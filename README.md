@@ -1,7 +1,7 @@
 ## 🚀 개발 환경 셋팅
 
 ### 1. 레포 클론
-git clone https://github.com/shineunsigan-project/swineunshigan-owner-backend.git
+git clone https://github.com/shineunsigan-project/swineunshigan-admin-backend.git
 cd
 
 ### 2. 브랜치 규칙
