@@ -18,3 +18,7 @@ build/
 # OS 자동생성
 .DS_Store
 Thumbs.db
+
+# IDE (IntelliJ)
+.idea/
+*.iml
