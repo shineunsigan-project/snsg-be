@@ -14,6 +14,7 @@
   - `.claude/rules/api.md` (presentation 작업 시 로드)
   - `.claude/rules/testing.md` (테스트 파일 작업 시 로드. 새 테스트를 만들기 전에 먼저 읽을 것)
   - `.claude/rules/git-workflow.md` (항상 로드. issue → 브랜치 → PR → merge)
+- 협업 규칙은 팀원용 `CONTRIBUTING.md`와 `.claude/rules/git-workflow.md` 두 곳에 있다. 같은 규칙이므로 한쪽을 고치면 다른 쪽도 같은 PR에서 고친다
 
 ## 에이전트 문서 관리
 
