@@ -1,0 +1,6 @@
+# 운영. 설정값은 환경변수로 주입한다. 문서 경로는 외부에 열지 않는다.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

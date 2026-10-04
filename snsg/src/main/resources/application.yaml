@@ -1,3 +1,36 @@
 spring:
   application:
     name: snsg
+
+  profiles:
+    default: local
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+
+oauth:
+  kakao:
+    client-id: ${KAKAO_CLIENT_ID}
+    client-secret: ${KAKAO_CLIENT_SECRET}
+    redirect-uri: ${KAKAO_REDIRECT_URI}
+  naver:
+    client-id: ${NAVER_CLIENT_ID}
+    client-secret: ${NAVER_CLIENT_SECRET}
+    redirect-uri: ${NAVER_REDIRECT_URI}
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-validity: 30m
+  refresh-token-validity: 14d
