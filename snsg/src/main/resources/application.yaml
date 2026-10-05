@@ -30,6 +30,10 @@ oauth:
     client-secret: ${NAVER_CLIENT_SECRET}
     redirect-uri: ${NAVER_REDIRECT_URI}
 
+terms:
+  privacy-policy-version: 2026-10-01
+  service-terms-version: 2026-10-01
+
 jwt:
   secret: ${JWT_SECRET}
   access-token-validity: 30m
