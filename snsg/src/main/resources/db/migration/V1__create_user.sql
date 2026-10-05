@@ -8,7 +8,6 @@ CREATE TABLE users
     gender            VARCHAR(10)  NOT NULL,
     birth_date        DATE         NOT NULL,
     profile_image_url VARCHAR(500) NOT NULL,
-    status            VARCHAR(20)  NOT NULL,
     created_at        TIMESTAMP    NOT NULL,
     updated_at        TIMESTAMP    NOT NULL,
     created_by        VARCHAR(50)  NOT NULL,
