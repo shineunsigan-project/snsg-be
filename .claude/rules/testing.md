@@ -5,19 +5,28 @@ paths:
 
 # Testing
 
-| 계층 | 방식 | 검증 대상 |
-|---|---|---|
-| domain | 순수 JUnit (Spring 없이) | Entity/VO 생성, 상태 변경, 불변식 위반 시 ErrorCode |
-| application | JUnit + Mockito. repository·`port/out` 인터페이스를 mock | Service 흐름, 예외 분기 |
-| presentation | `@WebMvcTest` + Service mock | 요청 검증, HTTP status, 응답 형식 |
-| infrastructure | `@DataJpaTest` 등 슬라이스 테스트 | 커스텀 쿼리, adapter의 DTO 변환 |
+## 기준 한 줄
 
-## 무엇을 테스트하는가
+**우리가 내린 판단만 테스트한다.** 프레임워크·라이브러리가 보장하는 동작은 테스트하지 않는다.
+코드를 짜고 "이걸 테스트해야 하나" 싶으면 이렇게 묻는다. **이 테스트가 빨간불이 되면 우리 버그인가, 아니면 라이브러리가 바뀐 것인가?** 후자면 쓰지 않는다.
 
-- **우리가 정한 규칙과 판단만 검증한다.** 정원이 찼을 때 참여가 막히는지, 재가입이 새 사용자가 되는지, 탈퇴 시 비식별 처리가 되는지 같은 것이다.
-- **프레임워크가 보장하는 동작은 테스트하지 않는다.** 라우팅, JSON 직렬화, Bean Validation 연동, 405·415 처리 따위다. 이런 테스트는 깨져도 우리 버그를 알려주지 않고, 통과해도 아무것도 보장하지 않는다.
-- 설정만 추가한 변경에는 테스트를 쓰지 않는다. 앱이 뜨는지, 연결되는지는 실행으로 확인하고 결과를 PR에 적는다.
-- 라이브러리 객체(`new ObjectMapper()` 등)를 직접 만들어 검증하지 않는다. 앱이 실제로 쓰는 설정과 다르므로 통과해도 의미가 없다.
+## 계층별 범위
+
+| 계층 | 테스트한다 | 테스트하지 않는다 | 방식 |
+|---|---|---|---|
+| domain | 불변식, 상태 전이, 계산 규칙 | getter, 단순 위임 | 순수 JUnit. Spring·mock 없이 |
+| application | **분기와 예외가 있는 흐름** (가입/로그인 갈림, 권한 검사, 상태 전이 호출) | repository를 그대로 호출해 돌려주기만 하는 메서드 | JUnit + Mockito. repository·`port/out`을 mock |
+| infrastructure | 커스텀 쿼리, **DB 제약(부분 유니크 인덱스 등)**, 외부 API adapter의 요청·응답 변환 | Spring Data가 만들어주는 기본 메서드(`save`, `findById`) | `@DataJpaTest`(실제 PostgreSQL), `MockRestServiceServer` |
+| presentation | **인증·인가 경계**(토큰 없이 부르면 막히는지), 우리가 정한 요청 검증 규칙과 에러 코드 | 라우팅, JSON 직렬화, Bean Validation 연동, 405·415 처리 | `@WebMvcTest` + Service mock |
+
+**domain이 가장 넓고 presentation이 가장 좁다.** domain 테스트는 Spring 없이 밀리초 단위로 돌고, 규칙이 그대로 들어 있어 실패하면 원인이 바로 보인다. 같은 규칙을 service 테스트로 간접 확인하면 mock을 거친 무거운 경로를 지나고, 실패했을 때 서비스 문제인지 엔티티 문제인지 구분되지 않는다.
+
+## 쓰지 않는 테스트
+
+- 설정만 추가한 변경. 앱이 뜨는지, DB·Redis에 붙는지는 실행으로 확인하고 결과를 PR의 test 절에 적는다.
+- 라이브러리 객체를 직접 만들어 검증하는 것(`new ObjectMapper()` 등). 앱이 실제로 쓰는 설정과 달라 통과해도 의미가 없다.
+- DTO 변환 메서드(`XxxResponse.from`)처럼 필드를 그대로 옮기는 코드. 변환 중 계산이나 분기가 들어가면 그때 테스트한다.
+- 커버리지 숫자를 목표로 삼지 않는다. 숫자를 채우려고 쓰는 테스트가 위 항목들이다.
 
 - `@SpringBootTest`는 계층을 넘는 흐름 확인이 꼭 필요할 때만 쓴다.
 - 성공 케이스뿐 아니라 예외 분기(어떤 ErrorCode가 나오는지)도 검증한다.
