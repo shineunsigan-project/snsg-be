@@ -1,6 +1,7 @@
 package com.shineunsigan.snsg.user.domain.model;
 
 import java.time.LocalDate;
+import java.util.regex.Pattern;
 
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.user.domain.constants.Gender;
@@ -24,9 +25,13 @@ import lombok.NoArgsConstructor;
 public class Profile {
 
     public static final String DEFAULT_PROFILE_IMAGE_URL = "/images/default-profile.png";
+
+    /** 2~10자의 한글·영문·숫자. 기능명세서 POL-005. */
+    public static final String NICKNAME_PATTERN = "^[가-힣a-zA-Z0-9]{2,10}$";
+
     private static final String WITHDRAWN_NICKNAME = "탈퇴한 사용자";
     private static final LocalDate WITHDRAWN_BIRTH_DATE = LocalDate.of(1900, 1, 1);
-    private static final int NICKNAME_MAX_LENGTH = 10;
+    private static final Pattern NICKNAME = Pattern.compile(NICKNAME_PATTERN);
 
     @Column(nullable = false)
     private String nickname;
@@ -73,7 +78,7 @@ public class Profile {
     }
 
     private static void validateNickname(String nickname) {
-        if (nickname == null || nickname.isBlank() || nickname.length() > NICKNAME_MAX_LENGTH) {
+        if (nickname == null || !NICKNAME.matcher(nickname).matches()) {
             throw new BusinessException(UserErrorCode.INVALID_NICKNAME);
         }
     }

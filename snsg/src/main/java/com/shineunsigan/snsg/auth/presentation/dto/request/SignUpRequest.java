@@ -8,12 +8,11 @@ import com.shineunsigan.snsg.auth.domain.constants.Gender;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Past;
-import jakarta.validation.constraints.Size;
 
 public record SignUpRequest(
 
-        @Schema(description = "일정에서 다른 사람에게 보일 이름. 소셜 닉네임이 기본값이고 바꿀 수 있다", example = "민트초코")
-        @Size(min = 1, max = 10)
+        @Schema(description = "일정에서 다른 사람에게 보일 이름. 2~10자의 한글·영문·숫자만 쓸 수 있다. 소셜 닉네임이 기본값이고 바꿀 수 있다",
+                example = "민트초코")
         String nickname,
 
         @Schema(description = "성별. 일정 참여자 구성 표시에 쓰인다", example = "FEMALE")
