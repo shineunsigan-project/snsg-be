@@ -6,6 +6,9 @@
 - 빌드/테스트: `snsg/`에서 `./gradlew build`, `./gradlew test`
 - DB는 PostgreSQL, 스키마는 Flyway로 관리한다. refresh token은 Redis에 둔다
 - 프로파일은 `local`(기본, `snsg/.env`를 읽음), `dev`, `prod`. 설정값은 전부 환경변수로 주입한다
+- Spring Boot 4에서 걸린 함정 두 가지. 같은 증상이 보이면 여기를 먼저 본다
+  - **자동 설정이 기술별 모듈로 쪼개져 있다.** 라이브러리만 넣으면 **에러 없이 조용히 동작하지 않는다**. Flyway는 `org.springframework.boot:spring-boot-flyway`가 따로 필요했다
+  - **Jackson 3를 쓴다.** `ObjectMapper`는 `tools.jackson.databind`에 있다. 애노테이션(`@JsonInclude` 등)만 `com.fasterxml.jackson.annotation`에 남아 있어 섞이기 쉽다
 - base package: `com.shineunsigan.snsg`
 - 들여쓰기는 4칸 공백
 - 시간대는 Asia/Seoul. `SnsgApplication.main`에서 JVM 기본 시간대를 고정하고, 시간 값은 오프셋 없는 `LocalDateTime`으로 주고받는다
