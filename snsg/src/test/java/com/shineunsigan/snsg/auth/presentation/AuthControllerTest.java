@@ -149,6 +149,17 @@ class AuthControllerTest {
         verify(completeSignUpUseCase, never()).completeSignUp(any());
     }
 
+
+    @Test
+    @DisplayName("쿠키가 없으면 400이 아니라 401로 알린다. 로그아웃했거나 만료된 경우다")
+    void missingCookieIsUnauthorized() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/tokens"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
+
+        verify(reissueTokenUseCase, never()).reissue(any());
+    }
+
     @Test
     @DisplayName("로그아웃은 인증된 사용자의 토큰을 지우고 쿠키를 만료시킨다")
     void logout() throws Exception {
