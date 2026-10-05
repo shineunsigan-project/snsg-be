@@ -1,6 +1,6 @@
 package com.shineunsigan.snsg.auth.application.dto.result;
 
-import com.shineunsigan.snsg.user.domain.constants.SocialProvider;
+import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
 
 /**
  * 소셜에서 받아온 사용자 정보.

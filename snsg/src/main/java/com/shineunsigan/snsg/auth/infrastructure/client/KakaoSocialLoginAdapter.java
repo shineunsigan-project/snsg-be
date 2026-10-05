@@ -14,7 +14,7 @@ import com.shineunsigan.snsg.auth.application.dto.result.SocialUserResult;
 import com.shineunsigan.snsg.auth.application.port.out.SocialLoginPort;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
-import com.shineunsigan.snsg.user.domain.constants.SocialProvider;
+import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
 
 /**
  * 카카오 인가코드를 토큰으로 바꾸고 사용자 정보를 조회한다.
