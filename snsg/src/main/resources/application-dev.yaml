@@ -1,0 +1,6 @@
+# 개발 서버. 설정값은 환경변수로 주입한다. FE가 이 서버의 swagger-ui를 본다.
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true

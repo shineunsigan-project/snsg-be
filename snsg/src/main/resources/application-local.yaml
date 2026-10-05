@@ -1,0 +1,13 @@
+# 개발자 PC. 설정값은 snsg/.env에서 읽는다.
+spring:
+  config:
+    import: optional:file:.env[.properties]
+
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+
+logging:
+  level:
+    org.hibernate.SQL: debug

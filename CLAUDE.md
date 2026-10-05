@@ -4,6 +4,8 @@
 
 - Spring Boot 4.0.x, Java 17, Gradle. 모듈: `snsg/`
 - 빌드/테스트: `snsg/`에서 `./gradlew build`, `./gradlew test`
+- DB는 PostgreSQL, 스키마는 Flyway로 관리한다. refresh token은 Redis에 둔다
+- 프로파일은 `local`(기본, `snsg/.env`를 읽음), `dev`, `prod`. 설정값은 전부 환경변수로 주입한다
 - base package: `com.shineunsigan.snsg`
 - 들여쓰기는 4칸 공백
 - 시간대는 Asia/Seoul. `SnsgApplication.main`에서 JVM 기본 시간대를 고정하고, 시간 값은 오프셋 없는 `LocalDateTime`으로 주고받는다
