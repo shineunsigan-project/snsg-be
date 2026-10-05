@@ -24,8 +24,10 @@ import com.shineunsigan.snsg.auth.application.SocialLoginUseCase;
 import com.shineunsigan.snsg.auth.application.dto.result.SocialAuthResult;
 import com.shineunsigan.snsg.auth.application.dto.result.TokenResult;
 import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
+import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.auth.presentation.dto.request.SignUpRequest;
 import com.shineunsigan.snsg.auth.presentation.dto.response.TokenResponse;
+import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.common.web.ApiResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -82,8 +84,9 @@ public class AuthController {
                     프로필을 받아 가입을 마치고 access token을 돌려준다. signUpToken 쿠키가 필요하므로 credentials를 포함해 호출한다.
                     소셜 정보는 서버가 보관한 가입 세션에서 꺼낸다. 가입이 끝나면 signUpToken은 무효가 된다.""")
     public ResponseEntity<ApiResponse<TokenResponse>> signUp(
-            @CookieValue(AuthCookieFactory.SIGN_UP_TOKEN) String signUpToken,
+            @CookieValue(value = AuthCookieFactory.SIGN_UP_TOKEN, required = false) String signUpToken,
             @Valid @RequestBody SignUpRequest request) {
+        requireCookie(signUpToken, AuthErrorCode.INVALID_SIGNUP_TOKEN);
         TokenResult result = completeSignUpUseCase.completeSignUp(request.toCommand(signUpToken));
 
         return ResponseEntity.ok()
@@ -100,7 +103,8 @@ public class AuthController {
                     발급하면 이전 refresh token은 무효가 되므로 동시에 여러 번 호출하지 않는다.
                     401 INVALID_REFRESH_TOKEN이면 로그인 화면으로 보낸다.""")
     public ResponseEntity<ApiResponse<TokenResponse>> reissue(
-            @CookieValue(AuthCookieFactory.REFRESH_TOKEN) String refreshToken) {
+            @CookieValue(value = AuthCookieFactory.REFRESH_TOKEN, required = false) String refreshToken) {
+        requireCookie(refreshToken, AuthErrorCode.INVALID_REFRESH_TOKEN);
         TokenResult result = reissueTokenUseCase.reissue(refreshToken);
 
         return ResponseEntity.ok()
@@ -117,6 +121,16 @@ public class AuthController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookieFactory.expired(AuthCookieFactory.REFRESH_TOKEN).toString())
                 .body(ApiResponse.success());
+    }
+
+    /**
+     * 쿠키가 없는 것은 요청 형식 오류(400)가 아니라 인증 실패(401)다.
+     * 로그아웃한 뒤나 쿠키가 만료된 뒤가 이 경우이고, 클라이언트는 로그인 화면으로 보내면 된다.
+     */
+    private void requireCookie(String value, AuthErrorCode errorCode) {
+        if (value == null || value.isBlank()) {
+            throw new BusinessException(errorCode);
+        }
     }
 
     private ResponseEntity<Void> redirectToFrontend(ResponseCookie cookie, boolean signUp) {
