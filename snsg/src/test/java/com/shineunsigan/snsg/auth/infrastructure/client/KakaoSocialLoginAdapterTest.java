@@ -18,7 +18,7 @@ import org.springframework.web.client.RestClient;
 import com.shineunsigan.snsg.auth.application.dto.result.SocialUserResult;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
-import com.shineunsigan.snsg.user.domain.constants.SocialProvider;
+import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
 
 /**
  * 카카오 응답을 우리 모델로 옮기는 규칙을 검증한다. 실제 카카오를 부르지 않는다.
