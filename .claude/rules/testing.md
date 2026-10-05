@@ -12,16 +12,24 @@ paths:
 | presentation | `@WebMvcTest` + Service mock | 요청 검증, HTTP status, 응답 형식 |
 | infrastructure | `@DataJpaTest` 등 슬라이스 테스트 | 커스텀 쿼리, adapter의 DTO 변환 |
 
+## 무엇을 테스트하는가
+
+- **우리가 정한 규칙과 판단만 검증한다.** 정원이 찼을 때 참여가 막히는지, 재가입이 새 사용자가 되는지, 탈퇴 시 비식별 처리가 되는지 같은 것이다.
+- **프레임워크가 보장하는 동작은 테스트하지 않는다.** 라우팅, JSON 직렬화, Bean Validation 연동, 405·415 처리 따위다. 이런 테스트는 깨져도 우리 버그를 알려주지 않고, 통과해도 아무것도 보장하지 않는다.
+- 설정만 추가한 변경에는 테스트를 쓰지 않는다. 앱이 뜨는지, 연결되는지는 실행으로 확인하고 결과를 PR에 적는다.
+- 라이브러리 객체(`new ObjectMapper()` 등)를 직접 만들어 검증하지 않는다. 앱이 실제로 쓰는 설정과 다르므로 통과해도 의미가 없다.
+
 - `@SpringBootTest`는 계층을 넘는 흐름 확인이 꼭 필요할 때만 쓴다.
 - 성공 케이스뿐 아니라 예외 분기(어떤 ErrorCode가 나오는지)도 검증한다.
-- 테스트 클래스는 대상 클래스와 같은 패키지에 둔다.
+- 테스트 클래스는 대상 클래스와 **같은 패키지, 같은 이름 + `Test`**로 둔다. 테스트는 원래 코드와 **별도 커밋**으로 올린다.
 - Spring Boot 4는 슬라이스 테스트에 기술별 test 스타터가 필요하다 (예: `spring-boot-starter-webmvc-test`). 없으면 build.gradle에 추가한다.
 - Boot 4에서 슬라이스 테스트 애너테이션의 패키지도 바뀌었다. `@DataJpaTest`는 `org.springframework.boot.data.jpa.test.autoconfigure`에 있다(`...boot.test.autoconfigure.orm.jpa` 아님). 스타터는 `spring-boot-starter-data-jpa-test`.
 - `@DataJpaTest`는 `@Entity`와 Spring Data repository만 등록한다. `@Repository` 구현체를 쓰려면 `@Import`로 직접 넣는다.
+- `@DataJpaTest`는 기본적으로 DataSource를 임베디드 DB로 바꿔치기한다. **우리 스키마는 PostgreSQL 전용 문법(부분 유니크 인덱스)에 의존하므로 반드시 실제 PostgreSQL로 돌린다.** Testcontainers를 쓰거나 `@AutoConfigureTestDatabase(replace = NONE)`로 로컬 컨테이너에 붙인다. 임베디드로 돌리면 제약이 아예 만들어지지 않아, 테스트는 통과하는데 운영에서 중복 데이터가 들어간다.
 - `@EnableJpaAuditing`은 `SnsgApplication`이 아니라 `common/config/JpaAuditingConfig`에 둔다. 메인 클래스에 붙이면 `@WebMvcTest`가 `jpaAuditingHandler`를 만들려다 "JPA metamodel must not be empty"로 실패한다.
 - 감사 필드를 검증하는 JPA 슬라이스 테스트는 `@Import`에 `JpaAuditingConfig`를 함께 넣는다.
 - `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`에 있고 스타터는 `spring-boot-starter-webmvc-test`. Service는 `@MockitoBean`으로 대체한다.
-- 테스트는 Gradle에서 `spring.profiles.active=test`로 돈다(build.gradle의 `systemProperty`). 운영에서 환경변수로 받는 설정값은 `src/test/resources/application-test.yaml`에 테스트용 값을 둔다. 새 환경변수를 추가하면 여기에도 넣어야 `contextLoads`가 뜬다.
+- 테스트는 기본 프로파일(`local`)로 돌고, 설정값은 `snsg/.env`에서 읽는다(`application-local.yaml`의 `spring.config.import`). 새 환경변수를 추가하면 `.env`에도 넣어야 컨텍스트가 뜬다.
 - 외부 API adapter는 슬라이스 없이 `MockRestServiceServer.bindTo(RestClient.Builder)`로 테스트한다.
 - Redis 같은 외부 저장소 adapter는 Testcontainers로 실제 컨테이너에서 테스트한다. 의존성은 `org.testcontainers:testcontainers-junit-jupiter`(Boot 4.0.8 관리 버전 2.0.5, 2.x에서 artifact 이름이 바뀌었다).
   - `@Testcontainers(disabledWithoutDocker = true)`로 Docker가 없으면 실패가 아니라 건너뛰게 한다. 대신 build가 통과해도 실제로 돌았는지는 테스트 결과의 `skipped` 수로 확인한다.

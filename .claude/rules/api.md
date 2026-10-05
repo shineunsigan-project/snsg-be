@@ -21,14 +21,21 @@ paths:
 - `/internal/v1` Controller(서비스 분리 후)는 `application/port/in`의 UseCase에 의존한다.
 - 반환 타입은 `ResponseEntity<ApiResponse<XxxResponse>>`. Entity나 Result를 그대로 반환하지 않는다.
 - 요청은 `@Valid` + Request record의 Bean Validation으로 형식만 검증한다. 비즈니스 규칙 검증은 domain에서 한다.
-- 인증 주체는 `@AuthenticationPrincipal Long userId`로 받는다. 인증 필터가 principal에 userId(Long)를 넣는다.
+- 인증 주체는 `@AuthenticationPrincipal UUID userId`로 받는다. 인증 필터가 principal에 userId(UUID)를 넣는다.
   - 공개 경로(토큰 없이 호출하는 엔드포인트)에서는 principal이 `"anonymousUser"`라 null이 들어온다. 타입이 맞지 않아도 예외 없이 null이므로 공개 경로에서는 쓰지 않는다.
   - 토큰 없이 호출하는 엔드포인트는 `SecurityConfig`에서 HTTP 메서드와 경로를 정확히 지정해 연다. `/api/v1/auth/**`처럼 prefix 전체를 열면 같은 prefix에 생긴 인증 필요 API까지 열린다.
-  - principal을 Long으로 두는 이유: 전용 타입을 auth에 두면 다른 도메인 컨트롤러가 auth를 import하게 된다. 역할 등 담을 정보가 늘면 principal 타입을 `common`에 둔다.
+  - principal을 UUID로 두는 이유: 전용 타입을 auth에 두면 다른 도메인 컨트롤러가 auth를 import하게 된다. 역할 등 담을 정보가 늘면 principal 타입을 `common`에 둔다.
 
 ## 응답과 예외
 
-- 성공: `ApiResponse.success(SuccessCode, data)`. 도메인 전용 성공 코드는 `presentation/dto/response/constants/<Domain>SuccessCode`.
+- 반환 타입은 `ResponseEntity<ApiResponse<XxxResponse>>`.
+- 봉투는 `{isSuccess, code, message, data}`다.
+  - **성공 여부는 `isSuccess`로 본다.** 값은 `ApiResponse`의 팩토리 메서드가 채우므로 HTTP 상태와 어긋나지 않는다.
+  - **HTTP 상태 코드는 계속 정확하게 내려준다.** 200으로 고정하고 본문으로만 성공을 알리지 않는다. 캐시·모니터링·에러 추적이 상태 코드를 본다.
+  - `code`와 `message`는 **실패 전용**이다. 성공 응답에서는 비어 있어 JSON에 나가지 않는다.
+- 성공: `ApiResponse.success(data)` 또는 `ApiResponse.success()`. **성공 코드 체계는 두지 않는다.**
+  - FE가 성공을 분기해야 하면 code가 아니라 `data`의 필드로 준다(예: `isNewUser`). code로 분기하면 코드가 하나 늘 때 FE가 조용히 깨진다.
+  - 화면 문구는 FE가 가진다. 성공 메시지를 서버가 내려주면 문구 하나 바꾸는 데 서버 배포가 필요하다.
 - 실패: `BusinessException(<Domain>ErrorCode)`를 던지고, `common.web`의 전역 예외 처리에서 `ApiResponse.error(...)`로 변환한다.
 - `<Domain>ErrorCode`는 `domain/exception`에 두고 `ErrorCode`를 구현하며, `ErrorType`과 메시지를 가진다. `ErrorType` → `HttpStatus` 변환은 전역 예외 처리에서만 한다.
 - 특정 Controller 전용 처리가 필요할 때만 `presentation/errorhandler`에 `@RestControllerAdvice(assignableTypes = XxxController.class)`를 둔다.
