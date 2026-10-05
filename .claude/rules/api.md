@@ -21,6 +21,9 @@ paths:
 - `/internal/v1` Controller(서비스 분리 후)는 `application/port/in`의 UseCase에 의존한다.
 - 반환 타입은 `ResponseEntity<ApiResponse<XxxResponse>>`. Entity나 Result를 그대로 반환하지 않는다.
 - 요청은 `@Valid` + Request record의 Bean Validation으로 형식만 검증한다. 비즈니스 규칙 검증은 domain에서 한다.
+  - 검증은 `jakarta.validation.constraints.*`를 쓴다(`spring-boot-starter-validation` 포함됨).
+- **Request DTO를 만드는 기준**: 필드가 둘 이상이거나 검증 제약(`@NotBlank`, `@Size` 등)이 붙으면 만든다. 파라미터 하나를 그대로 넘길 뿐이면 만들지 않고 `@RequestParam`·`@PathVariable`로 받아 Command를 만든다. 필드 하나짜리 껍데기 record는 읽는 사람에게 아무것도 알려주지 않는다.
+  - 단 **나중에 필드가 늘어날 것이 분명하면** 처음부터 만든다. 공개된 API의 요청 형태를 바꾸면 FE도 함께 고쳐야 한다.
 - 인증 주체는 `@AuthenticationPrincipal UUID userId`로 받는다. 인증 필터가 principal에 userId(UUID)를 넣는다.
   - 공개 경로(토큰 없이 호출하는 엔드포인트)에서는 principal이 `"anonymousUser"`라 null이 들어온다. 타입이 맞지 않아도 예외 없이 null이므로 공개 경로에서는 쓰지 않는다.
   - 토큰 없이 호출하는 엔드포인트는 `SecurityConfig`에서 HTTP 메서드와 경로를 정확히 지정해 연다. `/api/v1/auth/**`처럼 prefix 전체를 열면 같은 prefix에 생긴 인증 필요 API까지 열린다. 우리 API에서는 `POST /api/v1/auth/tokens`(재발급)가 공개이고 `DELETE /api/v1/auth/tokens`(로그아웃)는 인증이 필요하다. 경로가 같고 메서드만 다르므로 경로만 지정하면 로그아웃·탈퇴가 열린다.
@@ -28,6 +31,17 @@ paths:
 - 인증 필터는 공개 경로를 포함한 **모든 요청**에서 돈다. 필터는 토큰이 있을 때만 해석해 principal을 채우고, 없거나 틀리면 그냥 통과시킨다. 인가 판단은 `authorizeHttpRequests`가, 401 응답 생성은 `AuthenticationEntryPoint`가 한다.
   - 공개 경로에서도 principal이 채워져야 한다. 일정 상세처럼 비로그인도 보지만 보는 사람에 따라 응답이 달라지는 API가 있다(참여자면 "참여 취소", 아니면 "참여하기").
   - principal을 UUID로 두는 이유: 전용 타입을 auth에 두면 다른 도메인 컨트롤러가 auth를 import하게 된다. 역할 등 담을 정보가 늘면 principal 타입을 `common`에 둔다.
+
+## 토큰과 쿠키
+
+- 서비스 토큰은 JWT. **토큰에는 userId만 담는다.** 닉네임·역할을 넣으면 발급 후 바뀐 값이 만료까지 틀린 채로 돌아다닌다.
+- access와 refresh는 구조가 같고 만료만 다르다. 구분은 **저장 위치**로 한다. refresh만 Redis에 보관하고, 저장된 값과 일치해야 재발급한다.
+- **refresh token은 HttpOnly 쿠키, access token은 응답 본문**으로 내려준다.
+  - 웹 클라이언트는 refresh를 자바스크립트가 읽을 수 없어야 한다. 본문으로 주면 FE가 localStorage에 담게 되고 XSS 한 번에 14일짜리 토큰이 털린다.
+  - access는 짧게 살아 메모리 보관으로 충분하다. 새로고침하면 재발급 API로 복구한다.
+  - 리다이렉트로 토큰을 넘길 때 **쿼리 파라미터에 담지 않는다.** 브라우저 히스토리·서버 로그·Referer에 남는다.
+- **검증 실패는 한 코드로 묶는다.** 만료·위조·형식 오류를 구분해 알려주면 공격자에게 힌트가 된다. 클라이언트는 어느 쪽이든 재발급을 시도하면 된다.
+- 소셜 로그인은 **BE가 인가코드를 받아 토큰으로 교환**한다. 클라이언트 시크릿을 FE에 두지 않는다.
 
 ## 응답과 예외
 
