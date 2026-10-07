@@ -55,7 +55,7 @@ class UserAdapterTest {
     void convertsProviderAndGenderOnRegister() {
         RegisterUserCommand command = new RegisterUserCommand(
                 new SocialUserResult(SocialProvider.NAVER, "naver-1", "민트초코", "https://naver.test/me.png"),
-                "민트라떼", Gender.FEMALE, LocalDate.of(1996, 4, 12));
+                "민트라떼", Gender.FEMALE, LocalDate.of(1996, 4, 12), "https://naver.test/me.png");
         when(registerUserUseCase.register(any())).thenReturn(UUID.randomUUID());
 
         userAdapter.register(command);

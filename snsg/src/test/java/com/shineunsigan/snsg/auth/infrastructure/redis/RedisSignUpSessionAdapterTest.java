@@ -18,6 +18,9 @@ class RedisSignUpSessionAdapterTest {
     private static final SocialUserResult SOCIAL_USER =
             new SocialUserResult(SocialProvider.KAKAO, "kakao-1", "민트초코", "https://kakao.test/me.png");
 
+    private static final SocialUserResult OTHER_SOCIAL_USER =
+            new SocialUserResult(SocialProvider.KAKAO, "kakao-2", "딸기우유", "https://kakao.test/other.png");
+
     @Autowired
     private SignUpSessionPort signUpSessionPort;
 
@@ -54,12 +57,46 @@ class RedisSignUpSessionAdapterTest {
     @DisplayName("토큰은 매번 다르고 추측할 수 없을 만큼 길며 만료 시간이 걸린다")
     void tokenIsRandomAndExpires() {
         String first = signUpSessionPort.save(SOCIAL_USER);
-        String second = signUpSessionPort.save(SOCIAL_USER);
+        String second = signUpSessionPort.save(OTHER_SOCIAL_USER);
 
         assertThat(first).isNotEqualTo(second).hasSizeGreaterThanOrEqualTo(40);
         assertThat(redisTemplate.getExpire("signup:" + first)).isPositive();
 
         signUpSessionPort.delete(first);
         signUpSessionPort.delete(second);
+    }
+
+    @Test
+    @DisplayName("같은 소셜 계정으로 다시 로그인하면 이전 토큰은 쓸 수 없다")
+    void onlyLatestTokenSurvivesPerSocialAccount() {
+        String previous = signUpSessionPort.save(SOCIAL_USER);
+        String latest = signUpSessionPort.save(SOCIAL_USER);
+
+        assertThat(signUpSessionPort.find(previous)).isEmpty();
+        assertThat(signUpSessionPort.find(latest)).contains(SOCIAL_USER);
+
+        signUpSessionPort.delete(latest);
+    }
+
+    @Test
+    @DisplayName("다른 소셜 계정의 토큰은 서로 지우지 않는다")
+    void tokensOfDifferentAccountsCoexist() {
+        String mine = signUpSessionPort.save(SOCIAL_USER);
+        String others = signUpSessionPort.save(OTHER_SOCIAL_USER);
+
+        assertThat(signUpSessionPort.find(mine)).contains(SOCIAL_USER);
+        assertThat(signUpSessionPort.find(others)).contains(OTHER_SOCIAL_USER);
+
+        signUpSessionPort.delete(mine);
+        signUpSessionPort.delete(others);
+    }
+
+    @Test
+    @DisplayName("가입을 마치면 색인도 함께 지워져 다음 로그인에 영향을 주지 않는다")
+    void deleteRemovesOwnerIndex() {
+        String signUpToken = signUpSessionPort.save(SOCIAL_USER);
+        signUpSessionPort.delete(signUpToken);
+
+        assertThat(redisTemplate.hasKey("signup:owner:KAKAO:kakao-1")).isFalse();
     }
 }
