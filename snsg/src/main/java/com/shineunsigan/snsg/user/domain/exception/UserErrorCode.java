@@ -8,9 +8,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public enum UserErrorCode implements ErrorCode {
 
-    INVALID_NICKNAME(ErrorType.INVALID, "닉네임은 1자 이상 10자 이하여야 합니다."),
+    INVALID_NICKNAME(ErrorType.INVALID, "닉네임은 2~10자의 한글·영문·숫자만 쓸 수 있어요."),
     INVALID_BIRTH_DATE(ErrorType.INVALID, "생년월일이 올바르지 않습니다."),
-    DUPLICATED_NICKNAME(ErrorType.CONFLICT, "이미 사용 중인 닉네임입니다."),
+    DUPLICATED_NICKNAME(ErrorType.CONFLICT, "이미 사용 중인 닉네임이에요. 다른 닉네임을 입력해주세요."),
     ALREADY_WITHDRAWN(ErrorType.CONFLICT, "이미 탈퇴한 사용자입니다."),
     USER_NOT_FOUND(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
 

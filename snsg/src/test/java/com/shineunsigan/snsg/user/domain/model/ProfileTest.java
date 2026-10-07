@@ -21,13 +21,22 @@ class ProfileTest {
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {" ", "열한글자가넘는닉네임임"})
-    @DisplayName("닉네임이 비었거나 10자를 넘으면 INVALID_NICKNAME")
+    @ValueSource(strings = {" ", "한", "열한글자가넘는닉네임임", "민트 초코", "mint!", "민트😀", "mint_choco"})
+    @DisplayName("2~10자의 한글·영문·숫자가 아니면 INVALID_NICKNAME")
     void invalidNickname(String nickname) {
         assertThatThrownBy(() -> Profile.of(nickname, Gender.FEMALE, BIRTH_DATE, null))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(UserErrorCode.INVALID_NICKNAME);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"민트초코", "mint", "Mint123", "민트choco12", "ab", "열글자까지는허용함"})
+    @DisplayName("2~10자의 한글·영문·숫자는 허용한다")
+    void validNickname(String nickname) {
+        Profile profile = Profile.of(nickname, Gender.FEMALE, BIRTH_DATE, null);
+
+        assertThat(profile.getNickname()).isEqualTo(nickname);
     }
 
     @Test

@@ -33,6 +33,9 @@ oauth:
 app:
   frontend-redirect-uri: ${FRONTEND_REDIRECT_URI}
 
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS}
+
 terms:
   privacy-policy-version: 2026-10-01
   service-terms-version: 2026-10-01

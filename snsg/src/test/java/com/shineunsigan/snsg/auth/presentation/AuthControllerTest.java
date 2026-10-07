@@ -136,13 +136,13 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("닉네임이 10자를 넘으면 가입을 시도하지 않는다")
-    void signUpRejectsInvalidNickname() throws Exception {
+    @DisplayName("성별이 없으면 가입을 시도하지 않는다")
+    void signUpRejectsMissingGender() throws Exception {
         mockMvc.perform(post("/api/v1/auth/signup")
                         .cookie(new Cookie(AuthCookieFactory.SIGN_UP_TOKEN, "signup-token"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"nickname": "열한글자가넘는닉네임임", "gender": "FEMALE", "birthDate": "1996-04-12"}
+                                {"nickname": "민트초코", "birthDate": "1996-04-12"}
                                 """))
                 .andExpect(status().isBadRequest());
 
