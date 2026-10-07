@@ -26,6 +26,7 @@ public class UserAdapter implements UserPort {
 
     private final FindUserUseCase findUserUseCase;
     private final RegisterUserUseCase registerUserUseCase;
+    private final com.shineunsigan.snsg.user.application.port.in.UploadProfileImageUseCase uploadProfileImageUseCase;
 
     @Override
     public Optional<UUID> findIdBySocialAccount(SocialProvider provider, String providerUserId) {
@@ -46,7 +47,12 @@ public class UserAdapter implements UserPort {
                 command.nickname(),
                 toUserGender(command.gender()),
                 command.birthDate(),
-                socialUser.profileImageUrl()));
+                command.profileImageUrl()));
+    }
+
+    @Override
+    public String uploadProfileImage(byte[] content) {
+        return uploadProfileImageUseCase.upload(content);
     }
 
     private com.shineunsigan.snsg.user.domain.constants.SocialProvider toUserProvider(SocialProvider provider) {

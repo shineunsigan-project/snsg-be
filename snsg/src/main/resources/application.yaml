@@ -15,6 +15,11 @@ spring:
     hibernate:
       ddl-auto: validate
 
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
   data:
     redis:
       host: ${REDIS_HOST}
@@ -32,6 +37,9 @@ oauth:
 
 app:
   frontend-redirect-uri: ${FRONTEND_REDIRECT_URI}
+
+file-storage:
+  directory: ${FILE_STORAGE_DIRECTORY}
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS}
