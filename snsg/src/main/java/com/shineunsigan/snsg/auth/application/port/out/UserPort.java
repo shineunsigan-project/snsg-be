@@ -19,4 +19,9 @@ public interface UserPort {
     boolean exists(UUID userId);
 
     UUID register(RegisterUserCommand command);
+
+    /**
+     * 프로필 사진을 올리고 저장된 경로를 받는다.
+     */
+    String uploadProfileImage(byte[] content);
 }

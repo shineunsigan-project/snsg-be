@@ -1,3 +1,8 @@
+# 프록시(nginx·ALB·ngrok) 뒤에 있을 때 X-Forwarded-* 를 신뢰해 외부 주소를 인식한다.
+# 없으면 리다이렉트 주소와 CORS 판정이 내부 주소(localhost:8080) 기준이 되어 틀어진다.
+server:
+  forward-headers-strategy: framework
+
 spring:
   application:
     name: snsg
@@ -14,6 +19,11 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
 
   data:
     redis:
@@ -32,6 +42,9 @@ oauth:
 
 app:
   frontend-redirect-uri: ${FRONTEND_REDIRECT_URI}
+
+file-storage:
+  directory: ${FILE_STORAGE_DIRECTORY}
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS}

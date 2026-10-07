@@ -22,9 +22,13 @@ public record SignUpRequest(
         @Schema(description = "생년월일. 연령대 계산에 쓰이고 생년월일 자체는 공개되지 않는다", example = "1996-04-12")
         @NotNull
         @Past
-        LocalDate birthDate) {
+        LocalDate birthDate,
+
+        @Schema(description = "프로필 사진 업로드 API가 돌려준 경로. 비워 두면 소셜에서 받아온 사진을 쓰고, 그것도 없으면 기본 이미지가 된다",
+                example = "/images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png")
+        String profileImageUrl) {
 
     public SignUpCommand toCommand(String signUpToken) {
-        return new SignUpCommand(signUpToken, nickname, gender, birthDate);
+        return new SignUpCommand(signUpToken, nickname, gender, birthDate, profileImageUrl);
     }
 }

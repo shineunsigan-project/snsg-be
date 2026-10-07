@@ -22,11 +22,16 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class CompleteSignUpUseCase {
 
+    /** 업로드 API가 돌려주는 경로. 클라이언트가 임의의 외부 주소를 넣지 못하게 막는다. */
+    private static final String UPLOADED_IMAGE_PREFIX = "/images/profiles/";
+
     private final SignUpSessionPort signUpSessionPort;
     private final UserPort userPort;
     private final TokenIssuer tokenIssuer;
 
     public TokenResult completeSignUp(SignUpCommand command) {
+        validateProfileImageUrl(command.profileImageUrl());
+
         SocialUserResult socialUser = signUpSessionPort.find(command.signUpToken())
                 .orElseThrow(() -> new BusinessException(AuthErrorCode.INVALID_SIGNUP_TOKEN));
 
@@ -36,5 +41,29 @@ public class CompleteSignUpUseCase {
         signUpSessionPort.delete(command.signUpToken());
 
         return tokenIssuer.issue(userId);
+    }
+
+    public String uploadProfileImage(String signUpToken, byte[] content) {
+        signUpSessionPort.find(signUpToken)
+                .orElseThrow(() -> new BusinessException(AuthErrorCode.INVALID_SIGNUP_TOKEN));
+        return userPort.uploadProfileImage(content);
+    }
+
+    public SocialUserResult findSession(String signUpToken) {
+        return signUpSessionPort.find(signUpToken)
+                .orElseThrow(() -> new BusinessException(AuthErrorCode.INVALID_SIGNUP_TOKEN));
+    }
+
+    /**
+     * 우리가 발급한 경로만 받는다. 외부 주소를 그대로 저장하면 그 주소를 쥔 쪽이
+     * 프로필을 보는 사람들의 접속 기록을 모을 수 있다.
+     */
+    private void validateProfileImageUrl(String profileImageUrl) {
+        if (profileImageUrl == null || profileImageUrl.isBlank()) {
+            return;
+        }
+        if (!profileImageUrl.startsWith(UPLOADED_IMAGE_PREFIX)) {
+            throw new BusinessException(AuthErrorCode.INVALID_PROFILE_IMAGE_URL);
+        }
     }
 }
