@@ -1,3 +1,8 @@
+# 프록시(nginx·ALB·ngrok) 뒤에 있을 때 X-Forwarded-* 를 신뢰해 외부 주소를 인식한다.
+# 없으면 리다이렉트 주소와 CORS 판정이 내부 주소(localhost:8080) 기준이 되어 틀어진다.
+server:
+  forward-headers-strategy: framework
+
 spring:
   application:
     name: snsg

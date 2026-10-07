@@ -11,3 +11,8 @@ spring:
 logging:
   level:
     org.hibernate.SQL: debug
+
+# Swagger UI의 Try it out에서 쿠키를 함께 보낸다. 가입·재발급을 화면에서 그대로 시험할 수 있다.
+springdoc:
+  swagger-ui:
+    with-credentials: true
