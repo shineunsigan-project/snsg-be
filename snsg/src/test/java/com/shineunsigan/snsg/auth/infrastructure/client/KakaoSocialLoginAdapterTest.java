@@ -36,7 +36,8 @@ class KakaoSocialLoginAdapterTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         adapter = new KakaoSocialLoginAdapter(builder, new OAuthProperties(
-                new OAuthProperties.Provider("client-id", "client-secret", "http://localhost:8080/callback"), null));
+                new OAuthProperties.Kakao("client-id", "client-secret", "http://localhost:8080/callback", "admin-key"),
+                null));
     }
 
     @Test
