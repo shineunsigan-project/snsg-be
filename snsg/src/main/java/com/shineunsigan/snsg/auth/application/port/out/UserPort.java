@@ -24,4 +24,9 @@ public interface UserPort {
      * 프로필 사진을 올리고 저장된 경로를 받는다.
      */
     String uploadProfileImage(byte[] content);
+
+    /**
+     * 소셜 연동이 끊긴 사용자를 탈퇴시킨다. 없는 계정이면 아무 일도 하지 않는다.
+     */
+    void withdrawBySocialAccount(SocialProvider provider, String providerUserId);
 }

@@ -32,7 +32,7 @@ public class KakaoSocialLoginAdapter implements SocialLoginPort {
 
     public KakaoSocialLoginAdapter(RestClient.Builder restClientBuilder, OAuthProperties oAuthProperties) {
         this.restClient = restClientBuilder.build();
-        this.kakao = oAuthProperties.kakao();
+        this.kakao = oAuthProperties.kakao().toProvider();
     }
 
     @Override

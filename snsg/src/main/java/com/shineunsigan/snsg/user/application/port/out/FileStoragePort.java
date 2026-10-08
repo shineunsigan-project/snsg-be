@@ -11,4 +11,9 @@ public interface FileStoragePort {
      * @return 클라이언트에게 돌려줄 경로. 도메인은 붙이지 않는다
      */
     String store(byte[] content, String extension);
+
+    /**
+     * 없는 파일이면 아무 일도 하지 않는다. 우리가 저장한 경로가 아니면 지우지 않는다.
+     */
+    void delete(String path);
 }

@@ -27,6 +27,7 @@ public class UserAdapter implements UserPort {
     private final FindUserUseCase findUserUseCase;
     private final RegisterUserUseCase registerUserUseCase;
     private final com.shineunsigan.snsg.user.application.port.in.UploadProfileImageUseCase uploadProfileImageUseCase;
+    private final com.shineunsigan.snsg.user.application.port.in.WithdrawUserUseCase withdrawUserUseCase;
 
     @Override
     public Optional<UUID> findIdBySocialAccount(SocialProvider provider, String providerUserId) {
@@ -53,6 +54,11 @@ public class UserAdapter implements UserPort {
     @Override
     public String uploadProfileImage(byte[] content) {
         return uploadProfileImageUseCase.upload(content);
+    }
+
+    @Override
+    public void withdrawBySocialAccount(SocialProvider provider, String providerUserId) {
+        withdrawUserUseCase.withdrawBySocialAccount(toUserProvider(provider), providerUserId);
     }
 
     private com.shineunsigan.snsg.user.domain.constants.SocialProvider toUserProvider(SocialProvider provider) {

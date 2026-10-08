@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.user.infrastructure.persistence;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -12,4 +13,6 @@ interface UserSocialAccountJpaRepository extends JpaRepository<UserSocialAccount
 
     Optional<UserSocialAccount> findByProviderAndProviderUserIdAndIsDeletedFalse(
             SocialProvider provider, String providerUserId);
+
+    List<UserSocialAccount> findByUserIdAndIsDeletedFalse(UUID userId);
 }

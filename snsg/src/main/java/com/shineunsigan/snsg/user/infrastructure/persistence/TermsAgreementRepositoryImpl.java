@@ -1,6 +1,7 @@
 package com.shineunsigan.snsg.user.infrastructure.persistence;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.stereotype.Repository;
 
@@ -18,5 +19,10 @@ public class TermsAgreementRepositoryImpl implements TermsAgreementRepository {
     @Override
     public List<TermsAgreement> saveAll(List<TermsAgreement> termsAgreements) {
         return termsAgreementJpaRepository.saveAll(termsAgreements);
+    }
+
+    @Override
+    public List<TermsAgreement> findByUserId(UUID userId) {
+        return termsAgreementJpaRepository.findByUserIdAndIsDeletedFalse(userId);
     }
 }

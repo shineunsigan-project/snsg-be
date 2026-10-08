@@ -1,6 +1,8 @@
 package com.shineunsigan.snsg.user.infrastructure.persistence;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.stereotype.Repository;
 
@@ -26,5 +28,10 @@ public class UserSocialAccountRepositoryImpl implements UserSocialAccountReposit
             SocialProvider provider, String providerUserId) {
         return userSocialAccountJpaRepository
                 .findByProviderAndProviderUserIdAndIsDeletedFalse(provider, providerUserId);
+    }
+
+    @Override
+    public List<UserSocialAccount> findByUserId(UUID userId) {
+        return userSocialAccountJpaRepository.findByUserIdAndIsDeletedFalse(userId);
     }
 }
