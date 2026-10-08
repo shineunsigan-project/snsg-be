@@ -39,6 +39,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/signup/session").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/signup", "/api/v1/auth/signup/profile-image",
                                 "/api/v1/auth/tokens").permitAll()
+                        // 카카오가 호출한다. 인증 대신 어드민 키로 발신자를 확인한다
+                        .requestMatchers(HttpMethod.POST, "/webhooks/kakao/unlink").permitAll()
                         .requestMatchers("/images/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                         .anyRequest().authenticated())
