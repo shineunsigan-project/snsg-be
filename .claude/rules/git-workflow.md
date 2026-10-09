@@ -4,10 +4,19 @@
 
 작업은 항상 작업 브랜치에서 한다. 여러 작업을 동시에 진행할 수 있도록, 작업마다 issue와 브랜치를 따로 만들고 한 브랜치에 여러 작업을 섞지 않는다.
 
+**파일을 한 줄이라도 고치기 전에 issue와 워크트리를 먼저 만든다.** 고치고 나서 브랜치를 만들어 옮기지 않는다. 옮기는 과정에서 변경이 섞이거나 빠지고, 그 사이 다른 작업을 시작할 수 없다.
+
 1. 작업 시작 전 GitHub issue를 만든다 (`gh issue create`).
-2. develop을 최신화하고 브랜치를 만든다: `<prefix>/<issue번호>-<작업-이름>` (예: `feat/12-matching-create`)
+2. develop을 최신화하고 **워크트리와 브랜치를 함께 만든다**: `<prefix>/<issue번호>-<작업-이름>` (예: `feat/12-matching-create`)
+   ```bash
+   git fetch origin
+   git worktree add ../wt-<issue번호> -b <prefix>/<issue번호>-<작업-이름> origin/develop
+   cp snsg/.env ../wt-<issue번호>/snsg/.env   # gitignore 대상이라 따라오지 않는다
+   ```
    - prefix: `feat`(기능), `fix`(버그), `refactor`(리팩터링), `test`(테스트), `docs`(문서), `chore`(빌드·설정)
    - 작업 이름은 영문 kebab-case
+   - **메인 작업 디렉터리(develop)에서는 코드를 고치지 않는다.** 읽기와 조회만 한다
+   - 워크트리를 쓰는 이유: 작업마다 디렉터리가 분리되어 stash 없이 여러 작업을 동시에 진행할 수 있다. 리뷰 중인 작업을 그대로 둔 채 급한 수정을 시작할 수 있다
 3. 작업을 커밋하고 브랜치를 push한다.
    - **커밋하기 전에 멈춘다.** 변경을 스테이징까지 해두고(새 파일이 Unversioned로 흩어지지 않고 한 묶음으로 보인다) 커밋은 하지 않은 채 사용자에게 알린다. 사용자가 IDE에서 diff를 확인하고 OK하면 커밋한다. 커밋을 여러 개로 나눌 계획이면 어떻게 나눌지도 함께 알린다.
    - 큰 작업이라도 한 커밋에 몰지 않는다. 커밋 하나에는 하나의 논리적 변경만 담고, 커밋 메시지만 보고 무엇이 바뀌었는지 알 수 있어야 한다.
@@ -16,6 +25,17 @@
    - summary에 `Closes #<issue번호>`를 넣어 머지 시 issue가 자동으로 닫히게 한다.
    - test에는 실제로 실행한 검증(명령어와 결과)만 적는다.
 5. squash merge 후 원격·로컬 브랜치를 삭제하고 로컬 develop을 최신화한다. issue가 자동으로 닫혔는지 확인하고, 닫히지 않았으면 닫는다.
+   ```bash
+   gh pr merge <번호> --squash --delete-branch
+   git worktree remove ../wt-<issue번호>
+   git fetch --prune
+   ```
+
+## 워크트리를 쓸 때 주의
+
+- 워크트리마다 `snsg/.env`를 복사해야 빌드·테스트가 돈다. gitignore 대상이라 따라오지 않는다.
+- **DB·Redis·8080 포트는 모든 워크트리가 공유한다.** 두 워크트리에서 앱을 동시에 띄울 수 없고, 한쪽에서 돌린 테스트가 다른 쪽 데이터를 지운다.
+- 워크트리를 지우기 전에 Gradle 데몬이 그 디렉터리를 잡고 있으면 삭제가 실패한다. 앱을 먼저 멈춘다.
 
 ## main
 
