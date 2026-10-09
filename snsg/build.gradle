@@ -50,4 +50,11 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+
+    // 스펙 파일이 바뀌면 테스트를 다시 돌린다. 선언하지 않으면 코드가 그대로일 때 건너뛰어,
+    // 스펙만 손댄 변경을 잡지 못한다.
+    inputs.files(file('../docs/openapi.yaml')).withPropertyName('openapiSpec')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.property('openapiUpdate', System.getenv('OPENAPI_UPDATE') ?: '')
+    environment 'OPENAPI_UPDATE', System.getenv('OPENAPI_UPDATE') ?: ''
 }
