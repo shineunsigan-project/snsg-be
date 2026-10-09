@@ -1,0 +1,321 @@
+openapi: 3.1.0
+info:
+  title: snsg API
+  version: v1
+servers:
+- url: http://localhost
+  description: Generated server url
+security:
+- bearerAuth: []
+tags:
+- name: 인증
+  description: "소셜 로그인, 가입, 토큰 재발급"
+paths:
+  /api/v1/auth/tokens:
+    post:
+      tags:
+      - 인증
+      summary: access token 재발급
+      description: |-
+        refreshToken 쿠키로 새 access token을 발급한다. credentials를 포함해 호출한다.
+        발급하면 이전 refresh token은 무효가 되므로 동시에 여러 번 호출하지 않는다.
+        401 INVALID_REFRESH_TOKEN이면 로그인 화면으로 보낸다.
+      operationId: reissue
+      parameters:
+      - name: refreshToken
+        in: cookie
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseTokenResponse"
+      security: []
+    delete:
+      tags:
+      - 인증
+      summary: 로그아웃
+      description: 서버에 보관된 refresh token을 지우고 쿠키를 만료시킨다. 이미 발급된 access token은 만료까지
+        유효하므로 클라이언트에서 버린다.
+      operationId: logout
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
+  /api/v1/auth/signup:
+    post:
+      tags:
+      - 인증
+      summary: 가입 완료
+      description: |-
+        프로필을 받아 가입을 마치고 access token을 돌려준다. signUpToken 쿠키가 필요하므로 credentials를 포함해 호출한다.
+        소셜 정보는 서버가 보관한 가입 세션에서 꺼낸다. 가입이 끝나면 signUpToken은 무효가 된다.
+      operationId: signUp
+      parameters:
+      - name: signUpToken
+        in: cookie
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignUpRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseTokenResponse"
+      security: []
+  /api/v1/auth/signup/profile-image:
+    post:
+      tags:
+      - 인증
+      summary: 프로필 사진 업로드
+      description: |-
+        가입 중에 프로필 사진을 바꿀 때 쓴다. 돌려받은 경로를 가입 요청의 profileImageUrl에 넣는다.
+        5MB 이하의 PNG·JPG·WebP만 받는다. 형식은 파일 내용으로 판별하므로 확장자를 바꿔 올려도 거부된다.
+      operationId: uploadProfileImage
+      parameters:
+      - name: signUpToken
+        in: cookie
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+              required:
+              - image
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseProfileImageResponse"
+      security: []
+  /api/v1/auth/{provider}/callback:
+    get:
+      tags:
+      - 인증
+      summary: 소셜 인증 콜백
+      description: |-
+        소셜이 호출하는 주소다. 클라이언트가 직접 부르지 않는다.
+        기존 회원이면 refreshToken 쿠키를, 신규면 signUpToken 쿠키를 심고 프론트엔드로 302 리다이렉트한다.
+        신규는 쿼리로 signUp=true가 붙는다. 토큰은 URL에 담지 않는다.
+      operationId: callback
+      parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - KAKAO
+          - NAVER
+          - APPLE
+      - name: code
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        "302":
+          description: 프론트엔드로 이동. 쿠키가 심어진다
+      security: []
+  /api/v1/auth/{provider}/authorize:
+    get:
+      tags:
+      - 인증
+      summary: 소셜 로그인 시작
+      description: |-
+        소셜 인증 페이지로 302 리다이렉트한다. 클라이언트는 소셜 앱 키를 갖지 않는다.
+        **fetch나 XHR로 부르지 않는다.** 브라우저를 이동시켜야 한다(window.location.href = ...).
+        fetch는 리다이렉트를 따라가 소셜 도메인에 닿고, 소셜은 CORS 헤더를 주지 않아 실패한다.
+        같은 이유로 Swagger의 Try it out에서도 실패한다. 주소창에 직접 입력해 시험한다.
+      operationId: authorize
+      parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - KAKAO
+          - NAVER
+          - APPLE
+      responses:
+        "302":
+          description: 소셜 인증 페이지로 이동. Location 헤더에 주소가 담긴다
+      security: []
+  /api/v1/auth/signup/session:
+    get:
+      tags:
+      - 인증
+      summary: 가입 세션 조회
+      description: |-
+        프로필 완성 화면의 기본값(소셜 닉네임·사진)을 돌려준다. signUpToken 쿠키가 필요하므로 credentials를 포함해 호출한다.
+        세션이 만료되면 401 INVALID_SIGNUP_TOKEN이 오고, 소셜 로그인부터 다시 해야 한다.
+      operationId: signUpSession
+      parameters:
+      - name: signUpToken
+        in: cookie
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseSignUpSessionResponse"
+      security: []
+  /api/v1/users/me:
+    delete:
+      tags:
+      - 사용자
+      summary: 탈퇴
+      description: |-
+        사용자를 탈퇴시킨다. 닉네임·생년월일·프로필 사진은 비식별 값으로 바뀌고 올렸던 사진 파일은 지워진다.
+        카카오 연결도 끊어지므로 다시 로그인하면 동의 화면부터 시작한다.
+        되돌릴 수 없고, 다시 가입하면 이전 활동과 이어지지 않는 새 계정이 된다.
+        refresh token은 즉시 무효가 되지만 쿠키는 남는다. 탈퇴 직후 로그아웃 API를 한 번 호출해 쿠키를 비운다.
+      operationId: withdraw
+      responses:
+        "200":
+          description: 탈퇴 완료
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
+        "401":
+          description: 토큰이 없거나 유효하지 않다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
+components:
+  schemas:
+    ApiResponseTokenResponse:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/TokenResponse"
+    TokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: 인증이 필요한 API의 Authorization 헤더에 Bearer로 넣는다. 30분 뒤 만료되며 메모리에만
+            보관한다
+    SignUpRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+          description: 일정에서 다른 사람에게 보일 이름. 2~10자의 한글·영문·숫자만 쓸 수 있다. 소셜 닉네임이 기본값이고
+            바꿀 수 있다
+          example: 민트초코
+        gender:
+          type: string
+          description: 성별. 일정 참여자 구성 표시에 쓰인다
+          enum:
+          - FEMALE
+          - MALE
+          example: FEMALE
+        birthDate:
+          type: string
+          format: date
+          description: 생년월일. 연령대 계산에 쓰이고 생년월일 자체는 공개되지 않는다
+          example: 1996-04-12
+        profileImageUrl:
+          type: string
+          description: "프로필 사진 업로드 API가 돌려준 경로. 비워 두면 소셜에서 받아온 사진을 쓰고, 그것도 없으면 기본\
+            \ 이미지가 된다"
+          example: /images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png
+      required:
+      - birthDate
+      - gender
+    ApiResponseProfileImageResponse:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/ProfileImageResponse"
+    ProfileImageResponse:
+      type: object
+      properties:
+        profileImageUrl:
+          type: string
+          description: 저장된 사진 경로. 가입 요청의 profileImageUrl에 그대로 넣는다
+          example: /images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png
+    ApiResponseSignUpSessionResponse:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/SignUpSessionResponse"
+    SignUpSessionResponse:
+      type: object
+      properties:
+        nickname:
+          type: string
+          description: 소셜에서 받아온 닉네임. 화면의 기본값으로 쓰고 사용자가 바꿀 수 있다. 소셜이 주지 않으면 비어 있다
+          example: 민트초코
+        profileImageUrl:
+          type: string
+          description: 소셜에서 받아온 프로필 사진. 기본 이미지였거나 받지 못하면 비어 있다
+          example: https://k.kakaocdn.net/dn/abc/profile.jpg
+    ApiResponseVoid:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data: {}
+  securitySchemes:
+    bearerAuth:
+      type: http
+      description: |-
+        로그인·가입·재발급 응답 본문의 accessToken을 넣는다. Bearer는 빼고 토큰 값만 넣는다.
+        refresh token은 HttpOnly 쿠키라 여기에 넣지 않는다.
+      scheme: bearer
+      bearerFormat: JWT

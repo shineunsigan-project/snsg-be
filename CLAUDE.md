@@ -13,7 +13,7 @@
 - 들여쓰기는 4칸 공백
 - 시간대는 Asia/Seoul. `SnsgApplication.main`에서 JVM 기본 시간대를 고정하고, 시간 값은 오프셋 없는 `LocalDateTime`으로 주고받는다
 - 클라이언트는 웹(브라우저)이다. 모바일 앱이 아니다.
-- 이 저장소에서는 BE만 작업한다. FE는 담당 개발자가 따로 있고 저장소는 `shineunsigan-project/snsg-fr`다. FE 작업은 우리 역할이 아니므로 여기서 다루지 않고, FE에 필요한 내용은 `docs/openapi.yaml`과 `docs/api-guide.md`로만 전달한다(`.claude/rules/api.md`의 문서 절)
+- 이 저장소에서는 BE만 작업한다. FE는 담당 개발자가 따로 있고 저장소는 `shineunsigan-project/snsg-fr`다. FE 작업은 우리 역할이 아니므로 여기서 다루지 않는다. FE 담당자는 작업할 때마다 이 저장소를 받아가 `docs/`를 본다. FE에 필요한 내용은 `docs/openapi.yaml`과 `docs/api-guide.md`로만 전달한다(`.claude/rules/api.md`의 문서 절)
 - 도메인별 DDD 4계층, application·domain ↔ infrastructure는 반드시 DIP. 상세 규칙:
   - `.claude/rules/package-structure.md` (항상 로드)
   - `.claude/rules/api.md` (presentation 작업 시 로드)

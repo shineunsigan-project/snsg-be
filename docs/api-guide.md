@@ -2,14 +2,16 @@
 
 이 문서와 API 스펙만 보고 화면을 만들 수 있게 하는 게 목표다.
 
-- **엔드포인트별 요청·응답·에러 코드**: swagger-ui. 코드에서 생성하므로 항상 최신이다.
+- **엔드포인트별 요청·응답·에러 코드**: `docs/openapi.yaml`. 코드에서 생성한다.
 - **여러 호출에 걸친 흐름과 공통 규칙**: 이 문서. OpenAPI로는 표현할 수 없는 것만 적는다.
 
-`docs/openapi.yaml` 파일은 아직 없다. 지금은 서버를 띄워 swagger-ui에서 본다. 스펙 파일 생성(`OpenApiSpecTest`)은 다음 작업에서 붙인다.
+`docs/openapi.yaml`은 `OpenApiSpecTest`가 코드와 대조한다. 코드와 다르면 빌드가 실패하므로 **스펙이 코드보다 뒤처지지 않는다.** 이 문서는 빌드가 잡아주지 않으니 사람이 챙긴다.
 
 ## 스펙 보는 법
 
-- 로컬 서버를 띄웠다면 `http://localhost:8080/swagger-ui.html`에서 직접 호출해볼 수 있다.
+- `docs/openapi.yaml`을 Swagger Editor·Postman 등에 넣어 본다.
+- 서버를 띄웠다면 `/swagger-ui.html`에서 직접 호출해볼 수 있다. 우측 상단 **Authorize**에 access token을 넣으면(`Bearer` 빼고 토큰 값만) 인증이 필요한 API도 시험할 수 있다. 쿠키가 필요한 API는 같은 출처에서 열어야 쿠키가 함께 간다.
+- 스펙 원본은 `/v3/api-docs.yaml`(YAML), `/v3/api-docs`(JSON)에서 받는다.
 - 운영 서버에서는 swagger-ui와 스펙 경로를 열지 않는다.
 
 ## 공통 규칙
@@ -48,6 +50,10 @@
 | 401 | `INVALID_SIGNUP_TOKEN` | 가입 세션이 30분을 넘김 | 카카오 로그인부터 다시 |
 | 401 | `INVALID_SOCIAL_CODE` | 인가코드가 만료·위조됨 | 카카오 로그인부터 다시 |
 | 409 | `DUPLICATED_NICKNAME` | 이미 쓰이는 닉네임 | 다른 닉네임 입력 안내 |
+| 400 | `INVALID_NICKNAME` | 닉네임이 2~10자의 한글·영문·숫자가 아님 | 형식 안내 후 다시 입력 |
+| 400 | `INVALID_PROFILE_IMAGE` | 5MB를 넘거나 PNG·JPG·WebP가 아님 | 다른 사진 선택 안내 |
+| 400 | `INVALID_PROFILE_IMAGE_URL` | 가입 요청의 `profileImageUrl`이 업로드 API가 준 경로가 아님 | FE 버그다. 업로드 응답의 값을 그대로 넣는다 |
+| 409 | `ALREADY_WITHDRAWN` | 이미 탈퇴한 사용자 | 로그인 화면으로 |
 
 엔드포인트마다 추가로 나는 에러는 `openapi.yaml`의 응답 코드별 설명에 있다.
 
@@ -104,14 +110,49 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 소셜 인증과 가입은 나뉘어 있다. 소셜 인증만으로는 **사용자가 만들어지지 않는다.** 성별과 생년월일을 받아야 가입이 완료된다.
 
 - 소셜에서 받은 정보(닉네임, 프로필 사진)는 **서버가 30분간 보관**한다. 클라이언트가 들고 있다가 보내는 방식이 아니다.
-- 프로필 완성 화면에서 닉네임을 바꿀 수 있다. 기본값은 소셜 닉네임이고, 응답에 담겨 오지 않으므로 화면에서 입력받는다.
 - 가입을 마치면 `signUpToken`은 무효가 된다. 중간에 이탈하면 30분 뒤 사라지고, 다시 카카오 로그인부터 시작하면 된다.
+- **같은 소셜 계정으로 다시 로그인하면 이전 `signUpToken`은 즉시 무효가 된다.** 한 계정에 유효한 토큰은 항상 하나다.
 - 닉네임이 이미 쓰이고 있으면 `409 DUPLICATED_NICKNAME`이 온다. 다른 닉네임을 입력받는다.
+
+**프로필 완성 화면의 기본값**은 `GET /api/v1/auth/signup/session`으로 받는다(`signUpToken` 쿠키 필요).
+
+```json
+{ "isSuccess": true, "data": { "nickname": "민트초코", "profileImageUrl": "http://k.kakaocdn.net/..." } }
+```
+
+- `nickname`은 입력칸의 기본값으로 쓰고 사용자가 바꿀 수 있다. **가입 요청에는 화면에서 입력받은 값을 보낸다.** 서버가 세션의 닉네임을 쓰지 않는다.
+- `profileImageUrl`은 **`null`일 수 있다.** 소셜 기본 이미지였거나 사진을 받지 못한 경우다. 이때는 우리 기본 이미지(`/images/default-profile.png`)가 쓰인다.
+- 401 `INVALID_SIGNUP_TOKEN`이면 세션이 만료된 것이다. 카카오 로그인부터 다시 한다.
+
+**프로필 사진을 바꾸려면** 먼저 `POST /api/v1/auth/signup/profile-image`로 올리고, 받은 경로를 가입 요청의 `profileImageUrl`에 넣는다.
+
+- `multipart/form-data`, 파트 이름은 `image`. `signUpToken` 쿠키가 필요하다.
+- 5MB 이하의 PNG·JPG·WebP만 받는다. **형식은 파일 내용으로 판별하므로 확장자만 바꿔 올리면 거부된다.**
+- 응답은 `{ "profileImageUrl": "/images/profiles/<uuid>.png" }`. 도메인이 붙지 않은 경로이므로 화면에 쓸 때 서버 주소를 앞에 붙인다.
+- 가입 요청의 `profileImageUrl`에는 **이 API가 돌려준 경로만** 넣을 수 있다. 다른 주소를 넣으면 400 `INVALID_PROFILE_IMAGE_URL`이다.
+- 비워 두면(`null` 또는 생략) 소셜에서 받은 사진을 쓴다. 그것도 없으면 기본 이미지가 된다.
+- 올리기만 하고 가입을 완료하지 않으면 그 사진은 쓰이지 않는다.
 
 ### 로그아웃
 
 `DELETE /api/v1/auth/tokens`를 access token으로 호출한다. 서버의 refresh token이 지워지고 쿠키가 만료된다.
 이미 발급된 access token은 만료(최대 30분)까지 유효하므로 클라이언트에서 버린다.
+
+### 탈퇴
+
+`DELETE /api/v1/users/me`를 access token으로 호출한다.
+
+- 닉네임·생년월일·프로필 사진이 비식별 값으로 바뀌고 계정이 삭제 표시된다. **되돌릴 수 없다.**
+- 올렸던 프로필 사진 파일은 지워진다.
+- **카카오 연결도 서버가 끊는다.** 사용자가 카카오 설정에서 따로 끊을 필요가 없다.
+- refresh token이 즉시 무효가 된다. **쿠키는 서버가 비우지 않으므로** 탈퇴 직후 `DELETE /api/v1/auth/tokens`(로그아웃)를 한 번 더 호출해 쿠키를 정리한다.
+- 다시 가입하면 **이전 활동과 이어지지 않는 새 계정**이 된다. 같은 카카오 계정이어도 그렇다.
+
+### 사용자가 카카오에서 연결을 끊은 경우
+
+사용자가 카카오계정 설정에서 우리 서비스 연결을 끊으면 **카카오가 서버로 알려주고, 서버가 그 사용자를 탈퇴 처리한다.** FE가 할 일은 없다.
+
+다만 그 시점에 로그인 상태였다면 **다음 재발급부터 401 `INVALID_REFRESH_TOKEN`** 이 온다. 401 처리(로그인 화면으로)를 그대로 따르면 된다. **재발급을 반복 시도하지 않는다.**
 
 ## 화면별로 쓰는 API
 
@@ -119,8 +160,11 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | --- | --- | --- |
 | 앱 시작 | `POST /api/v1/auth/tokens` (credentials 포함) | 200이면 access token을 받아 메인. 401이면 비로그인 상태로 둔다 |
 | 로그인 | `GET /api/v1/auth/kakao/authorize`로 이동 | 돌아오면 `?signUp` 여부로 분기 |
-| 프로필 완성 | `POST /api/v1/auth/signup` | 200이면 access token 저장 후 메인. 409면 닉네임 변경 안내 |
+| 프로필 완성 (진입) | `GET /api/v1/auth/signup/session` | 닉네임·사진 기본값 표시. 401이면 카카오 로그인부터 다시 |
+| 프로필 완성 (사진 변경) | `POST /api/v1/auth/signup/profile-image` | 받은 경로를 가입 요청에 넣는다 |
+| 프로필 완성 (제출) | `POST /api/v1/auth/signup` | 200이면 access token 저장 후 메인. 409면 닉네임 변경 안내 |
 | 설정 · 로그아웃 | `DELETE /api/v1/auth/tokens` | 응답과 무관하게 메모리의 토큰을 버리고 로그인 화면 |
+| 설정 · 탈퇴 | `DELETE /api/v1/users/me` → `DELETE /api/v1/auth/tokens` | 되돌릴 수 없음을 한 번 확인받고 호출. 끝나면 로그인 화면 |
 
 일정·알림 API는 아직 없다. 생기면 이 표에 추가한다.
 
@@ -132,15 +176,16 @@ FE 개발 중 실제 서버에 붙여볼 때.
 
 ### 웹 FE 개발 서버에서 로컬 서버 호출하기
 
-- FE 개발 서버는 `http://localhost:8080`으로 API를 호출한다.
-- **서버에 CORS 설정이 아직 없다.** FE 개발 서버 주소가 정해지면 알려줘야 추가할 수 있다. 등록 전에는 쿠키가 오가지 않아 로그인이 끝까지 되지 않는다.
+- **CORS는 설정돼 있다.** 허용 출처는 환경변수로 관리하며 현재 `http://localhost:3000`이 등록돼 있다. 다른 주소를 쓰면 알려줘야 추가할 수 있다. 등록되지 않은 출처는 403이다.
+- **모든 요청에 `credentials: 'include'`를 붙인다.** 쿠키가 가지 않으면 재발급·가입이 전부 401이다.
 - 서버 주소는 FE 환경 설정으로 바꿀 수 있게 둔다. 운영 서버가 생기면 주소만 바꾼다.
+- 로그인 시작(`/auth/{provider}/authorize`)은 **`fetch`로 부르지 않는다.** 브라우저를 그 주소로 이동시킨다(`window.location.href`). fetch는 리다이렉트를 따라가 소셜 도메인에 닿고, 소셜은 CORS 헤더를 주지 않아 실패한다.
 
 ### 서버에 알려줘야 하는 값
 
 | 값 | 쓰이는 곳 | 현재 임시값 |
 | --- | --- | --- |
-| FE 개발 서버 주소 | CORS 허용 출처, 쿠키 전달 | 없음 (설정 안 됨) |
+| FE 개발 서버 주소 | CORS 허용 출처, 쿠키 전달 | `http://localhost:3000` |
 | 로그인 후 돌아올 화면 주소 | 서버가 리다이렉트할 곳(`FRONTEND_REDIRECT_URI`) | `http://localhost:3000/auth/callback` |
 | 운영·개발 서버 도메인 | 쿠키의 `SameSite`·`Secure` 설정 | 미정 |
 
@@ -150,5 +195,9 @@ FE 개발 중 실제 서버에 붙여볼 때.
 
 API를 바꾸는 PR에서 함께 고친다.
 
-- 요청·응답·에러 코드가 바뀌면: 컨트롤러의 springdoc 애노테이션을 고친다. swagger-ui에 그대로 반영된다. (스펙 파일 생성을 붙이면 `openapi.yaml`도 함께 커밋한다)
+- 요청·응답·에러 코드가 바뀌면: 컨트롤러의 springdoc 애노테이션을 고치고, 같은 PR에서 스펙을 다시 만들어 커밋한다.
+  ```bash
+  OPENAPI_UPDATE=true ./gradlew test --tests '*OpenApiSpecTest'
+  ```
+  커밋하지 않으면 빌드가 실패한다.
 - 흐름, 공통 규칙, 화면별로 쓰는 API가 바뀌면: 이 문서를 고친다. 이건 빌드가 잡아주지 않는다.
