@@ -42,7 +42,8 @@ public class SecurityConfig {
                         // 카카오가 호출한다. 인증 대신 어드민 키로 발신자를 확인한다
                         .requestMatchers(HttpMethod.POST, "/webhooks/kakao/unlink").permitAll()
                         .requestMatchers("/images/**").permitAll()
-                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/v3/api-docs.yaml")
+                        .permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling.authenticationEntryPoint(jwtAuthenticationEntryPoint))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
