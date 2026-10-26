@@ -23,11 +23,11 @@ description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md�
 
 ## task.md
 
-경로는 `.claude/tasks/<issue번호>/task.md`. 절은 아래 여섯 개다.
+경로는 `.claude/tasks/SHI-<번호>/task.md`. 절은 아래 여섯 개다.
 
 ```markdown
 ## 배경
-왜 이 작업을 하는가. 관련 issue·PR·대화.
+왜 이 작업을 하는가. 관련 Linear 이슈·PR·대화.
 
 ## 환경
 작업 디렉터리·브랜치·베이스 커밋, 이미 깨져 있는 것, 플랫폼 제약.
@@ -59,7 +59,7 @@ description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md�
 
 ```markdown
 ## 환경
-- 워크트리: `C:\Users\ks\nss\dev\snsg-be\wt-31` (브랜치 `chore/31-delegation-rule`, 베이스 `808e21b`)
+- 워크트리: `C:\Users\ks\nss\dev\snsg-be\wt-SHI-31` (브랜치 `chore/SHI-31-delegation-rule`, 베이스 `808e21b`)
 - 메인 작업 디렉터리 `snsg-be`는 읽기만 한다
 - `UserRedisAdapterTest`는 Docker가 꺼져 있으면 skip된다. 이번 작업과 무관하다
 - 셸은 PowerShell이 기본이고 Bash도 쓸 수 있다. `&&`는 PowerShell에서 동작하지 않는다
