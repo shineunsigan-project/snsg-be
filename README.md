@@ -17,13 +17,13 @@ cd snsg-be
 - 작업 시작 전 반드시 develop에서 분기
   - git checkout develop
   - git pull origin develop
-  - git checkout -b feat/12-내-기능명
-- 브랜치명은 `<prefix>/<issue번호>-<작업-이름>`
+  - git checkout -b feat/SHI-12-내-기능명
+- 브랜치명은 `<prefix>/SHI-<번호>-<작업-이름>` (`SHI-<번호>`는 Linear 이슈 ID)
 
 ### 4. 작업 완료 후
 - git add .
 - git commit -m "feat: 기능 설명"
-- git push origin feat/12-내-기능명
+- git push origin feat/SHI-12-내-기능명
 → GitHub에서 develop으로 PR 생성
 
 ### 5. main 직접 push 금지 ❌ (main은 운영 환경이고, main에서 분기도 금지)
