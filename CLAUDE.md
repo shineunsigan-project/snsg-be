@@ -19,6 +19,7 @@
   - `.claude/rules/api.md` (presentation 작업 시 로드)
   - `.claude/rules/testing.md` (테스트 파일 작업 시 로드. 새 테스트를 만들기 전에 먼저 읽을 것)
   - `.claude/rules/git-workflow.md` (항상 로드. issue → 브랜치 → PR → merge)
+  - `.claude/rules/temp-files.md` (항상 로드. 작업 중 만든 임시 파일은 끝나면 지운다)
 - 코드·문서를 고치는 작업은 `/task` 파이프라인으로 처리한다. 절차는 `.claude/skills/task/SKILL.md`
 
 ## 에이전트 문서 관리
