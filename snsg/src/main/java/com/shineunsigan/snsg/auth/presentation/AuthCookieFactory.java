@@ -20,12 +20,13 @@ public class AuthCookieFactory {
     public static final String SIGN_UP_TOKEN = "signUpToken";
 
     private static final String PATH = "/api/v1/auth";
-    private static final Duration SIGN_UP_TOKEN_MAX_AGE = Duration.ofMinutes(30);
 
     private final Duration refreshTokenMaxAge;
+    private final Duration signUpTokenMaxAge;
 
     public AuthCookieFactory(AuthProperties authProperties) {
         this.refreshTokenMaxAge = authProperties.refreshTokenValidity();
+        this.signUpTokenMaxAge = authProperties.signupSessionTtl();
     }
 
     public ResponseCookie refreshToken(String refreshToken) {
@@ -33,7 +34,7 @@ public class AuthCookieFactory {
     }
 
     public ResponseCookie signUpToken(String signUpToken) {
-        return build(SIGN_UP_TOKEN, signUpToken, SIGN_UP_TOKEN_MAX_AGE);
+        return build(SIGN_UP_TOKEN, signUpToken, signUpTokenMaxAge);
     }
 
     /**

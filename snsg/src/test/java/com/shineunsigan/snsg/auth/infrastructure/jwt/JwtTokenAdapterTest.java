@@ -69,6 +69,6 @@ class JwtTokenAdapterTest {
     }
 
     private JwtTokenAdapter adapterWith(String secret, Duration validity) {
-        return new JwtTokenAdapter(new JwtProperties(secret), new AuthProperties(validity, validity));
+        return new JwtTokenAdapter(new JwtProperties(secret), new AuthProperties(validity, validity, validity));
     }
 }

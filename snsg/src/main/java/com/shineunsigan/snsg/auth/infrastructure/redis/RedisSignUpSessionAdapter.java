@@ -8,6 +8,7 @@ import java.util.Optional;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
+import com.shineunsigan.snsg.auth.application.AuthProperties;
 import com.shineunsigan.snsg.auth.application.dto.result.SocialUserResult;
 import com.shineunsigan.snsg.auth.application.port.out.SignUpSessionPort;
 
@@ -28,11 +29,11 @@ public class RedisSignUpSessionAdapter implements SignUpSessionPort {
 
     private static final String KEY_PREFIX = "signup:";
     private static final String OWNER_KEY_PREFIX = "signup:owner:";
-    private static final Duration TTL = Duration.ofMinutes(30);
     private static final int TOKEN_BYTES = 32;
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final AuthProperties authProperties;
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Override
@@ -44,8 +45,9 @@ public class RedisSignUpSessionAdapter implements SignUpSessionPort {
         }
 
         String signUpToken = generateToken();
-        redisTemplate.opsForValue().set(key(signUpToken), socialUser, TTL);
-        redisTemplate.opsForValue().set(ownerKey, signUpToken, TTL);
+        Duration ttl = authProperties.signupSessionTtl();
+        redisTemplate.opsForValue().set(key(signUpToken), socialUser, ttl);
+        redisTemplate.opsForValue().set(ownerKey, signUpToken, ttl);
         return signUpToken;
     }
 
