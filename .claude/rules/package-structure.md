@@ -128,6 +128,7 @@
 ## domain
 
 - 생성은 정적 팩토리(`create`, `of`), 상태 변경은 의도가 드러나는 메서드(`accept()`, `close()`). setter 금지.
+  - 쓰기 경로가 없는 엔티티(마이그레이션으로만 관리하는 기준 데이터, 예: `Region`)에는 정적 팩토리를 두지 않는다. 팩토리를 쓸 곳이 테스트뿐이기 때문이다. 테스트 데이터는 native INSERT로 넣는다.
 - 불변식 검증은 Entity/VO 내부에서 하고, 위반 시 `BusinessException(<Domain>ErrorCode)`.
 - `<Domain>ErrorCode`는 `ErrorType`과 메시지만 가진다. `HttpStatus` 등 전달 방식(HTTP, 메시지)에 속한 타입은 domain에서 import하지 않는다.
 - JPA용 기본 생성자는 `@NoArgsConstructor(access = AccessLevel.PROTECTED)`.
@@ -139,6 +140,7 @@
   - 판단 기준: 도메인 컬럼으로는 알 수 없는 "누가 바꿨나"가 운영에서 궁금해지면 Audit. 예로 일정을 누가 취소했는지(개설자인지 운영자인지).
   - 값은 사용자 id 문자열이거나 `Auditor.SYSTEM`, `Auditor.SYSTEM_SCHEDULER`다. 인증이 없는 요청은 `SYSTEM`이 들어간다.
 - id는 UUID v7(`@UuidGenerator(style = VERSION_7)`)이다. 시간순으로 증가해 인덱스가 조각나지 않고, URL로 남의 데이터를 추측할 수 없다. 다른 키 전략이 꼭 필요한 테이블만 `BaseEntity`를 상속하지 않는다.
+  - 예: `regions`. 행정구역 코드(`CHAR(5)`)가 PK인 기준 데이터다. 지우지 않으므로 `is_deleted`가 없고, 숨김은 `is_active`가 맡는다. `created_at`·`updated_at`은 엔티티에서 직접 매핑한다.
 - `@Column(name = ...)`으로 컬럼명을 따로 주지 않는다. 필드명과 컬럼명을 항상 같게 두고, 이름을 두 곳에 적지 않는다.
 - 모든 컬럼은 되도록 NOT NULL. 값이 없는 상태는 빈 문자열이나 0으로 표현한다. NULL에 의미를 담아야 할 때만 허용한다.
 
@@ -179,6 +181,8 @@
 
 - 파일은 `snsg/src/main/resources/db/migration/V<번호>__<설명>.sql`. 설명은 소문자와 밑줄.
 - **머지 전에는 기존 마이그레이션 파일을 고쳐도 된다.** 로컬 DB는 스키마를 지우고 다시 적용한다. 머지된 뒤에는 절대 고치지 않고 새 버전을 더한다. 이미 적용된 환경에서 체크섬이 어긋나면 기동이 실패한다.
+- **번호는 개발 중에 develop의 다음 번호를 쓴다.** 기능 명세의 마이그레이션 표에 적힌 번호(V5 등)는 가칭이므로 쓰지 않는다. 다른 브랜치가 먼저 머지돼 번호가 겹치면 머지 직전에 이 브랜치의 번호를 올린다.
+  - 가칭 번호를 그대로 쓰면 안 되는 이유: Flyway `outOfOrder`가 꺼져 있다(설정 없음, 기본값). 공유 로컬 DB에 더 큰 번호가 먼저 적용되면, 작은 번호를 가진 다른 워크트리는 "Detected resolved migration not applied to database"로 검증에 막혀 DB 테스트가 전부 실패한다.
 - 엔티티와 스키마는 `ddl-auto: validate`가 대조한다. 어긋나면 앱이 뜨지 않는다. Hibernate가 스키마를 만들게 하지 않는다.
 - PostgreSQL 전용 문법(부분 유니크 인덱스 등)을 쓰므로 테스트도 실제 PostgreSQL로 돌린다.
 
