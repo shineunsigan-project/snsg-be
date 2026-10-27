@@ -46,6 +46,7 @@ git status --short
 ## 테스트를 돌릴 때
 
 - **DB·Redis·8080 포트는 모든 워크트리가 공유한다**(`.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의"). 다른 작업이 돌고 있을 수 있으니 앱을 띄워둔 채 방치하지 않는다.
+- **DB 충돌로 보이는 실패가 나면 멈추고 보고한다.** 증상은 Flyway 검증 오류(예: "Detected resolved migration not applied to database"), 모르는 테이블이나 버전, `flyway_schema_history` 불일치다. 스키마, `flyway_schema_history`, 다른 워크트리의 데이터는 건드리지 않는다. 공유 DB라 다른 작업이 쓰고 있고, 스키마 재적용은 오케스트레이터와 사용자가 정한다.
 - 워크트리에 `snsg/.env`가 없으면 컨텍스트가 뜨지 않는다. 없으면 보고한다. 직접 만들지 않는다. 환경변수 값을 추측해 채우면 테스트는 통과하는데 실제 설정과 다른 상태가 된다.
 
 ## 끝낼 때 보고할 것
