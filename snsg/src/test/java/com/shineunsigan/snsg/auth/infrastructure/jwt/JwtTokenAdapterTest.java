@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.shineunsigan.snsg.auth.application.AuthProperties;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 
@@ -68,6 +69,6 @@ class JwtTokenAdapterTest {
     }
 
     private JwtTokenAdapter adapterWith(String secret, Duration validity) {
-        return new JwtTokenAdapter(new JwtProperties(secret, validity, validity));
+        return new JwtTokenAdapter(new JwtProperties(secret), new AuthProperties(validity, validity, validity));
     }
 }

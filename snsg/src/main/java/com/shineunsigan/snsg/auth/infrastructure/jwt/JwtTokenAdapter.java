@@ -9,6 +9,7 @@ import javax.crypto.SecretKey;
 
 import org.springframework.stereotype.Component;
 
+import com.shineunsigan.snsg.auth.application.AuthProperties;
 import com.shineunsigan.snsg.auth.application.port.out.TokenPort;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
@@ -24,10 +25,10 @@ public class JwtTokenAdapter implements TokenPort {
     private final Duration accessTokenValidity;
     private final Duration refreshTokenValidity;
 
-    public JwtTokenAdapter(JwtProperties jwtProperties) {
+    public JwtTokenAdapter(JwtProperties jwtProperties, AuthProperties authProperties) {
         this.key = Keys.hmacShaKeyFor(jwtProperties.secret().getBytes(StandardCharsets.UTF_8));
-        this.accessTokenValidity = jwtProperties.accessTokenValidity();
-        this.refreshTokenValidity = jwtProperties.refreshTokenValidity();
+        this.accessTokenValidity = authProperties.accessTokenValidity();
+        this.refreshTokenValidity = authProperties.refreshTokenValidity();
     }
 
     @Override

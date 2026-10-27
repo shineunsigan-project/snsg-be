@@ -47,3 +47,7 @@ paths:
 - 인가 규칙과 401 형식은 auth에서 `@Import`로 `SecurityConfig`와 인증 진입점(entry point)을 넣고, 토큰 검증 adapter를 `@MockitoBean`으로 대체해 검증한다.
 - 다른 도메인의 컨트롤러 테스트는 auth를 import하지 않는다. `@AutoConfigureMockMvc(addFilters = false)`로 필터를 끄고 `SecurityContextHolder`에 `UsernamePasswordAuthenticationToken(userId, null, List.of())`을 직접 넣는다.
 - `OpenApiSpecTest`는 `/v3/api-docs.yaml`로 생성한 스펙과 커밋된 `docs/openapi.yaml`을 비교한다. 줄바꿈은 정규화해 비교한다(autocrlf). build.gradle의 test task inputs에 스펙 파일과 `OPENAPI_UPDATE`를 넣어, 파일만 바뀌어도 테스트가 건너뛰어지지 않게 한다. 스펙 파일은 `inputs.files`로 선언한다. Gradle 9.7에서 `inputs.file(...).optional()`은 파일이 없으면 테스트 태스크를 시작하지 않아, 스펙을 처음 만들 수 없다.
+- 패키지 의존 규칙(`.claude/rules/package-structure.md`)은 ArchUnit 테스트 `com.shineunsigan.snsg.ArchitectureTest`가 검사한다. 규칙 하나에 테스트 메서드 하나다.
+  - 프로덕션 클래스만 검사한다(`ImportOption.Predefined.DO_NOT_INCLUDE_TESTS`). 테스트 코드는 다른 도메인을 import해도 걸리지 않는다.
+  - 도메인은 base package 바로 아래 패키지 중 `common`을 뺀 것으로 자동 인식한다. 도메인 이름을 적어두지 않으므로 도메인을 추가해도 테스트를 고치지 않는다. base package 바로 아래 클래스(`SnsgApplication`)와 base package 밖(라이브러리)으로 향하는 의존은 보지 않는다.
+  - Spring 컨텍스트 없이 돈다. `./gradlew test --tests '*Architecture*'`로 따로 돌릴 수 있다.

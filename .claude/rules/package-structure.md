@@ -34,6 +34,8 @@
 - application·domain과 infrastructure 사이는 반드시 DIP. application·domain은 infrastructure를 import하지 않는다.
   - DB: `domain/repository` 인터페이스 ← `infrastructure/persistence`의 `XxxRepositoryImpl`
   - 그 외 외부 기술(Redis, Kafka, 외부 API, 타 도메인 등): `application/port/out`의 `XxxPort` ← `infrastructure`의 `XxxAdapter`
+- presentation은 infrastructure를 import하지 않는다. 같은 도메인의 presentation과 infrastructure가 같은 설정값을 읽어야 하면 그 설정 record를 application에 둔다. 예: refresh 쿠키 수명(presentation)과 Redis TTL(infrastructure)은 `auth/application/AuthProperties` 하나에서 읽는다.
+- 계층 방향, infrastructure 참조 금지, 도메인 간 참조 허용 대상, 도메인 간 순환 금지, common의 도메인 import 금지는 ArchUnit 테스트(`ArchitectureTest`)가 검사한다. 리뷰에 맡기지 않는다. 검사 범위는 `.claude/rules/testing.md`의 ArchUnit 항목.
 
 ## Service와 UseCase
 
@@ -66,16 +68,21 @@
 - UseCase 구현만을 위한 별도 facade/adapter 클래스는 만들지 않는다. 여러 Service를 조합해야 할 때만 둔다.
 - 서비스 분리 시 UseCase 하나가 `/internal/v1` API 하나가 된다. 호출 측 adapter는 HTTP 클라이언트로 교체한다.
 - outbound `port/out/XxxPort`: application이 필요로 하는 외부 기능. 기술 이름이 아니라 역할로 이름 짓는다 (`UserSettingPort`, `MatchingEventPort`).
-- adapter가 설정값을 읽어 정책을 수행해도 된다. 예로 JWT 어댑터가 `jwt.access-token-validity`를 읽어 만료를 계산한다. 정책의 이름은 포트 메서드(`issueAccessToken`)가 드러내고 숫자는 설정에 있으면 충분하다.
+- adapter가 설정값을 읽어 정책을 수행해도 된다. 예로 JWT 어댑터가 `auth.access-token-validity`를 읽어 만료를 계산한다. 정책의 이름은 포트 메서드(`issueAccessToken`)가 드러내고 숫자는 설정에 있으면 충분하다.
   - 단 **정책에 분기가 생기면 application으로 올린다.** 사용자·상황에 따라 값이 달라질 때, 종류가 셋 이상으로 늘 때, 계산에 조건이 붙을 때다.
 
 ## 도메인 간 참조
 
-- 다른 도메인을 import할 수 있는 곳은 infrastructure 구현체뿐이고, 대상은 상대 도메인의 `port/in` UseCase와 그 Command/Result, `application/event`로 한정한다.
+- 다른 도메인을 import할 수 있는 곳은 infrastructure 구현체뿐이고, 대상은 상대 도메인의 다음 넷으로 한정한다.
+  - `application/port/in`: UseCase
+  - `application/dto`: UseCase의 Command·Result
+  - `application/event`: 이벤트
+  - `domain/constants`: 계약(UseCase·Command·Result·이벤트)에 실린 enum
 - 코드 참조: `A.application` → `A.application.port.out.XxxPort` ← `A.infrastructure.client.XxxAdapter` → `B.application.port.in.XxxUseCase`
 - 이벤트: `B.infrastructure.event`의 리스너가 `A.application.event`의 이벤트를 받아 `B.application.port.in.XxxUseCase`를 호출한다.
 - 상대 도메인의 Result·이벤트는 adapter/리스너 안에서 자기 DTO(Command)로 변환한다.
-- **enum도 도메인마다 각자 소유한다.** 같은 이름·같은 값이어도 상대 도메인 것을 import하지 않고, adapter에서 변환한다. 포트와 UseCase로 경계를 세워놓고 enum 한 줄로 구멍을 내지 않기 위해서다.
+- **enum도 도메인마다 각자 소유한다.** 상대 도메인 enum은 **infrastructure의 adapter·리스너에서만** 참조하고, 그 자리에서 자기 enum(또는 필요한 값)으로 바꾼다. application·domain·presentation은 상대 도메인 enum을 참조하지 않는다. 포트와 UseCase로 경계를 세워놓고 enum 한 줄로 구멍을 내지 않기 위해서다.
+  - 계약 전용 enum을 따로 만들지 않는다. 계약에 실린 도메인 enum(`domain/constants`)을 그대로 쓴다. 예외: 계약에 내보내면 안 되는 값이 있는 enum만 그 도메인에 계약용 enum을 따로 둔다.
   - 변환은 `default` 없는 switch로 쓴다. 값을 추가하면 컴파일이 깨져 변환 누락을 잡는다.
   - 값만 가진 상수의 중복은 허용한다. 로직이 들어 있으면 중복하지 말고 어느 도메인 소유인지부터 다시 정한다.
 
