@@ -12,7 +12,7 @@ public enum UserErrorCode implements ErrorCode {
     INVALID_BIRTH_DATE(ErrorType.INVALID, "생년월일이 올바르지 않습니다."),
     DUPLICATED_NICKNAME(ErrorType.CONFLICT, "이미 사용 중인 닉네임이에요. 다른 닉네임을 입력해주세요."),
     ALREADY_WITHDRAWN(ErrorType.CONFLICT, "이미 탈퇴한 사용자입니다."),
-    INVALID_PROFILE_IMAGE(ErrorType.INVALID, "5MB 이하의 PNG·JPG·WebP 이미지만 올릴 수 있어요."),
+    INVALID_PROFILE_IMAGE(ErrorType.INVALID, "JPG, PNG 형식의 사진만 올릴 수 있어요."),
     PROFILE_IMAGE_STORE_FAILED(ErrorType.INTERNAL, "이미지를 저장하지 못했어요. 잠시 후 다시 시도해주세요."),
     USER_NOT_FOUND(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
 

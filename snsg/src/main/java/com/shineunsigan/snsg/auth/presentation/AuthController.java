@@ -112,7 +112,7 @@ public class AuthController {
     @Operation(summary = "프로필 사진 업로드",
             description = """
                     가입 중에 프로필 사진을 바꿀 때 쓴다. 돌려받은 경로를 가입 요청의 profileImageUrl에 넣는다.
-                    5MB 이하의 PNG·JPG·WebP만 받는다. 형식은 파일 내용으로 판별하므로 확장자를 바꿔 올려도 거부된다.""")
+                    5MB 이하의 JPG·PNG만 받는다. 형식은 파일 내용으로 판별하므로 확장자를 바꿔 올려도 거부된다.""")
     public ResponseEntity<ApiResponse<ProfileImageResponse>> uploadProfileImage(
             @CookieValue(value = AuthCookieFactory.SIGN_UP_TOKEN, required = false) String signUpToken,
             @RequestPart("image") MultipartFile image) throws IOException {

@@ -56,7 +56,7 @@
 | 401 | `INVALID_SOCIAL_CODE` | 인가코드가 만료·위조됨 | 카카오 로그인부터 다시 |
 | 409 | `DUPLICATED_NICKNAME` | 이미 쓰이는 닉네임 | 다른 닉네임 입력 안내 |
 | 400 | `INVALID_NICKNAME` | 닉네임이 2~10자의 한글·영문·숫자가 아님 | 형식 안내 후 다시 입력 |
-| 400 | `INVALID_PROFILE_IMAGE` | 5MB를 넘거나 PNG·JPG·WebP가 아님 | 다른 사진 선택 안내 |
+| 400 | `INVALID_PROFILE_IMAGE` | 5MB를 넘거나 JPG·PNG가 아님 | 다른 사진 선택 안내 |
 | 400 | `INVALID_PROFILE_IMAGE_URL` | 가입 요청의 `profileImageUrl`이 업로드 API가 준 경로가 아님 | FE 버그다. 업로드 응답의 값을 그대로 넣는다 |
 | 409 | `ALREADY_WITHDRAWN` | 이미 탈퇴한 사용자 | 로그인 화면으로 |
 
@@ -132,7 +132,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 **프로필 사진을 바꾸려면** 먼저 `POST /api/v1/auth/signup/profile-image`로 올리고, 받은 경로를 가입 요청의 `profileImageUrl`에 넣는다.
 
 - `multipart/form-data`, 파트 이름은 `image`. `signUpToken` 쿠키가 필요하다.
-- 5MB 이하의 PNG·JPG·WebP만 받는다. **형식은 파일 내용으로 판별하므로 확장자만 바꿔 올리면 거부된다.**
+- 5MB 이하의 JPG·PNG만 받는다. **형식은 파일 내용으로 판별하므로 확장자만 바꿔 올리면 거부된다.** 거부되면 400 `INVALID_PROFILE_IMAGE`("JPG, PNG 형식의 사진만 올릴 수 있어요.")다.
 - 응답은 `{ "profileImageUrl": "/images/profiles/<uuid>.png" }`. 도메인이 붙지 않은 경로이므로 화면에 쓸 때 서버 주소를 앞에 붙인다.
 - 가입 요청의 `profileImageUrl`에는 **이 API가 돌려준 경로만** 넣을 수 있다. 다른 주소를 넣으면 400 `INVALID_PROFILE_IMAGE_URL`이다.
 - 비워 두면(`null` 또는 생략) 소셜에서 받은 사진을 쓴다. 그것도 없으면 기본 이미지가 된다.
