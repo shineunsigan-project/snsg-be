@@ -15,12 +15,15 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.shineunsigan.snsg.common.exception.BusinessException;
+import com.shineunsigan.snsg.user.application.dto.command.RegisterUserCommand;
 import com.shineunsigan.snsg.user.application.event.UserWithdrawnEvent;
 import com.shineunsigan.snsg.user.application.port.out.FileStoragePort;
 import com.shineunsigan.snsg.user.application.port.out.UserEventPort;
@@ -68,7 +71,53 @@ class UserCommandServiceTest {
     private UserCommandService userCommandService;
 
     private User user() {
-        return User.create(Profile.of("민트초코", Gender.FEMALE, LocalDate.of(1996, 4, 12), UPLOADED_IMAGE));
+        return User.create("김민트", "mint@example.com",
+                Profile.of("민트초코", Gender.FEMALE, LocalDate.of(1996, 4, 12), UPLOADED_IMAGE), LocalDate.now());
+    }
+
+    private RegisterUserCommand registerCommand(String nickname, String email) {
+        return new RegisterUserCommand(SocialProvider.KAKAO, PROVIDER_USER_ID, "김민트", email, nickname,
+                Gender.FEMALE, LocalDate.of(1996, 4, 12), UPLOADED_IMAGE);
+    }
+
+    private User registerAndCaptureSavedUser(RegisterUserCommand command) {
+        when(userRepository.existsByNickname(command.nickname())).thenReturn(false);
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        userCommandService.register(command);
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    @DisplayName("가입하면 이름과 이메일이 저장된다")
+    void registerStoresNameAndEmail() {
+        User saved = registerAndCaptureSavedUser(registerCommand("민트초코", "User@Example.com"));
+
+        assertThat(saved.getName()).isEqualTo("김민트");
+        assertThat(saved.getEmail()).isEqualTo("User@Example.com");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @DisplayName("이메일을 생략하거나 빈 문자열로 보내면 빈 문자열로 저장된다")
+    void registerStoresEmptyEmail(String email) {
+        User saved = registerAndCaptureSavedUser(registerCommand("민트초코", email));
+
+        assertThat(saved.getEmail()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("이미 쓰이는 닉네임이면 저장하지 않고 DUPLICATED_NICKNAME")
+    void registerRejectsDuplicatedNickname() {
+        when(userRepository.existsByNickname("mint")).thenReturn(true);
+
+        assertThatThrownBy(() -> userCommandService.register(registerCommand("mint", "")))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", UserErrorCode.DUPLICATED_NICKNAME);
+        verify(userRepository, never()).save(any());
     }
 
     @Test

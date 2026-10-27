@@ -51,11 +51,12 @@ class UserAdapterTest {
     }
 
     @Test
-    @DisplayName("가입 요청의 제공자와 성별을 user 도메인 값으로 바꿔 넘긴다")
+    @DisplayName("가입 요청의 제공자와 성별을 user 도메인 값으로 바꿔 넘기고 이름·이메일을 그대로 전달한다")
     void convertsProviderAndGenderOnRegister() {
         RegisterUserCommand command = new RegisterUserCommand(
                 new SocialUserResult(SocialProvider.NAVER, "naver-1", "민트초코", "https://naver.test/me.png"),
-                "민트라떼", Gender.FEMALE, LocalDate.of(1996, 4, 12), "https://naver.test/me.png");
+                "김민트", "User@Example.com", "민트라떼", Gender.FEMALE, LocalDate.of(1996, 4, 12),
+                "https://naver.test/me.png");
         when(registerUserUseCase.register(any())).thenReturn(UUID.randomUUID());
 
         userAdapter.register(command);
@@ -70,6 +71,8 @@ class UserAdapterTest {
         assertThat(userCommand.gender())
                 .isEqualTo(com.shineunsigan.snsg.user.domain.constants.Gender.FEMALE);
         assertThat(userCommand.providerUserId()).isEqualTo("naver-1");
+        assertThat(userCommand.name()).isEqualTo("김민트");
+        assertThat(userCommand.email()).isEqualTo("User@Example.com");
         assertThat(userCommand.nickname()).isEqualTo("민트라떼");
         assertThat(userCommand.profileImageUrl()).isEqualTo("https://naver.test/me.png");
     }

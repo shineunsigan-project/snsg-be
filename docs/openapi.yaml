@@ -57,6 +57,8 @@ paths:
       description: |-
         프로필을 받아 가입을 마치고 access token을 돌려준다. signUpToken 쿠키가 필요하므로 credentials를 포함해 호출한다.
         소셜 정보는 서버가 보관한 가입 세션에서 꺼낸다. 가입이 끝나면 signUpToken은 무효가 된다.
+        필드 형식이 틀리면 400 INVALID_REQUEST와 함께 errors에 틀린 필드와 문구가 담긴다.
+        가입일 기준 만 18세 미만이면 400 UNDERAGE, 닉네임이 이미 쓰이고 있으면(대소문자 무시) 409 DUPLICATED_NICKNAME이다.
       operationId: signUp
       parameters:
       - name: signUpToken
@@ -85,7 +87,7 @@ paths:
       summary: 프로필 사진 업로드
       description: |-
         가입 중에 프로필 사진을 바꿀 때 쓴다. 돌려받은 경로를 가입 요청의 profileImageUrl에 넣는다.
-        5MB 이하의 PNG·JPG·WebP만 받는다. 형식은 파일 내용으로 판별하므로 확장자를 바꿔 올려도 거부된다.
+        5MB 이하의 JPG·PNG만 받는다. 형식은 파일 내용으로 판별하므로 확장자를 바꿔 올려도 거부된다.
       operationId: uploadProfileImage
       parameters:
       - name: signUpToken
@@ -213,7 +215,7 @@ paths:
       - 사용자
       summary: 탈퇴
       description: |-
-        사용자를 탈퇴시킨다. 닉네임·생년월일·프로필 사진은 비식별 값으로 바뀌고 올렸던 사진 파일은 지워진다.
+        사용자를 탈퇴시킨다. 이름·이메일·닉네임·생년월일·프로필 사진은 비식별 값으로 바뀌고 올렸던 사진 파일은 지워진다.
         카카오 연결도 끊어지므로 다시 로그인하면 동의 화면부터 시작한다.
         되돌릴 수 없고, 다시 가입하면 이전 활동과 이어지지 않는 새 계정이 된다.
         refresh token은 즉시 무효가 되지만 쿠키는 남는다. 탈퇴 직후 로그아웃 API를 한 번 호출해 쿠키를 비운다.
@@ -244,6 +246,17 @@ components:
           type: string
         data:
           $ref: "#/components/schemas/TokenResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    FieldError:
+      type: object
+      properties:
+        field:
+          type: string
+        message:
+          type: string
     TokenResponse:
       type: object
       properties:
@@ -254,11 +267,26 @@ components:
     SignUpRequest:
       type: object
       properties:
+        name:
+          type: string
+          description: 실명. 2~20자의 한글 또는 영문만 쓸 수 있다. 공백·숫자는 받지 않는다. 남에게 보이지 않고 가입 후
+            바꿀 수 없다
+          example: 김민트
+          pattern: "^[가-힣a-zA-Z]{2,20}$"
         nickname:
           type: string
-          description: 일정에서 다른 사람에게 보일 이름. 2~10자의 한글·영문·숫자만 쓸 수 있다. 소셜 닉네임이 기본값이고
-            바꿀 수 있다
+          description: 일정에서 다른 사람에게 보일 이름. 2~10자의 한글·영문·숫자·.·_만 쓸 수 있다. 대소문자만 다른 닉네임은
+            같은 닉네임으로 본다. 소셜 닉네임이 기본값이고 바꿀 수 있다
           example: 민트초코
+          pattern: "^[가-힣a-zA-Z0-9._]{2,10}$"
+        email:
+          type: string
+          description: "이메일. 선택 입력이다. 생략하거나 빈 문자열이면 없음으로 저장한다. local@domain.tld 형식\
+            , 최대 100자. 앞뒤 공백은 다듬지 않고 거부한다. 대소문자는 입력한 그대로 저장한다"
+          example: mint@example.com
+          maxLength: 100
+          minLength: 0
+          pattern: "^([A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,})?$"
         gender:
           type: string
           description: 성별. 일정 참여자 구성 표시에 쓰인다
@@ -269,7 +297,7 @@ components:
         birthDate:
           type: string
           format: date
-          description: 생년월일. 연령대 계산에 쓰이고 생년월일 자체는 공개되지 않는다
+          description: 생년월일. 연령대 계산에 쓰이고 생년월일 자체는 공개되지 않는다. 가입일 기준 만 18세 이상이어야 한다
           example: 1996-04-12
         profileImageUrl:
           type: string
@@ -279,6 +307,8 @@ components:
       required:
       - birthDate
       - gender
+      - name
+      - nickname
     ApiResponseProfileImageResponse:
       type: object
       properties:
@@ -290,6 +320,10 @@ components:
           type: string
         data:
           $ref: "#/components/schemas/ProfileImageResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
     ProfileImageResponse:
       type: object
       properties:
@@ -310,6 +344,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RegionResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
     RegionResponse:
       type: object
       properties:
@@ -332,6 +370,10 @@ components:
           type: string
         data:
           $ref: "#/components/schemas/SignUpSessionResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
     SignUpSessionResponse:
       type: object
       properties:
@@ -353,6 +395,10 @@ components:
         message:
           type: string
         data: {}
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
   securitySchemes:
     bearerAuth:
       type: http
