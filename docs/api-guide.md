@@ -25,19 +25,24 @@
 ```json
 { "isSuccess": true,  "data": { } }
 { "isSuccess": false, "code": "INVALID_REFRESH_TOKEN", "message": "다시 로그인해야 합니다." }
+{ "isSuccess": false, "code": "INVALID_REQUEST", "message": "요청 형식이 올바르지 않습니다.",
+  "errors": [ { "field": "nickname", "message": "닉네임은 2~10자의 한글·영문·숫자·.·_만 쓸 수 있어요." } ] }
 ```
 
 - **성공 여부는 `isSuccess`로 본다.** HTTP 상태 코드도 정확하게 내려가지만, 어느 쪽을 봐야 하는지 헷갈리지 않도록 본문에도 담는다.
 - **`code`와 `message`는 실패 전용**이다. 성공 응답에는 들어 있지 않다.
 - 화면 분기는 **`code`** 로 한다. enum 이름이라 바뀌지 않는다. 성공했을 때 분기가 필요하면 `data`의 필드로 준다.
-- `message`는 표시·디버깅용이다. 문구가 바뀔 수 있고, 요청 형식 오류의 메시지는 서버 로케일에 따라 달라진다. 분기에 쓰지 않는다.
+- `message`는 표시·디버깅용이다. 문구가 바뀔 수 있다. 분기에 쓰지 않는다.
+- **`errors`는 요청 필드 검증에 실패했을 때만** 들어 있다. 이때 `code`는 `INVALID_REQUEST`이고, 틀린 필드마다 `{ "field", "message" }`가 하나씩 담긴다. 여러 필드가 틀리면 모두 담기며 순서는 정해져 있지 않다.
+  - `field`는 요청 JSON의 필드 이름이다. 해당 입력칸 아래에 `message`를 그대로 보여주면 된다. 값이 비었을 때도 그 필드의 형식 안내 문구가 온다.
+  - 성공 응답, 업무 오류(`DUPLICATED_NICKNAME` 등), JSON 변환 실패(잘못된 JSON, 없는 enum 값, 없는 날짜, 타입 오류), 404·405 등에는 `errors`가 없다.
 - 실패하면 `data`는 들어 있지 않다. 성공이어도 돌려줄 값이 없으면 빠진다(로그아웃 등).
 
 ### 모든 API에서 날 수 있는 에러
 
 | 상태 | code | 언제 |
 | --- | --- | --- |
-| 400 | `INVALID_REQUEST` | 필수값 누락, 잘못된 JSON 등 요청 형식 오류 |
+| 400 | `INVALID_REQUEST` | 필수값 누락, 잘못된 JSON 등 요청 형식 오류. 필드 검증 실패면 `errors`에 틀린 필드가 담긴다 |
 | 404·405·415 등 | `INVALID_REQUEST` | 없는 경로, 지원하지 않는 메서드나 Content-Type. 상태 코드는 원래 값 그대로다 |
 | 401 | `UNAUTHENTICATED` | 인증이 필요한 API에 토큰이 없거나 만료·무효 |
 | 500 | `INTERNAL_ERROR` | 서버 오류 |

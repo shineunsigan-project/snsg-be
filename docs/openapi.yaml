@@ -244,6 +244,17 @@ components:
           type: string
         data:
           $ref: "#/components/schemas/TokenResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    FieldError:
+      type: object
+      properties:
+        field:
+          type: string
+        message:
+          type: string
     TokenResponse:
       type: object
       properties:
@@ -290,6 +301,10 @@ components:
           type: string
         data:
           $ref: "#/components/schemas/ProfileImageResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
     ProfileImageResponse:
       type: object
       properties:
@@ -310,6 +325,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RegionResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
     RegionResponse:
       type: object
       properties:
@@ -332,6 +351,10 @@ components:
           type: string
         data:
           $ref: "#/components/schemas/SignUpSessionResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
     SignUpSessionResponse:
       type: object
       properties:
@@ -353,6 +376,10 @@ components:
         message:
           type: string
         data: {}
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
   securitySchemes:
     bearerAuth:
       type: http

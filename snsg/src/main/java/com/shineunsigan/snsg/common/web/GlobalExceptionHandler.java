@@ -1,10 +1,13 @@
 package com.shineunsigan.snsg.common.web;
 
+import java.util.List;
+
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.ErrorResponse;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
@@ -48,6 +51,24 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
         return ResponseEntity.status(statusCode)
                 .body(ApiResponse.error(CommonErrorCode.INVALID_REQUEST));
+    }
+
+    /**
+     * 요청 DTO의 Bean Validation 실패. 틀린 필드와 문구를 {@code errors}에 담는다.
+     * 같은 필드에 같은 문구가 여러 번 걸리면 한 번만 담는다.
+     */
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException exception,
+            HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
+        return ResponseEntity.status(statusCode)
+                .body(ApiResponse.error(CommonErrorCode.INVALID_REQUEST, toFieldErrors(exception)));
+    }
+
+    private List<ApiResponse.FieldError> toFieldErrors(MethodArgumentNotValidException exception) {
+        return exception.getBindingResult().getFieldErrors().stream()
+                .map(error -> new ApiResponse.FieldError(error.getField(), error.getDefaultMessage()))
+                .distinct()
+                .toList();
     }
 
     /**
