@@ -5,7 +5,7 @@ import java.time.Duration;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
-import com.shineunsigan.snsg.auth.infrastructure.jwt.JwtProperties;
+import com.shineunsigan.snsg.auth.application.AuthProperties;
 
 /**
  * 토큰을 담는 쿠키를 만든다. 무엇을 쿠키로 주고 무엇을 본문으로 줄지는 presentation의 결정이다.
@@ -24,8 +24,8 @@ public class AuthCookieFactory {
 
     private final Duration refreshTokenMaxAge;
 
-    public AuthCookieFactory(JwtProperties jwtProperties) {
-        this.refreshTokenMaxAge = jwtProperties.refreshTokenValidity();
+    public AuthCookieFactory(AuthProperties authProperties) {
+        this.refreshTokenMaxAge = authProperties.refreshTokenValidity();
     }
 
     public ResponseCookie refreshToken(String refreshToken) {

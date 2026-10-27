@@ -26,6 +26,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.shineunsigan.snsg.auth.application.AuthProperties;
 import com.shineunsigan.snsg.auth.application.CompleteSignUpUseCase;
 import com.shineunsigan.snsg.auth.application.ReissueTokenUseCase;
 import com.shineunsigan.snsg.auth.application.SocialLoginUseCase;
@@ -33,7 +34,6 @@ import com.shineunsigan.snsg.auth.application.dto.result.SocialAuthResult;
 import com.shineunsigan.snsg.auth.application.dto.result.TokenResult;
 import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
-import com.shineunsigan.snsg.auth.infrastructure.jwt.JwtProperties;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.common.web.GlobalExceptionHandler;
 
@@ -63,7 +63,7 @@ class AuthControllerTest {
     private ReissueTokenUseCase reissueTokenUseCase;
 
     @MockitoBean
-    private JwtProperties jwtProperties;
+    private AuthProperties authProperties;
 
     /** 인증 필터가 빈으로 올라오면서 필요하다. 이 테스트에서는 필터를 끄고 쓰지 않는다. */
     @MockitoBean

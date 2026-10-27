@@ -10,8 +10,8 @@ import java.util.UUID;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import com.shineunsigan.snsg.auth.application.AuthProperties;
 import com.shineunsigan.snsg.auth.application.port.out.RefreshTokenStorePort;
-import com.shineunsigan.snsg.auth.infrastructure.jwt.JwtProperties;
 
 /**
  * refresh token을 Redis에 보관한다. 사용자당 하나만 유효하고, 재발급하면 덮어쓴다.
@@ -27,9 +27,9 @@ public class RedisRefreshTokenStoreAdapter implements RefreshTokenStorePort {
     private final StringRedisTemplate redisTemplate;
     private final Duration refreshTokenValidity;
 
-    public RedisRefreshTokenStoreAdapter(StringRedisTemplate redisTemplate, JwtProperties jwtProperties) {
+    public RedisRefreshTokenStoreAdapter(StringRedisTemplate redisTemplate, AuthProperties authProperties) {
         this.redisTemplate = redisTemplate;
-        this.refreshTokenValidity = jwtProperties.refreshTokenValidity();
+        this.refreshTokenValidity = authProperties.refreshTokenValidity();
     }
 
     @Override
