@@ -128,7 +128,9 @@ public class AuthController {
     @Operation(summary = "가입 완료",
             description = """
                     프로필을 받아 가입을 마치고 access token을 돌려준다. signUpToken 쿠키가 필요하므로 credentials를 포함해 호출한다.
-                    소셜 정보는 서버가 보관한 가입 세션에서 꺼낸다. 가입이 끝나면 signUpToken은 무효가 된다.""")
+                    소셜 정보는 서버가 보관한 가입 세션에서 꺼낸다. 가입이 끝나면 signUpToken은 무효가 된다.
+                    필드 형식이 틀리면 400 INVALID_REQUEST와 함께 errors에 틀린 필드와 문구가 담긴다.
+                    가입일 기준 만 18세 미만이면 400 UNDERAGE, 닉네임이 이미 쓰이고 있으면(대소문자 무시) 409 DUPLICATED_NICKNAME이다.""")
     public ResponseEntity<ApiResponse<TokenResponse>> signUp(
             @CookieValue(value = AuthCookieFactory.SIGN_UP_TOKEN, required = false) String signUpToken,
             @Valid @RequestBody SignUpRequest request) {

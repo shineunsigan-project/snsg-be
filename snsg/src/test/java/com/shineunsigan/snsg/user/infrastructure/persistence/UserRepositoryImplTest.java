@@ -13,8 +13,10 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.context.annotation.Import;
 
 import com.shineunsigan.snsg.common.config.JpaAuditingConfig;
+import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.user.domain.constants.Gender;
 import com.shineunsigan.snsg.user.domain.constants.SocialProvider;
+import com.shineunsigan.snsg.user.domain.exception.UserErrorCode;
 import com.shineunsigan.snsg.user.domain.model.Profile;
 import com.shineunsigan.snsg.user.domain.model.User;
 import com.shineunsigan.snsg.user.domain.model.UserSocialAccount;
@@ -58,6 +60,50 @@ class UserRepositoryImplTest {
         assertThat(userRepository.existsByNickname("민트초코")).isFalse();
         userRepository.save(createUser("민트초코"));
         entityManager.flush();
+    }
+
+    @Test
+    @DisplayName("대소문자만 다른 닉네임도 중복으로 본다")
+    void duplicatedNicknameIgnoresCase() {
+        userRepository.save(createUser("Mint"));
+
+        assertThat(userRepository.existsByNickname("mint")).isTrue();
+        assertThat(userRepository.existsByNickname("MINT")).isTrue();
+        assertThat(userRepository.existsByNickname("mint2")).isFalse();
+    }
+
+    @Test
+    @DisplayName("탈퇴한 사용자의 닉네임은 대소문자가 달라도 중복으로 보지 않는다")
+    void nicknameOfWithdrawnUserIsNotDuplicatedIgnoringCase() {
+        User user = userRepository.save(createUser("Mint"));
+        user.withdraw();
+        entityManager.flush();
+
+        assertThat(userRepository.existsByNickname("mint")).isFalse();
+    }
+
+    @Test
+    @DisplayName("중복 판정 없이 대소문자만 다른 닉네임을 저장하면 인덱스가 막는다")
+    void nicknameIndexIgnoresCase() {
+        entityManager.persist(createUser("Mint"));
+        entityManager.flush();
+
+        entityManager.persist(createUser("mint"));
+
+        assertThatThrownBy(entityManager::flush)
+                .rootCause()
+                .hasMessageContaining("uix_users_nickname");
+    }
+
+    @Test
+    @DisplayName("저장 중 닉네임 인덱스를 위반하면(동시 가입 경합) DUPLICATED_NICKNAME")
+    void nicknameIndexViolationBecomesDuplicatedNickname() {
+        userRepository.save(createUser("Mint"));
+
+        assertThatThrownBy(() -> userRepository.save(createUser("mint")))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(UserErrorCode.DUPLICATED_NICKNAME);
     }
 
     @Test
@@ -111,6 +157,7 @@ class UserRepositoryImplTest {
     }
 
     private User createUser(String nickname) {
-        return User.create(Profile.of(nickname, Gender.FEMALE, LocalDate.of(1996, 4, 12), null));
+        return User.create("김민트", "", Profile.of(nickname, Gender.FEMALE, LocalDate.of(1996, 4, 12), null),
+                LocalDate.now());
     }
 }
