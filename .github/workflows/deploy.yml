@@ -49,6 +49,12 @@ jobs:
           push: true
           tags: ${{ steps.login-ecr.outputs.registry }}/snsg/be:${{ github.ref_name }}
           provenance: false
+
+          # ECR에 저장된 빌드 캐시 사용
+          cache-from: type=registry,ref=${{ steps.login-ecr.outputs.registry }}/snsg/be:buildcache
+
+          # 다음 빌드를 위한 캐시 저장
+          cache-to: type=registry,ref=${{ steps.login-ecr.outputs.registry }}/snsg/be:buildcache,mode=max,oci-mediatypes=true,image-manifest=true
      # 7. 최신 ECS Task Definition에 새 이미지 적용
       - name: Render ECS Task Definition
         id: task-def

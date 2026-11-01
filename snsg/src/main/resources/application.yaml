@@ -48,7 +48,7 @@ file-storage:
   directory: ${FILE_STORAGE_DIRECTORY}
 
 cors:
-  allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
 
 terms:
   privacy-policy-version: 2026-10-01
