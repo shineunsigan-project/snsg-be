@@ -1,5 +1,5 @@
 
-name: ECR Push
+name: Deploy to ECS
 
 on:
   push:
@@ -49,3 +49,21 @@ jobs:
           push: true
           tags: ${{ steps.login-ecr.outputs.registry }}/snsg/be:${{ github.ref_name }}
           provenance: false
+     # 7. 최신 ECS Task Definition에 새 이미지 적용
+      - name: Render ECS Task Definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: snsg-be-web-task
+          container-name: snsg-be-web
+          image: ${{ steps.login-ecr.outputs.registry }}/snsg/be:${{ github.ref_name }}
+
+      # 8. 새 Revision 등록 및 ECS Service 업데이트
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          cluster: snsg-be-cluster
+          service: snsg-be-service
+          wait-for-service-stability: true
+          wait-max-delay-seconds: 15
