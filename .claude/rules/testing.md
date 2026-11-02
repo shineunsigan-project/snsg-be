@@ -39,6 +39,7 @@ paths:
 - 감사 필드를 검증하는 JPA 슬라이스 테스트는 `@Import`에 `JpaAuditingConfig`를 함께 넣는다.
 - `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`에 있고 스타터는 `spring-boot-starter-webmvc-test`. Service는 `@MockitoBean`으로 대체한다.
 - 테스트는 기본 프로파일(`local`)로 돌고, 설정값은 `snsg/.env`에서 읽는다(`application-local.yaml`의 `spring.config.import`). 새 환경변수를 추가하면 `.env`에도 넣어야 컨텍스트가 뜬다.
+- 결과가 경고 로그로만 드러나는 분기는 `OutputCaptureExtension`(`org.springframework.boot.test.system`)으로 로그를 받아 단정한다. Mockito와 함께 쓸 때는 `@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})`. 예: `PlaceCommandServiceTest`.
 - 외부 API adapter는 슬라이스 없이 `MockRestServiceServer.bindTo(RestClient.Builder)`로 테스트한다.
 - Redis 같은 외부 저장소 adapter는 Testcontainers로 실제 컨테이너에서 테스트한다. 의존성은 `org.testcontainers:testcontainers-junit-jupiter`(Boot 4.0.8 관리 버전 2.0.5, 2.x에서 artifact 이름이 바뀌었다).
   - `@Testcontainers(disabledWithoutDocker = true)`로 Docker가 없으면 실패가 아니라 건너뛰게 한다. 대신 build가 통과해도 실제로 돌았는지는 테스트 결과의 `skipped` 수로 확인한다.

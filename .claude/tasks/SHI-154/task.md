@@ -1,0 +1,294 @@
+## 배경
+- Linear SHI-154 "장소 마스터와 노출 장소 조회". 기능 명세(`C:\Users\ks\nss\dev\snsg-be\planning\be-spec-mvp.html`)의 작업 T-07이다.
+- place 도메인에 장소 마스터(places)를 더한다. 할 일은 넷이다.
+  - 2026-10-27 검수 결과를 초기 데이터로 넣는다.
+  - 다른 도메인(schedule)이 쓸 노출 장소 조회 입구(port/in)를 만든다.
+  - 분기 적재 배치(T-19)가 쓸 반영 메서드 두 개(upsert, 폐업 처리)를 만든다.
+- 뒤 작업
+  - T-10(일정 개설)·T-11(장소 후보 API)이 port/in을 부른다.
+  - T-19(공공데이터 적재 배치)가 반영 메서드를 부른다.
+- 사용자와 합의한 결정(2026-11-02, 명세 결정 D23)
+  1. 폐업을 검수 상태에서 분리한다.
+     - `status`는 CANDIDATE/APPROVED/REJECTED만 가진다. 폐업은 `is_closed BOOLEAN`이 맡는다.
+     - 노출 조건은 APPROVED이고 is_closed=false인 것이다. 명세 POL-P1의 나머지 조건(유형 미정 아님, 삭제 안 됨, 활성 지역)도 함께 건다.
+     - 원천에 다시 나타나면 is_closed만 false로 돌린다. 검수 상태와 화면 값은 그대로 둔다.
+  2. 원천 값 6개를 화면 값과 따로 둔다: `source_name`, `source_road_address`, `source_address_detail`, `source_latitude`, `source_longitude`, `source_region_code`.
+     - 적재(upsert)할 때마다 검수 상태와 상관없이 원천 값을 갱신한다.
+     - 화면 값 6개(name, road_address, address_detail, latitude, longitude, region_code)는 CANDIDATE일 때만 원천 값으로 갱신한다. place_type은 화면 값 갱신 대상이 아니다.
+     - APPROVED인데 새 원천 값이 지난 원천 값과 다르면 경고 로그를 남긴다. 우리 값(화면 값)과는 비교하지 않는다.
+     - 폐업 처리의 지역 판정은 `source_region_code` 기준이다. MANUAL 행의 source_*는 ''/0이다(source_address_detail도 '').
+  3. 2026-10-27 검수 결과 204행(승인 89·거절 115)을 Flyway 마이그레이션 INSERT로 넣는다.
+     - 입력은 정리된 CSV다. CSV가 정답이다. 메모 해석은 끝났으니 다시 해석하지 않는다.
+     - 모두 source=SEMAS, is_closed=false다. id는 고정 UUID(v7 형식)다.
+  4. 마이그레이션 번호: `V4__`(테이블), `V5__`(초기 데이터). PR #43(SHI-146)의 `V3__extend_user_profile.sql`이 먼저 머지된다. 명세 표의 V6은 가칭이라 쓰지 않는다.
+  5. 범위는 명세 T-07 그대로다. 적재 배치·외부 API·적재용 설정값은 T-19 몫이다.
+  6. 같은 가게가 새 상가업소번호로 나오는 경우는 코드로 처리하지 않는다(운영 조회, 명세 C5).
+  7. 상세주소(2026-11-02 결정)
+     - places에 `address_detail VARCHAR(100) NOT NULL`(화면 값)과 `source_address_detail VARCHAR(100) NOT NULL`(원천 값)을 더한다. 값이 없으면 ''다.
+     - 화면 값·원천 값 규칙은 다른 컬럼과 같다(결정 2).
+     - 원천은 SEMAS 층(flrNo)이다. 층 값을 문자열로 바꾸는 일(숫자 n → "n층", "Bn" → "지하 n층", "지" → "지하", 빈 값 → '')은 값 정리(POL-P6)라 T-19 몫이다. T-07의 upsert는 이미 정리된 문자열을 받는다.
+     - 호·동·건물명은 쓰지 않는다.
+     - port/in 결과에 `addressDetail`을 roadAddress와 별도 필드로 둔다.
+
+## 환경
+- 워크트리: `C:\Users\ks\nss\dev\snsg-be\wt-SHI-154` (브랜치 `feat/SHI-154-place-master`)
+  - 베이스: `3d4c3df`(PR #43 머지 후 develop). 오케스트레이터가 브랜치를 여기에 맞춘다.
+  - 구현 시작 시 `ls /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg/src/main/resources/db/migration`에 `V3__extend_user_profile.sql`이 있어야 한다.
+  - **없으면 멈추고 보고한다.** 공유 DB에 V3가 적용돼 있으면 Flyway 검증이 실패한다.
+- 메인 작업 디렉터리 `C:\Users\ks\nss\dev\snsg-be\snsg-be`와 다른 워크트리(`wt-SHI-146`, `wt-SHI-148`)는 읽기만 한다. 기획 문서 `C:\Users\ks\nss\dev\snsg-be\planning\`도 읽기만 한다.
+- `snsg/.env`는 복사돼 있다.
+- DB·Redis는 Docker 컨테이너 `snsg-postgres`(5432)·`snsg-redis`(6379)다. task.md를 쓰는 시점에는 Docker가 꺼져 있었다.
+  - 테스트 전에 `docker start snsg-postgres snsg-redis`로 켠다.
+  - 확인: `netstat -an | grep -E ':(5432|6379) .*LISTEN'` → 두 포트 모두 LISTENING
+- **DB·Redis·8080은 모든 워크트리가 공유한다.** 테스트는 오케스트레이터가 허락한 때에만 돌린다.
+  - Flyway validate 오류, 모르는 버전, `flyway_schema_history` 불일치가 나면 멈추고 보고한다.
+  - 스키마를 지우거나 다른 워크트리 데이터, `flyway_schema_history`를 고치지 않는다.
+- 초기 데이터 입력 CSV(읽기 전용, 저장소 밖): `C:\Users\ks\AppData\Local\Temp\claude\C--Users-ks-nss-dev-snsg-be-snsg-be\7c5ae07b-b709-421d-95e1-e5643fdef6ba\scratchpad\reviewed_places.csv`
+  - UTF-8이다. 헤더는 `source_id, region_code, place_type, status, name, road_address, address_detail, source_name, source_road_address, source_address_detail, latitude, longitude`
+- 초기 데이터 검증 스크립트(읽기 전용, 저장소 밖): 같은 폴더의 `verify_v5.py`. GOAL 2에서 쓴다. 고치지 않는다.
+- 셸은 PowerShell이 기본이고 Bash도 쓸 수 있다. 아래 검증 명령은 Bash 기준이다. PowerShell에서는 `&&`가 동작하지 않는다.
+
+## GOAL
+1. 새 마이그레이션 `V4__`가 places 테이블을 만든다.
+   - 컬럼 구성
+     - BaseEntity 컬럼: id UUID PK, created_at, updated_at TIMESTAMP, is_deleted BOOLEAN
+     - place_type VARCHAR(20), name VARCHAR(100), road_address VARCHAR(200), address_detail VARCHAR(100)
+     - latitude NUMERIC(10,7), longitude NUMERIC(10,7), region_code CHAR(5)
+     - status VARCHAR(20), is_closed BOOLEAN
+     - source VARCHAR(20), source_id VARCHAR(50)
+     - source_name VARCHAR(100), source_road_address VARCHAR(200), source_address_detail VARCHAR(100)
+     - source_latitude NUMERIC(10,7), source_longitude NUMERIC(10,7), source_region_code CHAR(5)
+     - last_synced_at TIMESTAMP
+   - 위 22개 컬럼은 모두 NOT NULL이다. created_by·updated_by는 없다(Audit 아님).
+   - 인덱스·제약은 명세 그대로다.
+     - `uix_places_source`: (source, source_id), WHERE is_deleted = FALSE AND source <> 'MANUAL'
+     - `ix_places_exposed`: (place_type, region_code, status)
+     - CHECK `ck_places_approved_type`: status <> 'APPROVED' OR place_type <> 'UNCLASSIFIED'
+     - regions로 가는 FK는 없다.
+   - 검증: `ls /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg/src/main/resources/db/migration` → `V1__create_user.sql`, `V2__create_region.sql`, `V3__extend_user_profile.sql`, 그리고 `V4__`·`V5__`로 시작하는 파일 각 하나. 이 다섯 개뿐이다.
+   - 검증(테스트로 마이그레이션이 적용된 뒤): `cd /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg && docker exec snsg-postgres psql -U "$(grep '^DB_USERNAME=' .env | cut -d= -f2)" -d snsg -c "select column_name, data_type, character_maximum_length, numeric_precision, numeric_scale, is_nullable from information_schema.columns where table_name = 'places' order by column_name"` → 정확히 22행. 위 22개 컬럼만 있다. 타입·길이가 위와 같고 모두 `is_nullable = NO`이다.
+   - 검증: `cd /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg && docker exec snsg-postgres psql -U "$(grep '^DB_USERNAME=' .env | cut -d= -f2)" -d snsg -c "select indexname, indexdef from pg_indexes where tablename = 'places' order by indexname" -c "select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'places'::regclass order by conname"`
+     - 기대(인덱스): `ix_places_exposed`, PK 인덱스, `uix_places_source`가 있다. `uix_places_source`의 정의에 `UNIQUE`와 위 WHERE 조건이 있다.
+     - 기대(제약): PK와 `ck_places_approved_type`이 있다. FOREIGN KEY는 없다.
+2. 새 마이그레이션 `V5__`가 CSV 204행을 그대로 넣는다.
+   - 모든 행은 source='SEMAS', is_closed=false, is_deleted=false다.
+   - 화면 값 name·road_address·address_detail은 CSV의 같은 이름 열(검수에서 고친 값)이다. 원천 값 source_name·source_road_address·source_address_detail은 CSV의 source_* 열이다. 빈 상세주소는 ''이고 NULL이 아니다.
+   - 좌표: latitude = source_latitude = CSV latitude이고, longitude = source_longitude = CSV longitude다.
+   - 지역: region_code = source_region_code = CSV region_code다.
+   - last_synced_at = `2026-10-27 00:00:00`
+   - id는 서로 다른 고정 UUID v7이다. 파일에 리터럴로 적혀 있어 어느 환경에서 적용해도 같은 id가 된다.
+   - 검증(테스트로 마이그레이션이 적용된 뒤, 테스트 데이터는 롤백된 상태): `python -I /c/Users/ks/AppData/Local/Temp/claude/C--Users-ks-nss-dev-snsg-be-snsg-be/7c5ae07b-b709-421d-95e1-e5643fdef6ba/scratchpad/verify_v5.py /c/Users/ks/nss/dev/snsg-be/wt-SHI-154` → 종료 코드 0, 마지막 줄 `OK 204 rows, status {'APPROVED': 89, 'REJECTED': 115}, region×status {('11200', 'APPROVED'): 9, ('11200', 'REJECTED'): 24, ('11410', 'APPROVED'): 17, ('11410', 'REJECTED'): 26, ('11440', 'APPROVED'): 63, ('11440', 'REJECTED'): 65}, edited 38`
+     - 이 스크립트는 places 전체 행을 CSV와 source_id로 맞춰 본다. 위 모든 컬럼을 대조한다. 화면 값(name, road_address, address_detail)과 원천 값이 다른 행이 CSV의 38행과 같은 source_id 집합인지도 본다.
+     - id의 v7 형식과 중복 여부, 각 id가 V5 파일에 적혀 있는지도 확인한다.
+   - 검증: `grep -c -i -E "gen_random_uuid|uuid_generate" /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg/src/main/resources/db/migration/V5__*.sql` → `0`
+3. 노출 조건(POL-P1)을 지키는 행만 port/in 조회에 나온다. 단건 조회와 목록 조회 모두 그렇다.
+   - 노출 조건은 다섯 가지다.
+     - status = APPROVED
+     - is_closed = false
+     - place_type <> UNCLASSIFIED
+     - is_deleted = false
+     - 지역이 활성(regions.is_active)이다. 지역 활성 여부는 regions와 조인해 같은 쿼리에서 거른다.
+   - 단건 조회는 placeId를 받아 Optional을 준다.
+     - 노출 대상이면 결과를 준다. 결과 필드는 id, placeType, name, roadAddress, addressDetail, latitude, longitude, regionCode다. addressDetail은 roadAddress와 별도 필드다.
+     - 노출 대상이 아니거나 없는 id면 비어 있다.
+   - 목록 조회는 (placeType, regionCodes)를 받는다.
+     - 해당 유형이고 regionCodes에 든 지역의 노출 장소만 준다.
+     - regionCodes가 비면 활성 지역 전체다.
+     - regionCodes에 비활성 지역이나 없는 코드가 섞여도 오류 없이 그 지역 장소만 빠진다.
+     - 결과가 없으면 빈 목록이다.
+   - 목록 정렬: 지역 display_order 오름차순, 같은 지역 안에서는 장소명 오름차순. 행을 넣은 순서와 무관하다.
+   - 검증: `cd /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg && ./gradlew test --tests 'com.shineunsigan.snsg.place.*'` → BUILD SUCCESSFUL, 실패 0, skipped 0
+   - 그리고 diff의 테스트 가운데 실제 PostgreSQL에 붙어 다음을 각각 단정하는 테스트가 있다.
+     - 단건·목록 모두에서 빠지는 행: CANDIDATE, REJECTED, APPROVED이지만 is_closed=true, APPROVED이지만 is_deleted=true, APPROVED이지만 비활성 지역
+     - 노출 대상인 행은 단건으로 찾힌다. 없는 id는 empty다.
+     - 목록은 다른 place_type을 빼고, 요청에 없는 지역을 뺀다.
+     - regionCodes가 비면 활성 지역의 장소가 나오고 비활성 지역의 장소는 나오지 않는다.
+     - 지역 display_order와 장소명 정렬이 넣은 순서와 다를 때도 정렬된 순서로 나온다.
+4. DB 제약이 검수·적재의 잘못된 값을 막는다.
+   - UNCLASSIFIED이면서 APPROVED인 행은 INSERT·UPDATE 모두 CHECK 위반으로 거부된다.
+   - 삭제되지 않은 같은 (source, source_id)의 두 번째 행(MANUAL 아님)은 유니크 위반으로 거부된다.
+   - source=MANUAL, source_id=''인 행은 여러 개 넣을 수 있다.
+   - 검증: GOAL 3과 같은 명령 → BUILD SUCCESSFUL, 실패 0, skipped 0
+   - 그리고 diff의 테스트 가운데 위 세 경우를 실제 PostgreSQL에서 각각 단정하는 테스트가 있다.
+5. upsert는 원천 행 목록(페이지 하나 분량)을 한 트랜잭션으로 반영한다. 원천 행 하나에는 source, sourceId, 장소명, 주소, 상세주소(정리된 문자열, 없으면 ''), 위도, 경도, 확인된 지역 코드, 추정 유형이 담긴다. 같은 (source, source_id)가 있는지에 따라 다음과 같이 된다.
+   - 없으면 새 행을 만든다.
+     - status = CANDIDATE, is_closed = false
+     - place_type = 추정 유형
+     - 화면 값과 원천 값을 같은 원천 값으로 채운다.
+     - last_synced_at을 반영 시각으로 둔다.
+   - 있고 CANDIDATE면 화면 값 6개와 원천 값 6개를 모두 새 원천 값으로 바꾼다.
+     - is_closed = false로 두고 last_synced_at을 갱신한다.
+     - place_type과 status는 바꾸지 않는다.
+   - 있고 APPROVED·REJECTED면 원천 값 6개만 새 값으로 바꾼다.
+     - is_closed = false로 두고 last_synced_at을 갱신한다.
+     - 화면 값 6개와 place_type, status는 그대로다.
+   - 있고 APPROVED인데 새 원천 값 6개(상세주소 포함) 중 하나라도 지난 원천 값과 다르면 WARN 로그를 남긴다. 로그에 그 행을 찾을 수 있는 식별자(id 또는 source·source_id)를 담는다.
+     - 원천 값이 같으면 로그를 남기지 않는다. 화면 값과 다르더라도 남기지 않는다.
+     - 좌표는 값으로 비교한다. 소수 자릿수 표기만 다른 것은 같은 값이다.
+     - REJECTED·CANDIDATE는 원천 값이 바뀌어도 로그를 남기지 않는다.
+   - 폐업(is_closed = true)이던 APPROVED 행이 다시 반영되면 is_closed = false가 되고 노출 조회(GOAL 3)에 다시 나온다. 이름·주소·상세주소는 검수에서 고친 화면 값 그대로다.
+   - 검증: `cd /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg && ./gradlew test --tests 'com.shineunsigan.snsg.place.*'` → BUILD SUCCESSFUL, 실패 0, skipped 0
+   - 그리고 diff의 테스트 가운데 위 항목을 각각 단정하는 테스트가 있다.
+     - 새 행 생성
+     - CANDIDATE 갱신
+     - APPROVED 갱신(화면 값 유지)
+     - REJECTED 갱신(화면 값 유지)
+     - APPROVED 원천 변경 시 경고 로그 있음. 상세주소만 바뀐 경우도 포함한다.
+     - APPROVED 원천 같음(화면 값과는 다름) 시 경고 로그 없음
+     - REJECTED 원천 변경 시 경고 로그 없음
+     - 폐업된 APPROVED가 다시 반영되면 고친 이름·주소 그대로 노출 조회에 나옴. 이 경우는 실제 PostgreSQL에서 확인한다.
+6. 폐업 처리는 (source, 완주한 지역 코드 목록, 기준 시각)을 받아 한 트랜잭션으로 처리한다. 기준 시각은 JOB 시작 시각이며 호출하는 쪽이 넘긴다.
+   - 대상은 다음 조건을 모두 만족하는 행이다.
+     - 그 source의 행이다.
+     - status가 CANDIDATE 또는 APPROVED다.
+     - is_closed = false, is_deleted = false다.
+     - source_region_code가 넘겨받은 지역 목록에 든다.
+     - last_synced_at < 기준 시각이다.
+   - 대상은 is_closed = true가 된다. status, 화면 값, 원천 값, place_type은 그대로다.
+   - 다음 행은 바뀌지 않는다.
+     - REJECTED
+     - MANUAL. source가 MANUAL이면 처리할 대상이 없다.
+     - 다른 source
+     - 목록에 없는 지역. 화면 region_code가 목록에 들더라도 source_region_code가 목록에 없으면 바뀌지 않는다.
+     - last_synced_at ≥ 기준 시각인 행
+   - 안전장치는 지역마다 따로 판정한다.
+     - 분모: 그 source·지역(source_region_code)에서 CANDIDATE·APPROVED이고 is_closed = false이며 삭제되지 않은 행 수
+     - 분자: 그중 대상 수
+     - 비율이 `place.close-max-ratio`(0.3)를 **넘으면** 그 지역은 하나도 닫지 않고 WARN 로그를 남긴다. 같으면 닫는다.
+     - 다른 지역은 계속 처리한다.
+   - 검증: GOAL 5와 같은 명령 → BUILD SUCCESSFUL, 실패 0, skipped 0
+   - 그리고 diff의 테스트 가운데 다음을 각각 단정하는 테스트가 있다.
+     - 대상인 CANDIDATE·APPROVED가 is_closed = true가 되고 status·이름·주소가 그대로다.
+     - 위 "바뀌지 않는다"의 각 경우
+     - 비율 초과 지역은 하나도 닫히지 않고 경고 로그가 남는다. 같은 호출의 다른 지역은 닫힌다.
+     - 비율이 정확히 설정값과 같으면 닫힌다.
+     - 대상 선택 조건은 실제 PostgreSQL에서 확인한다.
+7. close-max-ratio는 설정 record로 주입하고 `application.yaml`에 명세 값으로 둔다.
+   - 키는 `place.close-max-ratio`, 값은 0.3이다. 폐업 처리 메서드의 인자로 받지 않는다(근거는 `## 참고`).
+   - 검증: `grep -n -A3 "^place:" /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg/src/main/resources/application.yaml` → `close-max-ratio: 0.3`이 있다. place 아래 다른 키는 없다.
+   - 검증: `grep -rn "@ConfigurationProperties(prefix = \"place\")" /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg/src/main/java/com/shineunsigan/snsg/place/application` → 한 줄
+8. 전체 빌드와 패키지 의존 규칙이 통과한다.
+   - 검증: `cd /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg && ./gradlew build` → BUILD SUCCESSFUL, 실패 0. skipped 수는 베이스와 같다. 테스트 수는 베이스(PR #43 머지 후 develop) 이상이다.
+   - 검증: `cd /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg && ./gradlew test --tests '*ArchitectureTest'` → 7개 통과
+   - 검증: `cd /c/Users/ks/nss/dev/snsg-be/wt-SHI-154/snsg && ./gradlew test --tests '*OpenApiSpecTest'` → 통과. API를 더하지 않았으므로 `docs/openapi.yaml`은 바뀌지 않는다.
+9. 변경 범위가 제한된다.
+   - 변경은 워크트리 안의 다음에만 있다.
+     - place 도메인 파일(main·test)
+     - 새 마이그레이션 `V4__`·`V5__`
+     - `snsg/src/main/resources/application.yaml`
+   - 기존 Region 관련 파일, 다른 도메인, common, 기존 마이그레이션 V1~V3, docs, build.gradle은 바뀌지 않는다.
+   - 검증: `git -C /c/Users/ks/nss/dev/snsg-be/wt-SHI-154 status --short` → 위 범위 밖 경로가 없다. `.claude/tasks/SHI-154/task.md`는 예외다.
+   - 검증: `git -C /c/Users/ks/nss/dev/snsg-be/wt-SHI-154 diff --staged --stat -- snsg/src/main/java/com/shineunsigan/snsg/user snsg/src/main/java/com/shineunsigan/snsg/auth snsg/src/main/java/com/shineunsigan/snsg/common snsg/src/main/resources/db/migration/V1__create_user.sql snsg/src/main/resources/db/migration/V2__create_region.sql snsg/src/main/resources/db/migration/V3__extend_user_profile.sql docs snsg/build.gradle` → 출력 없음
+   - 검증: `git -C /c/Users/ks/nss/dev/snsg-be/wt-SHI-154 diff --staged --stat -- 'snsg/src/main/java/com/shineunsigan/snsg/place/**/Region*' 'snsg/src/main/java/com/shineunsigan/snsg/place/application/port/in/FindRegionUseCase.java'` → 출력 없음
+
+## 비목표
+- 적재 배치(JOB-04), 외부 API 포트·adapter(`PublicPlaceSourcePort` 등), `ImportPlacesUseCase`는 만들지 않는다. T-19 몫이다.
+- 적재 대상 필터(POL-P2), 유형 추정(POL-P3), 값 정리(POL-P6, 층 flrNo → 상세주소 문자열 변환 포함), 완주 판정(POL-P7)도 T-19 몫이다.
+  - upsert는 이미 정리·추정된 값을 받는다고 가정한다.
+- 설정 record에는 `closeMaxRatio`만 둔다. `place.*`의 나머지 키(import-cron, semas-category-codes, name-keywords, type-keywords, sido-aliases, import-timeout)와 `public-data.api-key`, `DATA_GO_KR_API_KEY`는 T-19가 더한다.
+  - `.env`에 `DATA_GO_KR_API_KEY`가 이미 있어도 이번에는 쓰지 않는다.
+- POL-P4의 "필터·값 정리에서 걸러진 기존 행도 last_synced_at 갱신"은 만들지 않는다.
+  - T-07 완료 조건에 없고 T-19 완료 조건("업종 필터에서 걸러진 기존 행은 폐업 처리되지 않음")에 있다.
+  - 필요한 PlaceCommandService 메서드는 T-19가 더한다.
+- 동시 실행 잠금(`pg_try_advisory_lock`)은 만들지 않는다. JOB-04(T-19) 몫이다.
+- MANUAL 행을 만드는 코드(정적 팩토리·API)는 만들지 않는다. MANUAL은 검수자가 DB에 직접 넣는다(C5). 테스트는 native INSERT로 넣는다.
+- 새 상가업소번호로 나온 같은 가게를 잇는 코드는 만들지 않는다(C5, 결정 6).
+- 검수 API·검수 화면, BaseAuditEntity 전환은 하지 않는다.
+- schedule 도메인, schedule 쪽 `PlacePort`·adapter, `INVALID_PLACE` 오류 코드, 장소 후보 API(API-S02)는 만들지 않는다. place는 오류 코드를 만들지 않는다(명세 9장).
+- REST 컨트롤러를 더하지 않는다. 그래서 `docs/openapi.yaml`, `docs/api-guide.md`는 고치지 않는다.
+- 기존 `Region`, `RegionRepository`, `RegionQueryService`, `FindRegionUseCase`, `RegionRepositoryImplTest`는 고치지 않는다.
+  - 노출 조회의 regions 조인은 Place 쪽 쿼리에서 한다.
+- 기획 문서(`planning/`)는 고치지 않는다. 문서 수정이 필요하면 보고만 한다.
+- CSV 데이터를 다시 해석하거나 고치지 않는다. 메모 해석, 상세주소 보충, 상호명 정리는 하지 않는다.
+- 마이그레이션 번호 분기
+  - V4·V5로 둔다.
+  - 머지 직전에 develop에 다른 V4·V5가 생겼으면 번호 조정은 오케스트레이터가 한다. implement는 스스로 바꾸지 않는다.
+- DB 충돌 분기: `## 환경`에 적은 대로 멈추고 보고한다.
+- 기존 경고, 다른 도메인의 곁다리 개선, 기존 테스트의 단정은 건드리지 않는다.
+
+## 제약
+- 패키지 구조, Entity·삭제·FK·마이그레이션 규칙, Service/UseCase/Port 구분, 설정 record, 메서드 분리 규칙은 `.claude/rules/package-structure.md`를 따른다.
+- 테스트 범위·방식·위치(실제 PostgreSQL, 별도 커밋)는 `.claude/rules/testing.md`를 따른다.
+- 들여쓰기 4칸, Asia/Seoul `LocalDateTime`은 `CLAUDE.md`를 따른다.
+- 커밋하지 않는다. `git add`로 스테이징까지만 한다(`.claude/skills/implement/SKILL.md`).
+- V5를 만드는 생성 스크립트 등 임시 파일은 스크래치패드에 두고 워크트리에 남기지 않는다(`.claude/rules/temp-files.md`). 스크래치패드의 `reviewed_places.csv`, `verify_v5.py`는 고치지 않는다.
+- 요청에 없는 수정은 하지 않는다. 각 GOAL 항목이 요구하는 것만 건드린다.
+
+## 참고
+- 명세가 정한 이름이다. schedule(T-10·T-11)과 T-19가 이 이름으로 부를 예정이라 되도록 그대로 쓴다.
+  - port/in `FindPlaceUseCase`: `find(placeId)`, `findExposed(placeType, regionCodes)`. 이를 `PlaceQueryService`가 구현한다.
+  - `PlaceCommandService`: upsert, 폐업 처리. repository만 의존한다(설정 record는 의존으로 세지 않는다).
+  - enum `PlaceType`(BOARD_GAME_CAFE, ESCAPE_ROOM, PARK, UNCLASSIFIED), `PlaceStatus`(CANDIDATE, APPROVED, REJECTED), `PlaceSource`(SEMAS, PARK_STANDARD, MANUAL). 모두 `place/domain/constants`에 둔다.
+- 제안 구성(바꿔도 된다)
+  - `place/domain/model/Place`: BaseEntity 상속, Audit 아님.
+    - 새 후보 정적 팩토리
+    - 원천 확인 반영 메서드(상태별 분기, APPROVED 원천 변경 여부를 돌려줌)
+    - 폐업 메서드
+    - setter 없음
+  - region_code·source_region_code는 CHAR(5)라 `Region.code`처럼 `@JdbcTypeCode(SqlTypes.CHAR)`가 필요할 수 있다(`ddl-auto: validate`).
+  - `place/domain/repository/PlaceRepository` ← `place/infrastructure/persistence/PlaceRepositoryImpl` + `PlaceJpaRepository`
+  - `place/application/dto/result/PlaceResult`, `place/application/dto/command/…`(원천 행 하나)
+  - 설정 record `place/application/PlaceProperties`. `AuthProperties`처럼 `@ConfigurationProperties(prefix = "place")`를 단다. `@ConfigurationPropertiesScan`이 이미 켜져 있다.
+- close-max-ratio를 설정 record로 받는 근거
+  - `package-structure.md`: "설정값은 `@Value` 대신 record로 묶어 주입한다", "설정(`@ConfigurationProperties` record)은 의존으로 세지 않는다". 그래서 Command 서비스가 repository만 의존한다는 규칙(명세 서비스 표 포함)을 깨지 않는다.
+  - 비율 판정에는 지역별 행 수가 필요하다. 그래서 같은 트랜잭션 안의 Command 서비스가 판정해야 하고, 임계값도 판정하는 곳이 읽는 것이 맞다. 인자로 받으면 유일한 호출자(T-19의 UseCase)가 정책 값을 중계만 하게 된다.
+  - 명세의 설정값 묶음(`place:` 아래 close-max-ratio, POL-P5 안전장치)과 같은 키다. T-19는 같은 record에 나머지 키를 더하면 된다.
+  - 0.3은 비밀이 아니고 정책 상수다. `auth.access-token-validity`처럼 yaml에 값을 직접 쓴다. 환경변수로 빼지 않는다.
+- upsert 구현 메모
+  - 명세 POL-P4는 삽입을 `INSERT … ON CONFLICT`로 하라고 적었다. 부분 유니크 인덱스라서 conflict target에 인덱스의 WHERE 조건을 함께 적어야 PostgreSQL이 인덱스를 고른다: `ON CONFLICT (source, source_id) WHERE is_deleted = FALSE AND source <> 'MANUAL'`.
+  - APPROVED 경고는 지난 원천 값이 있어야 판정된다. 같은 트랜잭션에서 기존 행을 먼저 읽고 비교하는 방식도 된다.
+  - last_synced_at은 반영하는 시각이다. 폐업 처리의 기준 시각(JOB 시작 시각)보다 늦으므로 다시 확인된 행은 대상에서 빠진다.
+- 폐업 처리 메모
+  - 명세 POL-P5 원문: "대상이 그 원천·지역의 기존 CANDIDATE·APPROVED 중 is_closed = false인 행 수 대비 설정 비율을 넘으면 그 지역은 폐업 처리하지 않고 경고 로그". "넘으면"이라 같으면 처리한다(GOAL 6).
+  - 결과(지역별 닫은 수, 건너뛴 지역)를 돌려주면 T-19가 로그에 쓸 수 있다. 필수는 아니다.
+- 초기 데이터 V5 만들기
+  - 입력은 CSV다(`## 환경`의 경로). 생성 스크립트는 스크래치패드에 둔다.
+  - id: UUID v7 형식의 고정 값을 리터럴로 적는다.
+    - 예: 48비트 시각 부분은 2026-10-27(검수일) 기준으로 고정한다.
+    - 나머지는 CSV 행 순번에서 결정적으로 만든다.
+    - 버전 니블 7, variant 비트 10.
+  - created_at·updated_at: V2 관례대로 `NOW() AT TIME ZONE 'Asia/Seoul'`. 행이 실제로 생긴 시각이라 이 값이 맞다.
+  - last_synced_at은 `'2026-10-27 00:00:00'` 고정이다. 근거는 셋이다.
+    - 이 컬럼의 뜻은 "원천 응답에서 마지막으로 확인한 시각"이다. 마이그레이션 적용 시각이 아니라 원천을 조회한 2026-10-27이 사실이다.
+    - 조회 시각의 시·분은 기록이 없다. 그래서 그날 0시로 둔다. 실제보다 이르게 잡는 쪽이다.
+    - 이 값은 첫 JOB-04의 기준 시각보다 이르다. 그래서 첫 적재에서 다시 확인되지 않은 행만 폐업 대상이 되고, 확인된 행은 upsert가 갱신한다(명세 8.1 "첫 적재는 그 행들을 확인하고 원천 값을 갱신한다").
+  - CSV 값에 작은따옴표는 없다(확인함). 최대 길이는 name 21자, 주소 25자, 상세주소 8자, source_id 20자로 컬럼 길이 안이다.
+  - APPROVED이면서 UNCLASSIFIED인 행은 없다(CHECK 통과).
+  - CSV 집계(검증 기대값의 출처)
+    - 204행
+    - APPROVED 89, REJECTED 115
+    - 11440: 승인 63, 거절 65
+    - 11410: 승인 17, 거절 26
+    - 11200: 승인 9, 거절 24
+    - 화면 값과 원천 값이 다른 행 38, 모두 APPROVED다(명세 D23의 38곳과 같다).
+      - 상호명 36행
+      - 도어이스케이프 `MA010120220813012115`: 주소 55 → 55-1, 상세 5층 → 4층
+      - 게임캠프 `MA0101202601A0003126`: 상세 '' → '상가동 305호'
+    - 상세주소가 비지 않은 행: 화면 값 174, 원천 값 173
+    - 유형: ESCAPE_ROOM 승인 52·거절 3, BOARD_GAME_CAFE 승인 37·거절 7, UNCLASSIFIED 거절 105
+- 테스트가 초기 데이터와 섞이지 않게 하는 방법
+  - 초기 204행은 활성 지역 11440·11410·11200에 있는 SEMAS 행이다. last_synced_at은 2026-10-27이고, 그중 승인 89행은 노출 대상이다.
+  - 노출 조회·폐업 처리 테스트는 테스트용 지역(예: 99001 활성, 99002 비활성, display_order 101~)을 native INSERT로 넣는다. 장소도 그 지역에만 넣는다.
+    - 단정은 테스트 지역 행으로 거른 결과에 한다(`RegionRepositoryImplTest`의 `filteredOn` 방식).
+    - "regionCodes가 비면 활성 지역 전체"는 두 가지로 단정한다. 테스트 활성 지역의 행이 들어 있고, 비활성 지역 행이 없다. 결과의 모든 지역이 활성이다.
+  - 폐업 처리 테스트는 완주 지역 목록에 테스트 지역만 넘긴다. 초기 행이 대상·분모에 섞이지 않는다.
+  - upsert 테스트의 source_id는 초기 데이터(`MA0101…`)와 겹치지 않게 한다(예: `TEST-…`).
+  - 초기 데이터 개수·내용은 테스트가 아니라 GOAL 2의 스크립트로 검증한다. 그래서 테스트 단정이 초기 데이터 개수에 기대지 않는다.
+  - 테스트 트랜잭션은 롤백된다. GOAL 2 스크립트는 places 전체 행 수가 204라고 기대하므로 테스트 데이터가 커밋되면 안 된다.
+- 테스트 계층 제안(`testing.md`)
+  - 상태별 반영 분기와 폐업 전이: `Place` 도메인 단위 테스트
+  - 비율 판정과 경고 로그: `PlaceCommandService` + Mockito
+    - 로그 단정은 Spring Boot의 `OutputCaptureExtension` 등을 쓴다.
+  - 노출 조건·정렬·대상 선택 쿼리·DB 제약·폐업 후 재노출: `PlaceRepositoryImplTest`(@DataJpaTest + `@AutoConfigureTestDatabase(replace = NONE)` + `@Import`)
+  - Query 서비스가 repository를 그대로 위임만 하면 서비스 테스트는 쓰지 않는다.
+- 장소명 정렬은 DB collation을 따른다. 한글 음절은 유니코드 순서가 가나다순이라 한글 이름끼리는 어느 collation에서도 가나다순이다. 테스트 이름은 한글로 둔다. 같은 이름의 순서를 고정하려면 id를 보조 정렬 키로 더해도 된다.
+- 근거 문서(`planning/be-spec-mvp.html`)
+  - 결정 D19·D20·D23
+  - place 서비스 표(PlaceQueryService·PlaceCommandService·ImportPlacesUseCase)
+  - places 표·인덱스·상태 전이 표
+  - POL-P1~P7
+  - 마이그레이션 순서 표
+  - 작업 T-07·T-19 블록
+  - 설정값 `place:` 묶음
+  - C5
+  - ERD는 `planning/erd.md`의 places 절이다.
