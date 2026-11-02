@@ -39,7 +39,7 @@ class CompleteSignUpUseCaseTest {
     private static final SocialUserResult SOCIAL_USER =
             new SocialUserResult(SocialProvider.KAKAO, "kakao-1", "민트초코", "https://kakao.test/me.png");
     private static final SignUpCommand COMMAND =
-            new SignUpCommand(SIGNUP_TOKEN, "민트라떼", Gender.FEMALE, LocalDate.of(1996, 4, 12), null);
+            new SignUpCommand(SIGNUP_TOKEN, "김민트", "", "민트라떼", Gender.FEMALE, LocalDate.of(1996, 4, 12), null);
 
     @Mock
     private SignUpSessionPort signUpSessionPort;

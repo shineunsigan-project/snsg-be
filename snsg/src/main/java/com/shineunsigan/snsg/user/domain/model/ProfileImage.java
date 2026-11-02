@@ -12,8 +12,7 @@ import com.shineunsigan.snsg.user.domain.exception.UserErrorCode;
 public enum ProfileImage {
 
     PNG("png", new byte[] {(byte) 0x89, 'P', 'N', 'G'}),
-    JPEG("jpg", new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF}),
-    WEBP("webp", new byte[] {'R', 'I', 'F', 'F'});
+    JPEG("jpg", new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF});
 
     /** 5MB. 프로필 사진에 그 이상은 필요 없다. */
     public static final int MAX_BYTES = 5 * 1024 * 1024;

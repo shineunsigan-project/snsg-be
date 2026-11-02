@@ -40,8 +40,9 @@ class UserSocialAccountRepositoryImplTest {
     @Test
     @DisplayName("이미 삭제된 소셜 계정은 사용자별 조회에서 빠진다")
     void deletedAccountIsNotFound() {
-        User user = userRepository.save(User.create(
-                Profile.of("민트초코", Gender.FEMALE, LocalDate.of(1996, 4, 12), "/images/default-profile.png")));
+        User user = userRepository.save(User.create("김민트", "",
+                Profile.of("민트초코", Gender.FEMALE, LocalDate.of(1996, 4, 12), "/images/default-profile.png"),
+                LocalDate.now()));
         UserSocialAccount account = userSocialAccountRepository
                 .save(UserSocialAccount.of(user, SocialProvider.KAKAO, "kakao-1"));
         entityManager.flush();

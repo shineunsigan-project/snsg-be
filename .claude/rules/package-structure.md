@@ -109,6 +109,7 @@
 - 도메인 간 이벤트는 기본적으로 결과적 일관성으로 처리한다.
   - 리스너: `@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)`
   - 리스너가 호출하는 UseCase 구현: `@Transactional(propagation = Propagation.REQUIRES_NEW)`. 없으면 AFTER_COMMIT 시점이라 수신 측 DB 변경이 저장되지 않는다.
+  - **트랜잭션 밖에서 발행한 이벤트는 AFTER_COMMIT 리스너에 도착하지 않는다.** 커밋할 트랜잭션이 없기 때문이다. 트랜잭션을 걸지 않는 UseCase(예: auth의 UseCase)에서 발행하지 않는다.
 - 같은 트랜잭션(`@EventListener`)은 두 도메인 변경이 반드시 원자적이어야 할 때만 쓰고, 그 이유와 "서비스 분리 시 saga 필요"를 주석으로 남긴다.
 - AFTER_COMMIT 방식은 수신 실패 시 이벤트가 유실된다. 유실되면 안 되는 이벤트가 생기면 Spring Modulith(Event Publication Registry) 도입을 제안한다.
 - **유실이 보안·정합성 문제로 번지는 이벤트는 수신 측에 안전망을 함께 둔다.** 이벤트는 즉시 정리용이고, 안전망이 최종 보장이다.

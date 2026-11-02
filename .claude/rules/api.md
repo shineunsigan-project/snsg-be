@@ -22,6 +22,8 @@ paths:
 - 반환 타입은 `ResponseEntity<ApiResponse<XxxResponse>>`. Entity나 Result를 그대로 반환하지 않는다.
 - 요청은 `@Valid` + Request record의 Bean Validation으로 형식만 검증한다. 비즈니스 규칙 검증은 domain에서 한다.
   - 검증은 `jakarta.validation.constraints.*`를 쓴다(`spring-boot-starter-validation` 포함됨).
+  - **형식은 요청 DTO와 domain 양쪽에서 검증한다.** 요청 DTO는 틀린 필드를 FE에 알려주는 곳이고, domain은 같은 규칙을 불변식으로 한 번 더 지키는 안전망이다. 나이 제한·중복처럼 저장된 값이나 기준일이 필요한 판정은 domain에서만 한다. 예: `SignUpRequest`와 `User`·`Profile`.
+  - 제약마다 `message`에 화면에 그대로 보여줄 문구를 준다. domain ErrorCode와 같은 문구를 쓰고, 값이 비었을 때(`@NotNull`)도 그 필드의 형식 문구를 쓴다. 다른 도메인의 상수는 import할 수 없으므로 정규식·문구가 두 곳에 적히는 것은 허용한다(`.claude/rules/package-structure.md` 도메인 간 참조의 값 상수 중복).
 - **Request DTO를 만드는 기준**: 필드가 둘 이상이거나 검증 제약(`@NotBlank`, `@Size` 등)이 붙으면 만든다. 파라미터 하나를 그대로 넘길 뿐이면 만들지 않고 `@RequestParam`·`@PathVariable`로 받아 Command를 만든다. 필드 하나짜리 껍데기 record는 읽는 사람에게 아무것도 알려주지 않는다.
   - 단 **나중에 필드가 늘어날 것이 분명하면** 처음부터 만든다. 공개된 API의 요청 형태를 바꾸면 FE도 함께 고쳐야 한다.
 - 인증 주체는 `@AuthenticationPrincipal UUID userId`로 받는다. 인증 필터가 principal에 userId(UUID)를 넣는다.
@@ -46,10 +48,11 @@ paths:
 ## 응답과 예외
 
 - 반환 타입은 `ResponseEntity<ApiResponse<XxxResponse>>`.
-- 봉투는 `{isSuccess, code, message, data}`다.
+- 봉투는 `{isSuccess, code, message, data, errors}`다.
   - **성공 여부는 `isSuccess`로 본다.** 값은 `ApiResponse`의 팩토리 메서드가 채우므로 HTTP 상태와 어긋나지 않는다.
   - **HTTP 상태 코드는 계속 정확하게 내려준다.** 200으로 고정하고 본문으로만 성공을 알리지 않는다. 캐시·모니터링·에러 추적이 상태 코드를 본다.
   - `code`와 `message`는 **실패 전용**이다. 성공 응답에서는 비어 있어 JSON에 나가지 않는다.
+  - `errors`(`[{field, message}]`)는 **요청 DTO의 Bean Validation 필드 오류일 때만** 담긴다(`code`는 `INVALID_REQUEST`). JSON 변환 실패(enum 밖 값, 없는 날짜, 타입 오류), `BusinessException`, 404·405 등에는 담지 않는다. 정상적인 FE 입력으로는 나오지 않는 값이라 필드별 안내가 필요 없다.
 - 성공: `ApiResponse.success(data)` 또는 `ApiResponse.success()`. **성공 코드 체계는 두지 않는다.**
   - FE가 성공을 분기해야 하면 code가 아니라 `data`의 필드로 준다(예: `isNewUser`). code로 분기하면 코드가 하나 늘 때 FE가 조용히 깨진다.
   - 화면 문구는 FE가 가진다. 성공 메시지를 서버가 내려주면 문구 하나 바꾸는 데 서버 배포가 필요하다.

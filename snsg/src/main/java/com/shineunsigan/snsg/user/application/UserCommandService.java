@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.user.application;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -53,6 +54,7 @@ public class UserCommandService implements RegisterUserUseCase, UploadProfileIma
     /**
      * 사용자·소셜 계정·약관 동의를 한 트랜잭션에서 만든다.
      * 로그인하면 약관에 동의한 것으로 간주하므로 동의 이력을 함께 남긴다.
+     * 중복 판정을 통과한 뒤 동시 가입으로 닉네임 인덱스를 위반해도 저장이 DUPLICATED_NICKNAME을 던진다.
      */
     @Override
     @Transactional
@@ -61,8 +63,9 @@ public class UserCommandService implements RegisterUserUseCase, UploadProfileIma
             throw new BusinessException(UserErrorCode.DUPLICATED_NICKNAME);
         }
 
-        User user = userRepository.save(User.create(
-                Profile.of(command.nickname(), command.gender(), command.birthDate(), command.profileImageUrl())));
+        User user = userRepository.save(User.create(command.name(), command.email(),
+                Profile.of(command.nickname(), command.gender(), command.birthDate(), command.profileImageUrl()),
+                LocalDate.now()));
 
         userSocialAccountRepository.save(
                 UserSocialAccount.of(user, command.provider(), command.providerUserId()));

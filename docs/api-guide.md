@@ -25,19 +25,24 @@
 ```json
 { "isSuccess": true,  "data": { } }
 { "isSuccess": false, "code": "INVALID_REFRESH_TOKEN", "message": "다시 로그인해야 합니다." }
+{ "isSuccess": false, "code": "INVALID_REQUEST", "message": "요청 형식이 올바르지 않습니다.",
+  "errors": [ { "field": "nickname", "message": "닉네임은 2~10자의 한글·영문·숫자·.·_만 쓸 수 있어요." } ] }
 ```
 
 - **성공 여부는 `isSuccess`로 본다.** HTTP 상태 코드도 정확하게 내려가지만, 어느 쪽을 봐야 하는지 헷갈리지 않도록 본문에도 담는다.
 - **`code`와 `message`는 실패 전용**이다. 성공 응답에는 들어 있지 않다.
 - 화면 분기는 **`code`** 로 한다. enum 이름이라 바뀌지 않는다. 성공했을 때 분기가 필요하면 `data`의 필드로 준다.
-- `message`는 표시·디버깅용이다. 문구가 바뀔 수 있고, 요청 형식 오류의 메시지는 서버 로케일에 따라 달라진다. 분기에 쓰지 않는다.
+- `message`는 표시·디버깅용이다. 문구가 바뀔 수 있다. 분기에 쓰지 않는다.
+- **`errors`는 요청 필드 검증에 실패했을 때만** 들어 있다. 이때 `code`는 `INVALID_REQUEST`이고, 틀린 필드마다 `{ "field", "message" }`가 하나씩 담긴다. 여러 필드가 틀리면 모두 담기며 순서는 정해져 있지 않다.
+  - `field`는 요청 JSON의 필드 이름이다. 해당 입력칸 아래에 `message`를 그대로 보여주면 된다. 값이 비었을 때도 그 필드의 형식 안내 문구가 온다.
+  - 성공 응답, 업무 오류(`DUPLICATED_NICKNAME` 등), JSON 변환 실패(잘못된 JSON, 없는 enum 값, 없는 날짜, 타입 오류), 404·405 등에는 `errors`가 없다.
 - 실패하면 `data`는 들어 있지 않다. 성공이어도 돌려줄 값이 없으면 빠진다(로그아웃 등).
 
 ### 모든 API에서 날 수 있는 에러
 
 | 상태 | code | 언제 |
 | --- | --- | --- |
-| 400 | `INVALID_REQUEST` | 필수값 누락, 잘못된 JSON 등 요청 형식 오류 |
+| 400 | `INVALID_REQUEST` | 필수값 누락, 잘못된 JSON 등 요청 형식 오류. 필드 검증 실패면 `errors`에 틀린 필드가 담긴다 |
 | 404·405·415 등 | `INVALID_REQUEST` | 없는 경로, 지원하지 않는 메서드나 Content-Type. 상태 코드는 원래 값 그대로다 |
 | 401 | `UNAUTHENTICATED` | 인증이 필요한 API에 토큰이 없거나 만료·무효 |
 | 500 | `INTERNAL_ERROR` | 서버 오류 |
@@ -49,9 +54,9 @@
 | 401 | `INVALID_REFRESH_TOKEN` | refresh가 만료·무효. 탈퇴했거나 다른 기기에서 로그인함 | 로그인 화면으로 |
 | 401 | `INVALID_SIGNUP_TOKEN` | 가입 세션이 15분을 넘김 | 카카오 로그인부터 다시 |
 | 401 | `INVALID_SOCIAL_CODE` | 인가코드가 만료·위조됨 | 카카오 로그인부터 다시 |
-| 409 | `DUPLICATED_NICKNAME` | 이미 쓰이는 닉네임 | 다른 닉네임 입력 안내 |
-| 400 | `INVALID_NICKNAME` | 닉네임이 2~10자의 한글·영문·숫자가 아님 | 형식 안내 후 다시 입력 |
-| 400 | `INVALID_PROFILE_IMAGE` | 5MB를 넘거나 PNG·JPG·WebP가 아님 | 다른 사진 선택 안내 |
+| 409 | `DUPLICATED_NICKNAME` | 이미 쓰이는 닉네임(대소문자 무시) | 다른 닉네임 입력 안내 |
+| 400 | `UNDERAGE` | 가입일 기준 만 18세 미만 | 가입할 수 없음을 안내 |
+| 400 | `INVALID_PROFILE_IMAGE` | 5MB를 넘거나 JPG·PNG가 아님 | 다른 사진 선택 안내 |
 | 400 | `INVALID_PROFILE_IMAGE_URL` | 가입 요청의 `profileImageUrl`이 업로드 API가 준 경로가 아님 | FE 버그다. 업로드 응답의 값을 그대로 넣는다 |
 | 409 | `ALREADY_WITHDRAWN` | 이미 탈퇴한 사용자 | 로그인 화면으로 |
 
@@ -107,12 +112,27 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 
 ### 가입
 
-소셜 인증과 가입은 나뉘어 있다. 소셜 인증만으로는 **사용자가 만들어지지 않는다.** 성별과 생년월일을 받아야 가입이 완료된다.
+소셜 인증과 가입은 나뉘어 있다. 소셜 인증만으로는 **사용자가 만들어지지 않는다.** 이름·닉네임·성별·생년월일을 받아야 가입이 완료된다.
 
 - 소셜에서 받은 정보(닉네임, 프로필 사진)는 **서버가 15분간 보관**한다. 클라이언트가 들고 있다가 보내는 방식이 아니다.
 - 가입을 마치면 `signUpToken`은 무효가 된다. 중간에 이탈하면 15분 뒤 사라지고, 다시 카카오 로그인부터 시작하면 된다.
 - **같은 소셜 계정으로 다시 로그인하면 이전 `signUpToken`은 즉시 무효가 된다.** 한 계정에 유효한 토큰은 항상 하나다.
 - 닉네임이 이미 쓰이고 있으면 `409 DUPLICATED_NICKNAME`이 온다. 다른 닉네임을 입력받는다.
+
+**가입 요청(`POST /api/v1/auth/signup`)의 입력 규칙**
+
+| 필드 | 필수 | 규칙 | 틀렸을 때 `errors[].message` |
+| --- | --- | --- | --- |
+| `name` | 예 | 2~20자의 한글 또는 영문. 공백·숫자 불가. 앞뒤 공백도 다듬지 않고 거부한다. 남에게 보이지 않고 가입 후 바꿀 수 없다 | 이름은 2~20자의 한글 또는 영문만 쓸 수 있어요. |
+| `nickname` | 예 | 2~10자의 한글·영문·숫자·`.`·`_` | 닉네임은 2~10자의 한글·영문·숫자·.·_만 쓸 수 있어요. |
+| `email` | 아니오 | 생략하거나 `""`이면 없음. 값이 있으면 `local@domain.tld` 형식, 최대 100자. 공백만 있거나 앞뒤에 공백이 있으면 거부한다. 대소문자는 입력한 그대로 저장한다 | 이메일 형식이 올바르지 않아요. |
+| `gender` | 예 | `FEMALE`·`MALE` | 성별을 선택해주세요. |
+| `birthDate` | 예 | 과거 날짜(`yyyy-MM-dd`) | 생년월일이 올바르지 않습니다. |
+
+- 위 형식 오류는 모두 `400 INVALID_REQUEST`와 `errors`로 온다. 필드별 안내는 `errors`로 한다.
+- `gender`에 `FEMALE`·`MALE` 밖의 값을 보내거나 `2010-02-30`처럼 없는 날짜를 보내면 JSON 변환 단계에서 실패해 `400 INVALID_REQUEST`만 오고 `errors`는 없다. 화면에서 고를 수 있는 값만 보내면 나지 않는다.
+- 형식은 맞지만 가입일 기준 **만 18세 미만**이면 `400 UNDERAGE`("만 18세 이상만 가입할 수 있어요."). 2월 29일생은 평년에는 3월 1일에 한 살을 먹는다.
+- 닉네임 중복은 **대소문자를 무시**한다. 누가 `Mint`를 쓰고 있으면 `mint`도 `409 DUPLICATED_NICKNAME`이다. 탈퇴한 회원의 닉네임은 다시 쓸 수 있다. 두 사람이 같은 닉네임으로 동시에 가입해도 한쪽은 409를 받는다.
 
 **프로필 완성 화면의 기본값**은 `GET /api/v1/auth/signup/session`으로 받는다(`signUpToken` 쿠키 필요).
 
@@ -127,7 +147,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 **프로필 사진을 바꾸려면** 먼저 `POST /api/v1/auth/signup/profile-image`로 올리고, 받은 경로를 가입 요청의 `profileImageUrl`에 넣는다.
 
 - `multipart/form-data`, 파트 이름은 `image`. `signUpToken` 쿠키가 필요하다.
-- 5MB 이하의 PNG·JPG·WebP만 받는다. **형식은 파일 내용으로 판별하므로 확장자만 바꿔 올리면 거부된다.**
+- 5MB 이하의 JPG·PNG만 받는다. **형식은 파일 내용으로 판별하므로 확장자만 바꿔 올리면 거부된다.** 거부되면 400 `INVALID_PROFILE_IMAGE`("JPG, PNG 형식의 사진만 올릴 수 있어요.")다.
 - 응답은 `{ "profileImageUrl": "/images/profiles/<uuid>.png" }`. 도메인이 붙지 않은 경로이므로 화면에 쓸 때 서버 주소를 앞에 붙인다.
 - 가입 요청의 `profileImageUrl`에는 **이 API가 돌려준 경로만** 넣을 수 있다. 다른 주소를 넣으면 400 `INVALID_PROFILE_IMAGE_URL`이다.
 - 비워 두면(`null` 또는 생략) 소셜에서 받은 사진을 쓴다. 그것도 없으면 기본 이미지가 된다.
@@ -142,7 +162,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 
 `DELETE /api/v1/users/me`를 access token으로 호출한다.
 
-- 닉네임·생년월일·프로필 사진이 비식별 값으로 바뀌고 계정이 삭제 표시된다. **되돌릴 수 없다.**
+- 이름·이메일·닉네임·생년월일·프로필 사진이 비식별 값으로 바뀌고 계정이 삭제 표시된다. **되돌릴 수 없다.**
 - 올렸던 프로필 사진 파일은 지워진다.
 - **카카오 연결도 서버가 끊는다.** 사용자가 카카오 설정에서 따로 끊을 필요가 없다.
 - refresh token이 즉시 무효가 된다. **쿠키는 서버가 비우지 않으므로** 탈퇴 직후 `DELETE /api/v1/auth/tokens`(로그아웃)를 한 번 더 호출해 쿠키를 정리한다.
@@ -181,7 +201,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 로그인 | `GET /api/v1/auth/kakao/authorize`로 이동 | 돌아오면 `?signUp` 여부로 분기 |
 | 프로필 완성 (진입) | `GET /api/v1/auth/signup/session` | 닉네임·사진 기본값 표시. 401이면 카카오 로그인부터 다시 |
 | 프로필 완성 (사진 변경) | `POST /api/v1/auth/signup/profile-image` | 받은 경로를 가입 요청에 넣는다 |
-| 프로필 완성 (제출) | `POST /api/v1/auth/signup` | 200이면 access token 저장 후 메인. 409면 닉네임 변경 안내 |
+| 프로필 완성 (제출) | `POST /api/v1/auth/signup` | 200이면 access token 저장 후 메인. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 400 `UNDERAGE`면 가입 불가 안내. 409면 닉네임 변경 안내 |
 | 설정 · 로그아웃 | `DELETE /api/v1/auth/tokens` | 응답과 무관하게 메모리의 토큰을 버리고 로그인 화면 |
 | 설정 · 탈퇴 | `DELETE /api/v1/users/me` → `DELETE /api/v1/auth/tokens` | 되돌릴 수 없음을 한 번 확인받고 호출. 끝나면 로그인 화면 |
 | 일정 목록 (지역 필터) | `GET /api/v1/regions` | 받은 순서대로 필터를 그린다 |

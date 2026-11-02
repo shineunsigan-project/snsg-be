@@ -45,6 +45,8 @@ public class UserAdapter implements UserPort {
         return registerUserUseCase.register(new com.shineunsigan.snsg.user.application.dto.command.RegisterUserCommand(
                 toUserProvider(socialUser.provider()),
                 socialUser.providerUserId(),
+                command.name(),
+                command.email(),
                 command.nickname(),
                 toUserGender(command.gender()),
                 command.birthDate(),
