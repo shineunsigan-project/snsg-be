@@ -61,3 +61,6 @@ auth:
   access-token-validity: 30m
   refresh-token-validity: 14d
   signup-session-ttl: 15m
+
+place:
+  close-max-ratio: 0.3
