@@ -57,27 +57,39 @@ public class KakaoSocialLoginAdapter implements SocialLoginPort {
     }
 
     private String exchangeToken(String authorizationCode) {
+        MultiValueMap<String, String> form = tokenRequestForm(authorizationCode);
+        KakaoTokenResponse response = requestToken(form);
+        return extractAccessToken(response);
+    }
+
+    private MultiValueMap<String, String> tokenRequestForm(String authorizationCode) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "authorization_code");
         form.add("client_id", kakao.clientId());
         form.add("client_secret", kakao.clientSecret());
         form.add("redirect_uri", kakao.redirectUri());
         form.add("code", authorizationCode);
+        return form;
+    }
 
+    private KakaoTokenResponse requestToken(MultiValueMap<String, String> form) {
         try {
-            KakaoTokenResponse response = restClient.post()
+            return restClient.post()
                     .uri(TOKEN_URL)
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .body(form)
                     .retrieve()
                     .body(KakaoTokenResponse.class);
-            if (response == null || response.accessToken() == null) {
-                throw new BusinessException(AuthErrorCode.INVALID_SOCIAL_CODE);
-            }
-            return response.accessToken();
         } catch (RestClientException exception) {
             throw new BusinessException(AuthErrorCode.INVALID_SOCIAL_CODE);
         }
+    }
+
+    private String extractAccessToken(KakaoTokenResponse response) {
+        if (response == null || response.accessToken() == null) {
+            throw new BusinessException(AuthErrorCode.INVALID_SOCIAL_CODE);
+        }
+        return response.accessToken();
     }
 
     private KakaoUserResponse fetchUserInfo(String accessToken) {

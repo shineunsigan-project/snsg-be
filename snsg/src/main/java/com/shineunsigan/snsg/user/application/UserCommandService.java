@@ -59,22 +59,34 @@ public class UserCommandService implements RegisterUserUseCase, UploadProfileIma
     @Override
     @Transactional
     public UUID register(RegisterUserCommand command) {
-        if (userRepository.existsByNickname(command.nickname())) {
+        validateNicknameNotTaken(command.nickname());
+        User user = saveUser(command);
+        saveSocialAccount(user, command);
+        agreeToTerms(user);
+        return user.getId();
+    }
+
+    private void validateNicknameNotTaken(String nickname) {
+        if (userRepository.existsByNickname(nickname)) {
             throw new BusinessException(UserErrorCode.DUPLICATED_NICKNAME);
         }
+    }
 
-        User user = userRepository.save(User.create(command.name(), command.email(),
+    private User saveUser(RegisterUserCommand command) {
+        return userRepository.save(User.create(command.name(), command.email(),
                 Profile.of(command.nickname(), command.gender(), command.birthDate(), command.profileImageUrl()),
                 LocalDate.now()));
+    }
 
+    private void saveSocialAccount(User user, RegisterUserCommand command) {
         userSocialAccountRepository.save(
                 UserSocialAccount.of(user, command.provider(), command.providerUserId()));
+    }
 
+    private void agreeToTerms(User user) {
         termsAgreementRepository.saveAll(List.of(
                 TermsAgreement.of(user, TermsType.PRIVACY_POLICY, termsProperties.privacyPolicyVersion()),
                 TermsAgreement.of(user, TermsType.SERVICE_TERMS, termsProperties.serviceTermsVersion())));
-
-        return user.getId();
     }
 
     /**
@@ -96,16 +108,28 @@ public class UserCommandService implements RegisterUserUseCase, UploadProfileIma
      */
     @Transactional
     public void withdraw(UUID userId, WithdrawReason reason) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+        User user = findUser(userId);
         String profileImageUrl = user.getProfile().getProfileImageUrl();
+        List<UserSocialAccount> socialAccounts = deleteAggregate(userId, user);
+        publishWithdrawnEvents(userId, socialAccounts, profileImageUrl, reason);
+    }
 
+    private User findUser(UUID userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+    }
+
+    private List<UserSocialAccount> deleteAggregate(UUID userId, User user) {
         user.withdraw();
 
         List<UserSocialAccount> socialAccounts = userSocialAccountRepository.findByUserId(userId);
         socialAccounts.forEach(UserSocialAccount::delete);
         termsAgreementRepository.findByUserId(userId).forEach(TermsAgreement::delete);
+        return socialAccounts;
+    }
 
+    private void publishWithdrawnEvents(UUID userId, List<UserSocialAccount> socialAccounts, String profileImageUrl,
+            WithdrawReason reason) {
         socialAccounts.forEach(account -> userEventPort.publish(new UserWithdrawnEvent(
                 userId, account.getProvider(), account.getProviderUserId(), profileImageUrl, reason)));
     }
