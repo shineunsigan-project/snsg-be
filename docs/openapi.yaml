@@ -209,6 +209,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseSignUpSessionResponse"
       security: []
+  /api/v1/activity-categories:
+    get:
+      tags:
+      - 활동
+      summary: 활동 목록
+      description: |-
+        고를 수 있는 활동(보드게임·방탈출·산책 등) 목록. 일정 개설의 활동 선택과 일정 목록의 활동 필터를 그릴 때 부른다.
+        토큰 없이 부를 수 있다. 숨긴(비활성) 활동은 빠지고, 서버가 정한 노출 순서(display_order)대로 온다.
+        조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
+      operationId: findActivityCategories
+      responses:
+        "200":
+          description: 노출 순서대로 정렬된 활동 목록
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListActivityCategoryResponse"
+      security: []
   /api/v1/users/me:
     delete:
       tags:
@@ -385,6 +403,39 @@ components:
           type: string
           description: 소셜에서 받아온 프로필 사진. 기본 이미지였거나 받지 못하면 비어 있다
           example: https://k.kakaocdn.net/dn/abc/profile.jpg
+    ActivityCategoryResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 활동 ID. 다른 API에 활동을 넘길 때 이 값을 쓴다
+          example: 01a19cc6-3d80-7000-8000-000000000001
+        code:
+          type: string
+          description: 활동 코드. 화면에 보여줄 이름(name)이 바뀌어도 그대로인 식별자다
+          example: BOARD_GAME
+        name:
+          type: string
+          description: 화면에 보여줄 활동 이름
+          example: 보드게임
+    ApiResponseListActivityCategoryResponse:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityCategoryResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
     ApiResponseVoid:
       type: object
       properties:
