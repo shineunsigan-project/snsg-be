@@ -1,0 +1,11 @@
+package com.shineunsigan.snsg.schedule.domain.repository;
+
+import java.util.List;
+
+import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
+
+public interface ActivityCategoryRepository {
+
+    /** 활성이고 삭제되지 않은 활동. display_order 오름차순이다. */
+    List<ActivityCategory> findAllActive();
+}
