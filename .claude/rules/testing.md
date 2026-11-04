@@ -35,6 +35,10 @@ paths:
 - Boot 4에서 슬라이스 테스트 애너테이션의 패키지도 바뀌었다. `@DataJpaTest`는 `org.springframework.boot.data.jpa.test.autoconfigure`에 있다(`...boot.test.autoconfigure.orm.jpa` 아님). 스타터는 `spring-boot-starter-data-jpa-test`.
 - `@DataJpaTest`는 `@Entity`와 Spring Data repository만 등록한다. `@Repository` 구현체를 쓰려면 `@Import`로 직접 넣는다.
 - `@DataJpaTest`는 기본적으로 DataSource를 임베디드 DB로 바꿔치기한다. **우리 스키마는 PostgreSQL 전용 문법(부분 유니크 인덱스)에 의존하므로 반드시 실제 PostgreSQL로 돌린다.** Testcontainers를 쓰거나 `@AutoConfigureTestDatabase(replace = NONE)`로 로컬 컨테이너에 붙인다. 임베디드로 돌리면 제약이 아예 만들어지지 않아, 테스트는 통과하는데 운영에서 중복 데이터가 들어간다.
+- **DB 연결 수는 "캐시된 테스트 컨텍스트 수 × Hikari 풀 크기"다.** Spring은 컨텍스트를 구성(`@Import` 조합 등)별로 캐시해 JVM이 끝날 때까지 닫지 않고, 컨텍스트마다 풀을 하나씩 잡는다. 기본 풀(10)로는 DB 슬라이스 구성이 열 개쯤 되면 PostgreSQL `max_connections`(100)를 넘어 `FATAL: sorry, too many clients already`로 컨텍스트가 뜨지 않는다. 그래서 `snsg/build.gradle`의 test 태스크가 `spring.datasource.hikari.maximum-pool-size`를 3으로 둔다(SHI-156에서 DB 테스트 컨텍스트가 늘며 간헐 실패가 났다).
+  - 한 테스트에서 동시에 쓰는 연결이 셋을 넘어야 하면 이 값을 함께 본다. 지금 가장 많이 쓰는 곳은 `ScheduleCommandServiceTest`의 동시 개설(둘)이다.
+  - 실패가 간헐적이라 한 번 통과한 결과로 안심하지 않는다. DB 슬라이스 구성을 더한 작업은 `./gradlew cleanTest build`로 전체를 다시 돌려 확인한다.
+- 한 대상 클래스에 Mockito 흐름 테스트와 실제 PostgreSQL 테스트가 함께 필요하면, 테스트 클래스 이름 규칙(대상 이름 + `Test`)을 지키며 `@Nested` 클래스로 나눠 각자 애너테이션을 단다. 예: `ScheduleCommandServiceTest`의 `Flow`(Mockito), `Concurrency`·`SavedSchedule`(`@DataJpaTest`).
 - `@EnableJpaAuditing`은 `SnsgApplication`이 아니라 `common/config/JpaAuditingConfig`에 둔다. 메인 클래스에 붙이면 `@WebMvcTest`가 `jpaAuditingHandler`를 만들려다 "JPA metamodel must not be empty"로 실패한다.
 - 감사 필드를 검증하는 JPA 슬라이스 테스트는 `@Import`에 `JpaAuditingConfig`를 함께 넣는다.
 - `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`에 있고 스타터는 `spring-boot-starter-webmvc-test`. Service는 `@MockitoBean`으로 대체한다.

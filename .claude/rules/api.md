@@ -17,7 +17,7 @@ paths:
 
 ## Controller
 
-- 사용자용 Controller는 같은 도메인의 Service에 의존한다.
+- 사용자용 Controller는 같은 도메인의 application에 의존한다. 자기 도메인 안에서 끝나는 일은 Service(`UserController`, `RegionController`), 외부·타 도메인 호출이나 여러 서비스 조합이 필요한 흐름은 행위별 UseCase 클래스(`AuthController`, `ScheduleController`)다(`.claude/rules/package-structure.md` Service와 UseCase).
 - `/internal/v1` Controller(서비스 분리 후)는 `application/port/in`의 UseCase에 의존한다.
 - 반환 타입은 `ResponseEntity<ApiResponse<XxxResponse>>`. Entity나 Result를 그대로 반환하지 않는다.
 - 요청은 `@Valid` + Request record의 Bean Validation으로 형식만 검증한다. 비즈니스 규칙 검증은 domain에서 한다.
