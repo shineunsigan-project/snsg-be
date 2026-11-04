@@ -64,3 +64,11 @@ auth:
 
 place:
   close-max-ratio: 0.3
+
+schedule:
+  capacity-min: 4
+  capacity-max: 24
+  min-lead-time: 1h
+  max-advance-days: 30
+  overlap-window: 12h
+  completion-after: 12h
