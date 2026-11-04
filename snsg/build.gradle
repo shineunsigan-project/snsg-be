@@ -58,4 +58,10 @@ tasks.named('test') {
             .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.property('openapiUpdate', System.getenv('OPENAPI_UPDATE') ?: '')
     environment 'OPENAPI_UPDATE', System.getenv('OPENAPI_UPDATE') ?: ''
+
+    // Spring은 테스트 컨텍스트를 구성별로 캐시해 JVM이 끝날 때까지 닫지 않고, 컨텍스트마다 Hikari 풀을 하나씩 잡는다.
+    // 기본 풀(10개, 최소 유휴도 10개)이면 DB 슬라이스 구성이 열 개를 넘을 때 PostgreSQL max_connections(100)를 넘어
+    // "too many clients already"로 컨텍스트가 뜨지 않는다. 테스트에서는 동시에 쓰는 연결이 많아야 둘
+    // (ScheduleCommandServiceTest의 동시 개설)이므로 풀을 작게 둔다.
+    systemProperty 'spring.datasource.hikari.maximum-pool-size', '3'
 }
