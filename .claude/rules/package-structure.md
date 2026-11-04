@@ -62,12 +62,13 @@
   - 타 도메인이 호출해야 할 때
   - 여러 서비스를 조합해야 할 때
 - **구현은 `XxxCommandService`·`XxxQueryService`가 UseCase를 구현한다.** UseCase 구현만을 위한 별도 클래스를 만들지 않는다.
-- 사용자 요청은 UseCase가 아니다. Controller는 같은 도메인의 Service를 직접 호출한다.
+- 사용자 요청은 `port/in` UseCase가 아니다. Controller는 같은 도메인의 application을 직접 호출한다. 대개 Service이고, 조합 흐름이면 행위별 UseCase 클래스다(위 "Service와 UseCase", `.claude/rules/api.md` Controller 절).
 - 같은 기능을 사용자와 타 도메인이 모두 쓰면 Service가 UseCase를 구현하고, Controller는 Service를 그대로 호출한다.
 - UseCase는 기능 단위로 나누고 이름은 동사로 시작한다 (`CreateMatchingUseCase`, `AcceptMatchingUseCase`). 하나의 Service가 여러 UseCase를 구현해도 된다.
 - UseCase 구현만을 위한 별도 facade/adapter 클래스는 만들지 않는다. 여러 Service를 조합해야 할 때만 둔다.
 - 서비스 분리 시 UseCase 하나가 `/internal/v1` API 하나가 된다. 호출 측 adapter는 HTTP 클라이언트로 교체한다.
 - outbound `port/out/XxxPort`: application이 필요로 하는 외부 기능. 기술 이름이 아니라 역할로 이름 짓는다 (`UserSettingPort`, `MatchingEventPort`).
+  - 포트 이름은 도메인마다 겹쳐도 된다(auth·schedule 모두 `UserPort`). 단 **adapter는 Spring 빈이라 단순 클래스명이 다른 도메인과 같으면 빈 이름이 겹쳐 기동이 실패한다**(`ConflictingBeanDefinitionException`). 겹치면 앞에 자기 도메인 이름을 붙인다. 예: auth의 `UserAdapter`가 있어 schedule은 `ScheduleUserAdapter`·`SchedulePlaceAdapter`다.
 - adapter가 설정값을 읽어 정책을 수행해도 된다. 예로 JWT 어댑터가 `auth.access-token-validity`를 읽어 만료를 계산한다. 정책의 이름은 포트 메서드(`issueAccessToken`)가 드러내고 숫자는 설정에 있으면 충분하다.
   - 단 **정책에 분기가 생기면 application으로 올린다.** 사용자·상황에 따라 값이 달라질 때, 종류가 셋 이상으로 늘 때, 계산에 조건이 붙을 때다.
 

@@ -69,6 +69,7 @@ description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md�
 
 - **복사해서 바로 실행할 수 있는 전문으로 적는다.** 디렉터리 이동까지 포함한다. "테스트를 돌린다" 같은 서술은 검증 명령이 아니다. 에이전트가 명령을 조립하게 두면 조립한 명령이 실제로 그 항목을 확인하는지 아무도 모른다.
 - **기대 결과를 함께 적는다.** 명령만 있으면 **무엇이 성공인지 에이전트가 정한다.**
+- **테스트를 다시 돌려야 의미가 있는 검증에는 `cleanTest`를 붙인다**(`./gradlew cleanTest test --tests ...`). 코드가 그대로면 Gradle이 test를 UP-TO-DATE로 건너뛰어, "연속 3회 통과"가 실제로는 한 번만 돈 결과가 된다(SHI-156).
 
 ```markdown
 1. 닉네임이 2자 미만이면 `BusinessException(UserErrorCode.INVALID_NICKNAME)`이 난다.
