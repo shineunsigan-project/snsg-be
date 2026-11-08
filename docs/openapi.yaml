@@ -186,6 +186,51 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseListRegionResponse"
       security: []
+  /api/v1/place-candidates:
+    get:
+      tags:
+      - 장소 후보
+      summary: 장소 후보
+      description: |-
+        활동이 고를 수 있는 유형의 장소 목록(보드게임 → 보드게임카페, 방탈출 → 방탈출 매장, 산책 → 공원).
+        장소 선택 화면에 들어올 때와 지역 칩을 바꿀 때 부른다. 목록과 지도 핀을 이 결과로 그리고, 고른 장소의 id를 일정 개설의 placeId로 보낸다.
+        토큰 없이 부를 수 있다. 검수를 통과하고 영업 중인, 서비스 중인 지역의 장소만 온다.
+        정렬은 지역 노출 순서(display_order), 그 안에서 장소명 순이다. 페이지를 나누지 않는다.
+        조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
+      operationId: listPlaceCandidates
+      parameters:
+      - name: categoryId
+        in: query
+        description: 활동 ID. 활동 목록 API의 id
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 01a19cc6-3d80-7000-8000-000000000001
+      - name: regionCode
+        in: query
+        description: 지역 코드. 지역 목록 API의 code. 생략하면 서비스 중인 지역 전체다. 빈 값으로 보내지 않는다
+        required: false
+        schema:
+          type: string
+        example: 11440
+      responses:
+        "200":
+          description: 정렬된 장소 후보 목록. 조건에 맞는 장소가 없으면 빈 배열이고 화면에 결과 없음을 보여준다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListPlaceCandidateResponse"
+        "400":
+          description: |-
+            INVALID_REQUEST: categoryId가 없거나 UUID 형식이 아니다.
+            INVALID_CATEGORY: 없거나 숨긴 활동. 활동 목록을 다시 불러 고르게 한다. 지역도 틀렸어도 이 코드가 온다.
+            INVALID_REGION: 없거나 서비스하지 않는 지역, 빈 값으로 보낸 regionCode. 지역 목록을 다시 불러 고르게 한다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListPlaceCandidateResponse"
+      security: []
   /api/v1/auth/{provider}/callback:
     get:
       tags:
@@ -507,6 +552,55 @@ components:
           type: string
           description: 화면에 보여줄 지역 이름. 시군구 이름이다
           example: 마포구
+    ApiResponseListPlaceCandidateResponse:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaceCandidateResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    PlaceCandidateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 장소 ID. 일정 개설 요청의 placeId로 보낸다
+          example: 01a1a2b3-0000-7000-8000-000000000001
+        name:
+          type: string
+          description: 장소명
+          example: 보드게임카페 홍대점
+        roadAddress:
+          type: string
+          description: 도로명주소. 없으면 지번주소다. 상세주소(층 등)는 들어 있지 않다
+          example: 서울특별시 마포구 와우산로 1
+        addressDetail:
+          type: string
+          description: 상세주소(층 등). 없으면 빈 문자열이다. 표시할 때 도로명주소 뒤에 붙인다
+          example: 2층
+        latitude:
+          type: number
+          description: 위도. WGS84 소수
+          example: 37.5512345
+        longitude:
+          type: number
+          description: 경도. WGS84 소수
+          example: 126.9212345
+        regionCode:
+          type: string
+          description: 장소가 속한 지역 코드. 지역 목록 API의 code와 같은 5자리 문자열이다
+          example: 11440
     ApiResponseSignUpSessionResponse:
       type: object
       properties:

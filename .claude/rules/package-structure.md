@@ -56,6 +56,7 @@
   - 이렇게 두면 **트랜잭션 안에 외부 호출이 들어갈 수 없다.** 규칙으로 막는 게 아니라 구조가 막는다. 외부 API가 느려져 DB 커넥션이 말라붙는 사고를 구조적으로 차단한다.
 - "다른 도메인 동기 호출"은 별도 기준이 아니다. facade는 다른 도메인의 서비스를 직접 부르지 않고 자기 `port/out`만 부르므로 첫째 경우에 든다.
 - facade에는 비즈니스 규칙을 두지 않는다. 규칙은 엔티티·서비스에 둔다.
+  - 포트·서비스가 돌려준 결과를 보고 흐름을 이어갈지 정하는 전제 조건 확인은 흐름 검증이라 facade에 둔다. 대상이 있는지, 활성인지, 활동이 고를 수 있는 유형인지 보고 아니면 `<Domain>ErrorCode`로 끊는 것이다. 활성 여부 같은 판정 값은 포트·서비스가 돌려준 것을 그대로 쓴다. 예: `CreateScheduleFacade`의 `validateActiveUser`·`findPlace`, `ListPlaceCandidatesFacade`의 `validateActiveRegion`.
 - facade가 다른 facade를 부르지 않는다.
 - 복잡도는 facade를 만드는 기준이 아니다. 흐름이 길어도 위 두 경우가 아니면 서비스에 둔다.
 - 가진 데이터가 없는 도메인은 Command 서비스 없이 facade만 가질 수 있다. auth가 그렇다. 자기 테이블이 생기면 그때 만든다.

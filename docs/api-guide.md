@@ -215,6 +215,54 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 
 ## 일정
 
+### 장소 후보
+
+`GET /api/v1/place-candidates?categoryId=&regionCode=`. 고른 활동으로 갈 수 있는 장소 목록이다(보드게임 → 보드게임카페, 방탈출 → 방탈출 매장, 산책 → 공원).
+
+- **부르는 화면**: 장소 선택 화면(CRT-02)에 들어올 때, 지역 칩을 바꿀 때. 목록과 지도 핀을 이 결과로 그린다.
+- **인증이 필요 없다.** 토큰 없이 불러도 200이다.
+- **노출 대상 장소만 온다.** 검수를 통과했고, 폐업하지 않았고, 서비스 중인 지역에 있는 장소다.
+- 요청(쿼리 파라미터):
+
+  | 파라미터 | 필수 | 의미·형식 |
+  | --- | --- | --- |
+  | `categoryId` | 필수 | 활동 목록 API(`GET /api/v1/activity-categories`)의 `id`(UUID 문자열) |
+  | `regionCode` | 선택 | 지역 목록 API(`GET /api/v1/regions`)의 `code`(5자리 문자열). **생략하면 서비스 중인 지역 전체다.** 전체를 보려면 파라미터를 아예 빼고, `regionCode=`처럼 빈 값으로 보내지 않는다. 빈 값은 400 `INVALID_REGION`이다 |
+
+- 응답 예시:
+  ```json
+  { "isSuccess": true, "data": [ { "id": "01a1a2b3-0000-7000-8000-000000000001", "name": "보드게임카페 홍대점", "roadAddress": "서울특별시 마포구 와우산로 1", "addressDetail": "2층", "latitude": 37.5512345, "longitude": 126.9212345, "regionCode": "11440" } ] }
+  ```
+  - `id`: 장소 ID(UUID 문자열). 고른 장소의 `id`를 일정 개설의 `placeId`로 보낸다.
+  - `name`: 장소명.
+  - `roadAddress`: 도로명주소. 도로명주소가 없는 장소는 지번주소가 온다. 상세주소(층 등)는 들어 있지 않다.
+  - `addressDetail`: 상세주소(층 등). **없으면 빈 문자열**이다. 표시할 때 `roadAddress` 뒤에 붙인다.
+  - `latitude`, `longitude`: 위도·경도. WGS84 좌표의 소수(JSON 숫자)다. 지도 핀에 쓴다.
+  - `regionCode`: 장소가 속한 지역 코드. 지역 목록의 `code`와 같은 5자리 문자열이다.
+  - 모든 필드가 null이 아니다.
+- **정렬은 지역 노출 순서(지역 목록과 같은 순서), 같은 지역 안에서는 장소명 가나다순이다.** 받은 순서 그대로 그린다.
+- **페이지를 나누지 않는다.** 조건에 맞는 장소를 한 번에 모두 준다.
+- **결과가 없으면 200과 빈 배열이다.** 화면에 "결과 없음"을 보여준다. 오류가 아니다.
+- 산책(공원) 후보는 공원 장소를 적재하기 전까지 비어 있을 수 있다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 400 | `INVALID_REQUEST` | `categoryId`가 없거나 UUID 형식이 아니다 | 정상 화면 흐름에서는 나지 않는다. 활동 선택부터 다시 하게 한다 |
+  | 400 | `INVALID_CATEGORY` | 없거나 숨긴 활동. 지역도 틀렸어도 이 코드가 먼저 온다 | 활동 목록을 다시 불러 고르게 한다 |
+  | 400 | `INVALID_REGION` | 없거나 서비스하지 않는 지역, 빈 값으로 보낸 `regionCode` | 지역 목록을 다시 불러 칩을 다시 그리고 고르게 한다 |
+
+  ```json
+  { "isSuccess": false, "code": "INVALID_REQUEST", "message": "요청 형식이 올바르지 않습니다." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "INVALID_CATEGORY", "message": "선택할 수 없는 활동이에요. 활동을 다시 골라주세요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "INVALID_REGION", "message": "선택할 수 없는 지역이에요. 지역을 다시 골라주세요." }
+  ```
+- 조회만 하므로 **같은 요청을 몇 번 다시 보내도 된다.** 실패하면 그대로 재시도한다.
+
 ### 일정 개설
 
 `POST /api/v1/schedules`. 일정을 연다.
@@ -239,7 +287,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   | 필드 | 의미 | 형식·범위 |
   | --- | --- | --- |
   | `categoryId` | 활동 | 활동 목록 API(`GET /api/v1/activity-categories`)의 `id`. 숨긴 활동은 고를 수 없다 |
-  | `placeId` | 장소 | 장소 후보 API의 `id`. 장소 후보 API(T-11)는 아직 없다. 활동이 고를 수 있는 유형의 장소여야 한다(보드게임 → 보드게임카페, 방탈출 → 방탈출 매장, 산책 → 공원). **장소명·주소·좌표는 보내지 않는다.** 서버가 장소에서 읽어 개설 시점 값으로 저장한다. 그 뒤 장소 정보가 바뀌거나 폐업해도 일정에는 개설 시점 값이 남는다 |
+  | `placeId` | 장소 | 장소 후보 API(`GET /api/v1/place-candidates`)의 `id`. 활동이 고를 수 있는 유형의 장소여야 한다(보드게임 → 보드게임카페, 방탈출 → 방탈출 매장, 산책 → 공원). **장소명·주소·좌표는 보내지 않는다.** 서버가 장소에서 읽어 개설 시점 값으로 저장한다. 그 뒤 장소 정보가 바뀌거나 폐업해도 일정에는 개설 시점 값이 남는다 |
   | `title` | 활동명 | 앞뒤 공백을 뺀 길이로 1~20자. 저장되는 값은 앞뒤 공백을 뺀 값이다 |
   | `durationType` | 예상 소요 시간 | `SHORT` 1시간 내외(60분), `NORMAL` 2시간 내외(120분), `LONG` 3시간 이상(180분). 이 셋 밖의 값은 400 `INVALID_REQUEST` |
   | `description` | 간략 설명 | 앞뒤 공백을 뺀 길이로 10~500자. 줄바꿈을 쓸 수 있고 한 글자로 센다. 저장되는 값은 앞뒤 공백을 뺀 값이다 |
@@ -285,11 +333,12 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 설정 · 탈퇴 | `DELETE /api/v1/users/me` → `DELETE /api/v1/auth/tokens` | 되돌릴 수 없음을 한 번 확인받고 호출. 끝나면 로그인 화면 |
 | 일정 목록 (지역 필터) | `GET /api/v1/regions` | 받은 순서대로 필터를 그린다 |
 | 장소 선택 (지역 칩) | `GET /api/v1/regions` | 받은 순서대로 칩을 그린다 |
+| 장소 선택 (목록·지도) | `GET /api/v1/place-candidates` | 화면 진입과 지역 칩 변경 때 부른다. 받은 순서대로 목록과 지도 핀을 그린다. 빈 배열이면 결과 없음. 400 `INVALID_CATEGORY`면 활동을, `INVALID_REGION`이면 지역을 다시 고르게 한다 |
 | 일정 개설 (활동 선택) | `GET /api/v1/activity-categories` | 받은 순서대로 활동을 그린다 |
 | 일정 목록 (활동 필터) | `GET /api/v1/activity-categories` | 받은 순서대로 필터를 그린다 |
 | 일정 개설 ([일정 열기]) | `POST /api/v1/schedules` | 201이면 내가 연 일정 목록(LIST-05)으로 이동하고 팝업을 띄운다. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 그 밖의 400·409는 해당 입력을 다시 고르게 한다. 응답 전까지 버튼을 막는다 |
 
-일정 개설 외의 일정 API(장소 후보·목록·상세·참여 등)와 알림 API는 아직 없다. 생기면 이 표에 추가한다.
+장소 후보·일정 개설 외의 일정 API(목록·상세·참여 등)와 알림 API는 아직 없다. 생기면 이 표에 추가한다.
 
 ## 로컬에서 서버 띄우기
 

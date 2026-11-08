@@ -1,5 +1,7 @@
 package com.shineunsigan.snsg.schedule.infrastructure.client;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -32,6 +34,14 @@ public class SchedulePlaceAdapter implements PlacePort {
         return findPlaceUseCase.find(placeId).flatMap(this::toExposedPlace);
     }
 
+    /** place가 준 순서(지역 display_order, 장소명)를 그대로 둔다. */
+    @Override
+    public List<ExposedPlaceResult> findExposed(ActivityPlaceType placeType, Collection<String> regionCodes) {
+        return findPlaceUseCase.findExposed(toPlaceType(placeType), regionCodes).stream()
+                .flatMap(place -> toExposedPlace(place).stream())
+                .toList();
+    }
+
     private Optional<ExposedPlaceResult> toExposedPlace(PlaceResult place) {
         return toActivityPlaceType(place.placeType())
                 .map(placeType -> new ExposedPlaceResult(place.id(), placeType, place.name(), place.roadAddress(),
@@ -44,6 +54,14 @@ public class SchedulePlaceAdapter implements PlacePort {
             case ESCAPE_ROOM -> Optional.of(ActivityPlaceType.ESCAPE_ROOM);
             case PARK -> Optional.of(ActivityPlaceType.PARK);
             case UNCLASSIFIED -> Optional.empty();
+        };
+    }
+
+    private PlaceType toPlaceType(ActivityPlaceType placeType) {
+        return switch (placeType) {
+            case BOARD_GAME_CAFE -> PlaceType.BOARD_GAME_CAFE;
+            case ESCAPE_ROOM -> PlaceType.ESCAPE_ROOM;
+            case PARK -> PlaceType.PARK;
         };
     }
 }

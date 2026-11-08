@@ -26,6 +26,7 @@ paths:
   - 제약마다 `message`에 화면에 그대로 보여줄 문구를 준다. domain ErrorCode와 같은 문구를 쓰고, 값이 비었을 때(`@NotNull`)도 그 필드의 형식 문구를 쓴다. 다른 도메인의 상수는 import할 수 없으므로 정규식·문구가 두 곳에 적히는 것은 허용한다(`.claude/rules/package-structure.md` 도메인 간 참조의 값 상수 중복).
 - **Request DTO를 만드는 기준**: 필드가 둘 이상이거나 검증 제약(`@NotBlank`, `@Size` 등)이 붙으면 만든다. 파라미터 하나를 그대로 넘길 뿐이면 만들지 않고 `@RequestParam`·`@PathVariable`로 받아 Command를 만든다. 필드 하나짜리 껍데기 record는 읽는 사람에게 아무것도 알려주지 않는다.
   - 단 **나중에 필드가 늘어날 것이 분명하면** 처음부터 만든다. 공개된 API의 요청 형태를 바꾸면 FE도 함께 고쳐야 한다.
+- 선택 쿼리 파라미터에서 생략과 빈 값을 다르게 다뤄야 하면 `@RequestParam(required = false) String`으로 받고 `defaultValue`를 주지 않는다. 생략은 `null`, `?x=`는 `""`로 들어온다. `defaultValue`를 주면 빈 값도 기본값으로 바뀌어 구분이 사라진다. 예: `PlaceCandidateController`의 `regionCode`(생략은 활성 지역 전체, 빈 값은 400 `INVALID_REGION`).
 - 인증 주체는 `@AuthenticationPrincipal UUID userId`로 받는다. 인증 필터가 principal에 userId(UUID)를 넣는다.
   - 공개 경로(토큰 없이 호출하는 엔드포인트)에서는 principal이 `"anonymousUser"`라 null이 들어온다. 타입이 맞지 않아도 예외 없이 null이므로 공개 경로에서는 쓰지 않는다.
   - 토큰 없이 호출하는 엔드포인트는 `SecurityConfig`에서 HTTP 메서드와 경로를 정확히 지정해 연다. `/api/v1/auth/**`처럼 prefix 전체를 열면 같은 prefix에 생긴 인증 필요 API까지 열린다. 우리 API에서는 `POST /api/v1/auth/tokens`(재발급)가 공개이고 `DELETE /api/v1/auth/tokens`(로그아웃)는 인증이 필요하다. 경로가 같고 메서드만 다르므로 경로만 지정하면 로그아웃·탈퇴가 열린다.
@@ -83,5 +84,6 @@ FE는 작업할 때마다 이 저장소를 받아가 `docs/`를 본다. FE에 AP
   - 토큰 없이 호출하는 엔드포인트는 메서드에 `@SecurityRequirements`를 달아 전역 bearer 요구를 지운다. 같은 컨트롤러에 인증이 필요한 엔드포인트가 섞이므로 클래스에 달지 않는다.
 - Request/Response record 필드에는 `@Schema(description, example)`을 단다.
 - API를 바꾸면 같은 PR에서 `OPENAPI_UPDATE=true ./gradlew test --tests '*OpenApiSpecTest'`로 `docs/openapi.yaml`을 다시 만들어 커밋한다. 코드와 다르면 빌드가 실패한다.
+  - `docs/openapi.yaml`은 API를 바꾼 코드와 **같은 커밋**에 넣는다. `docs:` 커밋으로 떼면 그 사이 커밋에서 `OpenApiSpecTest`가 실패한다. `docs/api-guide.md`는 빌드가 대조하지 않으므로 따로 커밋해도 된다.
 - 여러 호출에 걸친 흐름, 공통 규칙, 화면별로 쓰는 API가 바뀌면 `docs/api-guide.md`도 고친다. 이건 빌드가 잡지 못한다.
 - swagger-ui와 스펙 경로는 SecurityConfig에서 공개한다. 운영 프로파일에서는 `springdoc.api-docs.enabled=false`, `springdoc.swagger-ui.enabled=false`로 끈다.

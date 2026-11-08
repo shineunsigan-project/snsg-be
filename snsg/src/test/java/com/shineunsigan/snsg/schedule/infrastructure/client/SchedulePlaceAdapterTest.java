@@ -1,6 +1,7 @@
 package com.shineunsigan.snsg.schedule.infrastructure.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -32,6 +33,7 @@ class SchedulePlaceAdapterTest {
 
     private static final String ACTIVE = "99001";
     private static final String INACTIVE = "99002";
+    private static final String OTHER_ACTIVE = "99003";
 
     @Autowired
     private SchedulePlaceAdapter schedulePlaceAdapter;
@@ -76,6 +78,77 @@ class SchedulePlaceAdapterTest {
         assertThat(hidden).allSatisfy(id -> assertThat(schedulePlaceAdapter.find(id)).isEmpty());
     }
 
+    @Test
+    @DisplayName("목록: 공원 유형으로 찾으면 같은 지역의 보드게임카페·방탈출은 빠지고 공원만 PARK로 온다")
+    void findExposedParkOnly() {
+        UUID park = insert("PARK", "APPROVED", false, false, ACTIVE);
+        insert("BOARD_GAME_CAFE", "APPROVED", false, false, ACTIVE);
+        insert("ESCAPE_ROOM", "APPROVED", false, false, ACTIVE);
+
+        assertThat(schedulePlaceAdapter.findExposed(ActivityPlaceType.PARK, List.of(ACTIVE)))
+                .extracting(ExposedPlaceResult::id, ExposedPlaceResult::placeType)
+                .containsExactly(tuple(park, ActivityPlaceType.PARK));
+    }
+
+    @Test
+    @DisplayName("목록: 보드게임카페 유형으로 찾으면 보드게임카페만 온다")
+    void findExposedBoardGameCafeOnly() {
+        insert("PARK", "APPROVED", false, false, ACTIVE);
+        UUID cafe = insert("BOARD_GAME_CAFE", "APPROVED", false, false, ACTIVE);
+        insert("ESCAPE_ROOM", "APPROVED", false, false, ACTIVE);
+
+        assertThat(schedulePlaceAdapter.findExposed(ActivityPlaceType.BOARD_GAME_CAFE, List.of(ACTIVE)))
+                .extracting(ExposedPlaceResult::id, ExposedPlaceResult::placeType)
+                .containsExactly(tuple(cafe, ActivityPlaceType.BOARD_GAME_CAFE));
+    }
+
+    @Test
+    @DisplayName("목록: 지역을 지정하면 그 지역 장소만 place가 준 순서(장소명)대로 온다")
+    void findExposedInRegion() {
+        insertRegion(OTHER_ACTIVE, true);
+        UUID second = insert("PARK", "APPROVED", false, false, ACTIVE, "나공원");
+        UUID first = insert("PARK", "APPROVED", false, false, ACTIVE, "가공원");
+        insert("PARK", "APPROVED", false, false, OTHER_ACTIVE);
+
+        assertThat(schedulePlaceAdapter.findExposed(ActivityPlaceType.PARK, List.of(ACTIVE)))
+                .extracting(ExposedPlaceResult::id)
+                .containsExactly(first, second);
+    }
+
+    @Test
+    @DisplayName("목록: 지역을 비워 넘기면 활성 지역 장소는 들어 있고 비활성 지역 장소는 없다")
+    void findExposedAllActiveRegions() {
+        UUID active = insert("PARK", "APPROVED", false, false, ACTIVE);
+        UUID inactive = insert("PARK", "APPROVED", false, false, INACTIVE);
+
+        assertThat(schedulePlaceAdapter.findExposed(ActivityPlaceType.PARK, List.of()))
+                .extracting(ExposedPlaceResult::id)
+                .contains(active)
+                .doesNotContain(inactive);
+    }
+
+    @Test
+    @DisplayName("목록: 검수 대기·거절·폐업·삭제 장소는 빠지고 노출 대상만 온다")
+    void findExposedOnlyExposed() {
+        UUID exposed = insert("PARK", "APPROVED", false, false, ACTIVE);
+        insert("PARK", "CANDIDATE", false, false, ACTIVE);
+        insert("PARK", "REJECTED", false, false, ACTIVE);
+        insert("PARK", "APPROVED", true, false, ACTIVE);
+        insert("PARK", "APPROVED", false, true, ACTIVE);
+
+        assertThat(schedulePlaceAdapter.findExposed(ActivityPlaceType.PARK, List.of(ACTIVE)))
+                .extracting(ExposedPlaceResult::id)
+                .containsExactly(exposed);
+    }
+
+    @Test
+    @DisplayName("목록: 조건에 맞는 장소가 없으면 빈 목록이다")
+    void findExposedEmpty() {
+        insert("PARK", "APPROVED", false, false, ACTIVE);
+
+        assertThat(schedulePlaceAdapter.findExposed(ActivityPlaceType.ESCAPE_ROOM, List.of(ACTIVE))).isEmpty();
+    }
+
     private void insertRegion(String code, boolean active) {
         entityManager.createNativeQuery("""
                         INSERT INTO regions (code, sido_name, sigungu_name, display_order, is_active, created_at, updated_at)
@@ -87,6 +160,11 @@ class SchedulePlaceAdapterTest {
     }
 
     private UUID insert(String placeType, String status, boolean closed, boolean deleted, String region) {
+        return insert(placeType, status, closed, deleted, region, "테스트공원");
+    }
+
+    private UUID insert(String placeType, String status, boolean closed, boolean deleted, String region,
+            String name) {
         UUID id = UUID.randomUUID();
         entityManager.createNativeQuery("""
                         INSERT INTO places (id, place_type, name, road_address, address_detail, latitude, longitude,
@@ -94,15 +172,16 @@ class SchedulePlaceAdapterTest {
                                             source_road_address, source_address_detail, source_latitude,
                                             source_longitude, source_region_code, last_synced_at,
                                             created_at, updated_at, is_deleted)
-                        VALUES (?, ?, '테스트공원', '서울특별시 테스트로 1', '정문', 37.5512345, 126.9212345, ?, ?, ?,
+                        VALUES (?, ?, ?, '서울특별시 테스트로 1', '정문', 37.5512345, 126.9212345, ?, ?, ?,
                                 'MANUAL', '', '', '', '', 0, 0, ?, NOW(), NOW(), NOW(), ?)""")
                 .setParameter(1, id)
                 .setParameter(2, placeType)
-                .setParameter(3, region)
-                .setParameter(4, status)
-                .setParameter(5, closed)
-                .setParameter(6, region)
-                .setParameter(7, deleted)
+                .setParameter(3, name)
+                .setParameter(4, region)
+                .setParameter(5, status)
+                .setParameter(6, closed)
+                .setParameter(7, region)
+                .setParameter(8, deleted)
                 .executeUpdate();
         return id;
     }
