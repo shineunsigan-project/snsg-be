@@ -35,7 +35,7 @@ import com.shineunsigan.snsg.schedule.domain.model.PlaceSnapshot;
  * 개설 전 확인 순서(활성 사용자 → 활동 → 장소)와 실패 시 저장으로 넘어가지 않는지 본다.
  */
 @ExtendWith(MockitoExtension.class)
-class CreateScheduleUseCaseTest {
+class CreateScheduleFacadeTest {
 
     private static final UUID USER_ID = UUID.randomUUID();
     private static final UUID CATEGORY_ID = UUID.randomUUID();
@@ -56,7 +56,7 @@ class CreateScheduleUseCaseTest {
     private ScheduleCommandService scheduleCommandService;
 
     @InjectMocks
-    private CreateScheduleUseCase createScheduleUseCase;
+    private CreateScheduleFacade createScheduleFacade;
 
     @Test
     @DisplayName("탈퇴한 사용자면 USER_NOT_ACTIVE이고 활동·장소를 조회하지 않는다")
@@ -111,7 +111,7 @@ class CreateScheduleUseCaseTest {
         when(placePort.find(PLACE_ID)).thenReturn(Optional.of(place(ActivityPlaceType.BOARD_GAME_CAFE)));
         when(scheduleCommandService.create(any(), any())).thenReturn(scheduleId);
 
-        assertThat(createScheduleUseCase.create(COMMAND)).isEqualTo(scheduleId);
+        assertThat(createScheduleFacade.create(COMMAND)).isEqualTo(scheduleId);
 
         ArgumentCaptor<PlaceSnapshot> snapshot = ArgumentCaptor.forClass(PlaceSnapshot.class);
         verify(scheduleCommandService).create(eq(COMMAND), snapshot.capture());
@@ -124,7 +124,7 @@ class CreateScheduleUseCaseTest {
     }
 
     private void assertError(ScheduleErrorCode errorCode) {
-        assertThatThrownBy(() -> createScheduleUseCase.create(COMMAND))
+        assertThatThrownBy(() -> createScheduleFacade.create(COMMAND))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(errorCode);

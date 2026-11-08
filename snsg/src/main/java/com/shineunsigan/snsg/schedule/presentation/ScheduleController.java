@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.shineunsigan.snsg.common.web.ApiResponse;
-import com.shineunsigan.snsg.schedule.application.CreateScheduleUseCase;
+import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
 import com.shineunsigan.snsg.schedule.presentation.dto.request.CreateScheduleRequest;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.CreateScheduleResponse;
 
@@ -28,7 +28,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ScheduleController {
 
-    private final CreateScheduleUseCase createScheduleUseCase;
+    private final CreateScheduleFacade createScheduleFacade;
 
     @PostMapping
     @Operation(summary = "일정 개설",
@@ -59,7 +59,7 @@ public class ScheduleController {
                             정확히 12시간 차이는 허용한다. 시작 일시를 바꾸게 안내한다""")})
     public ResponseEntity<ApiResponse<CreateScheduleResponse>> create(@AuthenticationPrincipal UUID userId,
             @Valid @RequestBody CreateScheduleRequest request) {
-        UUID scheduleId = createScheduleUseCase.create(request.toCommand(userId));
+        UUID scheduleId = createScheduleFacade.create(request.toCommand(userId));
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(new CreateScheduleResponse(scheduleId)));

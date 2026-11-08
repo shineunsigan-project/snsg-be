@@ -258,7 +258,7 @@ class ScheduleCommandServiceTest {
     @DisplayName("개설 저장 결과")
     @DataJpaTest
     @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-    @Import({CreateScheduleUseCase.class, ActivityCategoryQueryService.class, ScheduleCommandService.class,
+    @Import({CreateScheduleFacade.class, ActivityCategoryQueryService.class, ScheduleCommandService.class,
             ScheduleRepositoryImpl.class, ActivityCategoryRepositoryImpl.class, SchedulePlaceAdapter.class,
             PlaceQueryService.class, PlaceRepositoryImpl.class, JpaAuditingConfig.class})
     @EnableConfigurationProperties(ScheduleProperties.class)
@@ -267,7 +267,7 @@ class ScheduleCommandServiceTest {
         private static final String REGION = "99001";
 
         @Autowired
-        private CreateScheduleUseCase createScheduleUseCase;
+        private CreateScheduleFacade createScheduleFacade;
 
         @Autowired
         private EntityManager entityManager;
@@ -330,7 +330,7 @@ class ScheduleCommandServiceTest {
         }
 
         private Schedule createAndReload(UUID placeId) {
-            UUID scheduleId = createScheduleUseCase.create(command(userId, placeId, futureStartAt()));
+            UUID scheduleId = createScheduleFacade.create(command(userId, placeId, futureStartAt()));
             entityManager.flush();
             entityManager.clear();
             return entityManager.find(Schedule.class, scheduleId);
