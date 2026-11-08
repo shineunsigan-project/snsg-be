@@ -10,6 +10,7 @@ public enum ScheduleErrorCode implements ErrorCode {
 
     INVALID_CATEGORY(ErrorType.INVALID, "선택할 수 없는 활동이에요. 활동을 다시 골라주세요."),
     INVALID_PLACE(ErrorType.INVALID, "선택할 수 없는 장소예요. 장소를 다시 골라주세요."),
+    INVALID_REGION(ErrorType.INVALID, "선택할 수 없는 지역이에요. 지역을 다시 골라주세요."),
     INVALID_TITLE(ErrorType.INVALID, "활동명은 1~20자로 적어주세요."),
     INVALID_DESCRIPTION(ErrorType.INVALID, "10자 이상 적어주세요."),
     INVALID_START_AT(ErrorType.INVALID, "시작 일시는 지금부터 1시간 이후, 30일 이내에서 30분 단위로 골라주세요."),
