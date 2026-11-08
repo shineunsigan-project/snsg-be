@@ -21,7 +21,7 @@ import com.shineunsigan.snsg.auth.application.port.out.SocialUnlinkPort;
 import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
 
 @ExtendWith(MockitoExtension.class)
-class RevokeAuthUseCaseTest {
+class RevokeAuthFacadeTest {
 
     private static final UUID USER_ID = UUID.randomUUID();
     private static final String PROVIDER_USER_ID = "kakao-1";
@@ -33,12 +33,12 @@ class RevokeAuthUseCaseTest {
     private SocialUnlinkPort socialUnlinkPort;
 
     @InjectMocks
-    private RevokeAuthUseCase revokeAuthUseCase;
+    private RevokeAuthFacade revokeAuthFacade;
 
     @Test
     @DisplayName("사용자가 탈퇴하면 토큰을 지우고 소셜 연동도 끊는다")
     void revokeOnUserRequest() {
-        revokeAuthUseCase.revoke(USER_ID, SocialProvider.KAKAO, PROVIDER_USER_ID, true);
+        revokeAuthFacade.revoke(USER_ID, SocialProvider.KAKAO, PROVIDER_USER_ID, true);
 
         verify(refreshTokenStorePort).delete(USER_ID);
         verify(socialUnlinkPort).unlink(SocialProvider.KAKAO, PROVIDER_USER_ID);
@@ -47,7 +47,7 @@ class RevokeAuthUseCaseTest {
     @Test
     @DisplayName("소셜 쪽에서 끊긴 경우에는 연동 해제를 호출하지 않는다")
     void doesNotUnlinkWhenAlreadyUnlinked() {
-        revokeAuthUseCase.revoke(USER_ID, SocialProvider.KAKAO, PROVIDER_USER_ID, false);
+        revokeAuthFacade.revoke(USER_ID, SocialProvider.KAKAO, PROVIDER_USER_ID, false);
 
         verify(refreshTokenStorePort).delete(USER_ID);
         verify(socialUnlinkPort, never()).unlink(any(), anyString());
@@ -59,7 +59,7 @@ class RevokeAuthUseCaseTest {
         doThrow(new RuntimeException("카카오 응답 없음"))
                 .when(socialUnlinkPort).unlink(SocialProvider.KAKAO, PROVIDER_USER_ID);
 
-        assertThatCode(() -> revokeAuthUseCase.revoke(USER_ID, SocialProvider.KAKAO, PROVIDER_USER_ID, true))
+        assertThatCode(() -> revokeAuthFacade.revoke(USER_ID, SocialProvider.KAKAO, PROVIDER_USER_ID, true))
                 .doesNotThrowAnyException();
 
         verify(refreshTokenStorePort).delete(USER_ID);

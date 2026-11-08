@@ -31,7 +31,7 @@ import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
  * 신규 사용자를 여기서 만들지 않는 것이 핵심이다.
  */
 @ExtendWith(MockitoExtension.class)
-class SocialLoginUseCaseTest {
+class SocialLoginFacadeTest {
 
     private static final String AUTH_CODE = "auth-code";
     private static final SocialUserResult SOCIAL_USER =
@@ -52,11 +52,11 @@ class SocialLoginUseCaseTest {
     @Mock
     private RefreshTokenStorePort refreshTokenStorePort;
 
-    private SocialLoginUseCase socialLoginUseCase;
+    private SocialLoginFacade socialLoginFacade;
 
     @BeforeEach
     void setUp() {
-        socialLoginUseCase = new SocialLoginUseCase(List.of(socialLoginPort), userPort, signUpSessionPort,
+        socialLoginFacade = new SocialLoginFacade(List.of(socialLoginPort), userPort, signUpSessionPort,
                 new TokenIssuer(tokenPort, refreshTokenStorePort));
     }
 
@@ -70,7 +70,7 @@ class SocialLoginUseCaseTest {
         when(tokenPort.issueAccessToken(userId)).thenReturn("access");
         when(tokenPort.issueRefreshToken(userId)).thenReturn("refresh");
 
-        SocialAuthResult result = socialLoginUseCase.authenticate(SocialProvider.KAKAO, AUTH_CODE);
+        SocialAuthResult result = socialLoginFacade.authenticate(SocialProvider.KAKAO, AUTH_CODE);
 
         assertThat(result).isInstanceOf(SocialAuthResult.LoggedIn.class);
         assertThat(((SocialAuthResult.LoggedIn) result).tokens().accessToken()).isEqualTo("access");
@@ -86,7 +86,7 @@ class SocialLoginUseCaseTest {
         when(userPort.findIdBySocialAccount(SocialProvider.KAKAO, "kakao-1")).thenReturn(Optional.empty());
         when(signUpSessionPort.save(SOCIAL_USER)).thenReturn("signup-token");
 
-        SocialAuthResult result = socialLoginUseCase.authenticate(SocialProvider.KAKAO, AUTH_CODE);
+        SocialAuthResult result = socialLoginFacade.authenticate(SocialProvider.KAKAO, AUTH_CODE);
 
         assertThat(result).isInstanceOf(SocialAuthResult.SignUpRequired.class);
         assertThat(((SocialAuthResult.SignUpRequired) result).signUpToken()).isEqualTo("signup-token");

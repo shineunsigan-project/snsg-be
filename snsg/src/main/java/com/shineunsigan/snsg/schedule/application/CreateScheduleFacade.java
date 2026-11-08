@@ -23,7 +23,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
-public class CreateScheduleUseCase {
+public class CreateScheduleFacade {
 
     private final UserPort userPort;
     private final PlacePort placePort;

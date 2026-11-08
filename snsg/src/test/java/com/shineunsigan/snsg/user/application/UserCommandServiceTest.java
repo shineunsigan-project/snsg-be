@@ -25,7 +25,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.user.application.dto.command.RegisterUserCommand;
 import com.shineunsigan.snsg.user.application.event.UserWithdrawnEvent;
-import com.shineunsigan.snsg.user.application.port.out.FileStoragePort;
 import com.shineunsigan.snsg.user.application.port.out.UserEventPort;
 import com.shineunsigan.snsg.user.domain.constants.Gender;
 import com.shineunsigan.snsg.user.domain.constants.SocialProvider;
@@ -60,9 +59,6 @@ class UserCommandServiceTest {
 
     @Mock
     private TermsProperties termsProperties;
-
-    @Mock
-    private FileStoragePort fileStoragePort;
 
     @Mock
     private UserEventPort userEventPort;

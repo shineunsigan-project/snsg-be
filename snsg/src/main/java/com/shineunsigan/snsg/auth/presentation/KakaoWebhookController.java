@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.shineunsigan.snsg.auth.application.HandleSocialUnlinkUseCase;
+import com.shineunsigan.snsg.auth.application.HandleSocialUnlinkFacade;
 
 import io.swagger.v3.oas.annotations.Hidden;
 
@@ -26,7 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class KakaoWebhookController {
 
-    private final HandleSocialUnlinkUseCase handleSocialUnlinkUseCase;
+    private final HandleSocialUnlinkFacade handleSocialUnlinkFacade;
 
     @PostMapping("/webhooks/kakao/unlink")
     public ResponseEntity<Void> unlink(
@@ -34,7 +34,7 @@ public class KakaoWebhookController {
             @RequestParam("user_id") String userId,
             @RequestParam(value = "referrer_type", required = false) String referrerType) {
         try {
-            handleSocialUnlinkUseCase.handleKakaoUnlink(authorization, userId);
+            handleSocialUnlinkFacade.handleKakaoUnlink(authorization, userId);
             log.info("카카오 연결 끊기를 처리했다. userId={}, referrerType={}", userId, referrerType);
         } catch (RuntimeException exception) {
             // 가입하지 않은 사용자(INCOMPLETE_SIGN_UP)에 대해서도 통지가 온다. 재시도를 부르지 않도록 200으로 답한다.

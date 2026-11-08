@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import com.shineunsigan.snsg.common.web.GlobalExceptionHandler;
-import com.shineunsigan.snsg.schedule.application.CreateScheduleUseCase;
+import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.dto.command.CreateScheduleCommand;
 
 /**
@@ -54,7 +54,7 @@ class ScheduleControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private CreateScheduleUseCase createScheduleUseCase;
+    private CreateScheduleFacade createScheduleFacade;
 
     @BeforeEach
     void authenticate() {
@@ -71,7 +71,7 @@ class ScheduleControllerTest {
     @DisplayName("개설하면 201과 일정 id를 준다. 요청한 사용자가 개설자로 넘어간다")
     void createsSchedule() throws Exception {
         UUID scheduleId = UUID.randomUUID();
-        when(createScheduleUseCase.create(any())).thenReturn(scheduleId);
+        when(createScheduleFacade.create(any())).thenReturn(scheduleId);
 
         perform(body("\"보드게임 같이 해요\"", "\"NORMAL\"", "\"처음 오시는 분도 환영해요.\""))
                 .andExpect(status().isCreated())
@@ -79,7 +79,7 @@ class ScheduleControllerTest {
                 .andExpect(jsonPath("$.data.scheduleId").value(scheduleId.toString()));
 
         ArgumentCaptor<CreateScheduleCommand> command = ArgumentCaptor.forClass(CreateScheduleCommand.class);
-        verify(createScheduleUseCase).create(command.capture());
+        verify(createScheduleFacade).create(command.capture());
         assertThat(command.getValue().userId()).isEqualTo(USER_ID);
     }
 
@@ -91,7 +91,7 @@ class ScheduleControllerTest {
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.errors[0].field").value("title"))
                 .andExpect(jsonPath("$.errors[0].message").value(TITLE_MESSAGE));
-        verify(createScheduleUseCase, never()).create(any());
+        verify(createScheduleFacade, never()).create(any());
     }
 
     @Test
@@ -101,13 +101,13 @@ class ScheduleControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.errors[0].field").value("title"));
-        verify(createScheduleUseCase, never()).create(any());
+        verify(createScheduleFacade, never()).create(any());
     }
 
     @Test
     @DisplayName("앞뒤 공백을 포함해 22자여도 공백을 뺀 활동명이 20자면 요청 단계를 통과한다")
     void titleWithSurroundingSpacesPasses() throws Exception {
-        when(createScheduleUseCase.create(any())).thenReturn(UUID.randomUUID());
+        when(createScheduleFacade.create(any())).thenReturn(UUID.randomUUID());
 
         perform(body("\" " + "가".repeat(20) + " \"", "\"NORMAL\"", "\"처음 오시는 분도 환영해요.\""))
                 .andExpect(status().isCreated());
@@ -121,7 +121,7 @@ class ScheduleControllerTest {
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.errors[0].field").value("description"))
                 .andExpect(jsonPath("$.errors[0].message").value(DESCRIPTION_MESSAGE));
-        verify(createScheduleUseCase, never()).create(any());
+        verify(createScheduleFacade, never()).create(any());
     }
 
     @Test
@@ -130,7 +130,7 @@ class ScheduleControllerTest {
         perform(body("\"보드게임 같이 해요\"", "\"VERY_LONG\"", "\"처음 오시는 분도 환영해요.\""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
-        verify(createScheduleUseCase, never()).create(any());
+        verify(createScheduleFacade, never()).create(any());
     }
 
     private ResultActions perform(String body) throws Exception {

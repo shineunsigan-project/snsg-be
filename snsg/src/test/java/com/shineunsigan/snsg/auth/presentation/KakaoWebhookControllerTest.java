@@ -15,7 +15,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import com.shineunsigan.snsg.auth.application.HandleSocialUnlinkUseCase;
+import com.shineunsigan.snsg.auth.application.HandleSocialUnlinkFacade;
 import com.shineunsigan.snsg.auth.application.port.out.TokenPort;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
@@ -32,7 +32,7 @@ class KakaoWebhookControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private HandleSocialUnlinkUseCase handleSocialUnlinkUseCase;
+    private HandleSocialUnlinkFacade handleSocialUnlinkFacade;
 
     /** 인증 필터가 요구한다. 이 경로는 필터를 끄고 돌지만 빈은 있어야 컨텍스트가 뜬다. */
     @MockitoBean
@@ -48,14 +48,14 @@ class KakaoWebhookControllerTest {
                         .param("referrer_type", "UNLINK_FROM_APPS"))
                 .andExpect(status().isOk());
 
-        verify(handleSocialUnlinkUseCase).handleKakaoUnlink("KakaoAK admin-key", "kakao-1");
+        verify(handleSocialUnlinkFacade).handleKakaoUnlink("KakaoAK admin-key", "kakao-1");
     }
 
     @Test
     @DisplayName("처리하지 못해도 200을 준다")
     void alwaysRespondsOk() throws Exception {
         doThrow(new BusinessException(AuthErrorCode.INVALID_WEBHOOK_SENDER))
-                .when(handleSocialUnlinkUseCase).handleKakaoUnlink(anyString(), anyString());
+                .when(handleSocialUnlinkFacade).handleKakaoUnlink(anyString(), anyString());
 
         mockMvc.perform(post("/webhooks/kakao/unlink")
                         .header(HttpHeaders.AUTHORIZATION, "KakaoAK wrong-key")

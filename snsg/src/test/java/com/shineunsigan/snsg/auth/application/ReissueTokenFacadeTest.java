@@ -24,7 +24,7 @@ import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 
 @ExtendWith(MockitoExtension.class)
-class ReissueTokenUseCaseTest {
+class ReissueTokenFacadeTest {
 
     private static final String REFRESH_TOKEN = "refresh-token";
     private static final UUID USER_ID = UUID.randomUUID();
@@ -38,11 +38,11 @@ class ReissueTokenUseCaseTest {
     @Mock
     private UserPort userPort;
 
-    private ReissueTokenUseCase reissueTokenUseCase;
+    private ReissueTokenFacade reissueTokenFacade;
 
     @BeforeEach
     void setUp() {
-        reissueTokenUseCase = new ReissueTokenUseCase(tokenPort, refreshTokenStorePort, userPort,
+        reissueTokenFacade = new ReissueTokenFacade(tokenPort, refreshTokenStorePort, userPort,
                 new TokenIssuer(tokenPort, refreshTokenStorePort));
     }
 
@@ -55,7 +55,7 @@ class ReissueTokenUseCaseTest {
         when(tokenPort.issueAccessToken(USER_ID)).thenReturn("new-access");
         when(tokenPort.issueRefreshToken(USER_ID)).thenReturn("new-refresh");
 
-        TokenResult result = reissueTokenUseCase.reissue(REFRESH_TOKEN);
+        TokenResult result = reissueTokenFacade.reissue(REFRESH_TOKEN);
 
         assertThat(result.accessToken()).isEqualTo("new-access");
         verify(refreshTokenStorePort).save(USER_ID, "new-refresh");
@@ -67,7 +67,7 @@ class ReissueTokenUseCaseTest {
         when(tokenPort.parseUserId(REFRESH_TOKEN)).thenReturn(USER_ID);
         when(refreshTokenStorePort.matches(USER_ID, REFRESH_TOKEN)).thenReturn(false);
 
-        assertThatThrownBy(() -> reissueTokenUseCase.reissue(REFRESH_TOKEN))
+        assertThatThrownBy(() -> reissueTokenFacade.reissue(REFRESH_TOKEN))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.INVALID_REFRESH_TOKEN);
@@ -81,7 +81,7 @@ class ReissueTokenUseCaseTest {
         when(refreshTokenStorePort.matches(USER_ID, REFRESH_TOKEN)).thenReturn(true);
         when(userPort.exists(USER_ID)).thenReturn(false);
 
-        assertThatThrownBy(() -> reissueTokenUseCase.reissue(REFRESH_TOKEN))
+        assertThatThrownBy(() -> reissueTokenFacade.reissue(REFRESH_TOKEN))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.INVALID_REFRESH_TOKEN);
@@ -95,7 +95,7 @@ class ReissueTokenUseCaseTest {
         when(tokenPort.parseUserId(REFRESH_TOKEN))
                 .thenThrow(new BusinessException(AuthErrorCode.INVALID_ACCESS_TOKEN));
 
-        assertThatThrownBy(() -> reissueTokenUseCase.reissue(REFRESH_TOKEN))
+        assertThatThrownBy(() -> reissueTokenFacade.reissue(REFRESH_TOKEN))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.INVALID_REFRESH_TOKEN);

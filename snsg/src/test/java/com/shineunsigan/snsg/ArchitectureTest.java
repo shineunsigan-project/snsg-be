@@ -14,6 +14,7 @@ import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.Dependency;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchCondition;
@@ -37,6 +38,10 @@ class ArchitectureTest {
     /** 다른 도메인이 참조할 수 있는 계약. 도메인 패키지 기준 상대 경로다. */
     private static final List<String> CONTRACTS = List.of(
             "application.port.in", "application.dto", "application.event", "domain.constants");
+
+    /** facade에 걸면 안 되는 트랜잭션 애노테이션. 외부 호출을 트랜잭션 밖에 두기 위해서다. */
+    private static final List<String> TRANSACTIONAL = List.of(
+            "org.springframework.transaction.annotation.Transactional", "jakarta.transaction.Transactional");
 
     private static final JavaClasses CLASSES = new ClassFileImporter()
             .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
@@ -116,6 +121,49 @@ class ArchitectureTest {
                 .check(CLASSES);
     }
 
+    @Test
+    @DisplayName("Facade 클래스와 그 메서드에는 @Transactional이 없다")
+    void facadesAreNotTransactional() {
+        classes().that(inAnyDomain()).and().haveSimpleNameEndingWith("Facade")
+                .should(new ArchCondition<>("not be annotated with " + TRANSACTIONAL + " on the class or its methods") {
+                    @Override
+                    public void check(JavaClass javaClass, ConditionEvents events) {
+                        for (String annotation : TRANSACTIONAL) {
+                            if (javaClass.isAnnotatedWith(annotation)) {
+                                events.add(SimpleConditionEvent.violated(javaClass,
+                                        javaClass.getName() + " is annotated with @" + annotation));
+                            }
+                            for (JavaMethod method : javaClass.getMethods()) {
+                                if (method.isAnnotatedWith(annotation)) {
+                                    events.add(SimpleConditionEvent.violated(method,
+                                            method.getFullName() + " is annotated with @" + annotation));
+                                }
+                            }
+                        }
+                    }
+                })
+                .check(CLASSES);
+    }
+
+    @Test
+    @DisplayName("CommandService·QueryService는 이벤트 발행 포트가 아닌 port.out에 의존하지 않는다")
+    void servicesDependOnlyOnEventPortsAmongOutboundPorts() {
+        classes().that(inAnyDomain()).and(haveSimpleNameEndingWithAny("CommandService", "QueryService"))
+                .should(new ArchCondition<>("not depend on application.port.out types other than *EventPort") {
+                    @Override
+                    public void check(JavaClass javaClass, ConditionEvents events) {
+                        for (Dependency dependency : javaClass.getDirectDependenciesFromSelf()) {
+                            JavaClass target = dependency.getTargetClass().getBaseComponentType();
+                            if (isOutboundPort(target.getPackageName())
+                                    && !target.getSimpleName().endsWith("EventPort")) {
+                                events.add(SimpleConditionEvent.violated(dependency, dependency.getDescription()));
+                            }
+                        }
+                    }
+                })
+                .check(CLASSES);
+    }
+
     /** 도메인의 {@code layer} 계층이 같은 도메인의 {@code forbidden} 계층에 의존하지 않는다. */
     private static ArchRule layerRule(String layer, Set<String> forbidden) {
         return classes().that(inLayer(layer))
@@ -161,6 +209,18 @@ class ArchitectureTest {
         return DescribedPredicate.describe("reside in the " + layer + " layer of a domain",
                 javaClass -> domainOf(javaClass.getPackageName()) != null
                         && layer.equals(layerOf(javaClass.getPackageName())));
+    }
+
+    private static DescribedPredicate<JavaClass> haveSimpleNameEndingWithAny(String... suffixes) {
+        return DescribedPredicate.describe("have simple name ending with any of " + List.of(suffixes),
+                javaClass -> List.of(suffixes).stream().anyMatch(javaClass.getSimpleName()::endsWith));
+    }
+
+    /** 도메인의 {@code application.port.out} 패키지(하위 포함)인지. */
+    private static boolean isOutboundPort(String packageName) {
+        String[] segments = segmentsAfterBase(packageName);
+        return domainOf(packageName) != null && segments.length >= 4
+                && "application".equals(segments[1]) && "port".equals(segments[2]) && "out".equals(segments[3]);
     }
 
     private static boolean isContract(String targetPackage) {

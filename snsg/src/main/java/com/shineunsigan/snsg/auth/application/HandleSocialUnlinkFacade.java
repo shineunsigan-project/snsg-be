@@ -20,7 +20,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
-public class HandleSocialUnlinkUseCase {
+public class HandleSocialUnlinkFacade {
 
     private static final String ADMIN_KEY_PREFIX = "KakaoAK ";
 

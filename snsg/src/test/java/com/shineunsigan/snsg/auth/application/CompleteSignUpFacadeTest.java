@@ -33,7 +33,7 @@ import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 
 @ExtendWith(MockitoExtension.class)
-class CompleteSignUpUseCaseTest {
+class CompleteSignUpFacadeTest {
 
     private static final String SIGNUP_TOKEN = "signup-token";
     private static final SocialUserResult SOCIAL_USER =
@@ -53,11 +53,11 @@ class CompleteSignUpUseCaseTest {
     @Mock
     private RefreshTokenStorePort refreshTokenStorePort;
 
-    private CompleteSignUpUseCase completeSignUpUseCase;
+    private CompleteSignUpFacade completeSignUpFacade;
 
     @BeforeEach
     void setUp() {
-        completeSignUpUseCase = new CompleteSignUpUseCase(signUpSessionPort, userPort,
+        completeSignUpFacade = new CompleteSignUpFacade(signUpSessionPort, userPort,
                 new TokenIssuer(tokenPort, refreshTokenStorePort));
     }
 
@@ -70,7 +70,7 @@ class CompleteSignUpUseCaseTest {
         when(tokenPort.issueAccessToken(userId)).thenReturn("access");
         when(tokenPort.issueRefreshToken(userId)).thenReturn("refresh");
 
-        TokenResult result = completeSignUpUseCase.completeSignUp(COMMAND);
+        TokenResult result = completeSignUpFacade.completeSignUp(COMMAND);
 
         ArgumentCaptor<RegisterUserCommand> captor = ArgumentCaptor.forClass(RegisterUserCommand.class);
         verify(userPort).register(captor.capture());
@@ -86,7 +86,7 @@ class CompleteSignUpUseCaseTest {
         when(signUpSessionPort.find(SIGNUP_TOKEN)).thenReturn(Optional.of(SOCIAL_USER));
         when(userPort.register(any())).thenReturn(userId);
 
-        completeSignUpUseCase.completeSignUp(COMMAND);
+        completeSignUpFacade.completeSignUp(COMMAND);
 
         verify(signUpSessionPort).delete(SIGNUP_TOKEN);
     }
@@ -96,7 +96,7 @@ class CompleteSignUpUseCaseTest {
     void rejectsUnknownSignUpToken() {
         when(signUpSessionPort.find(SIGNUP_TOKEN)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> completeSignUpUseCase.completeSignUp(COMMAND))
+        assertThatThrownBy(() -> completeSignUpFacade.completeSignUp(COMMAND))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.INVALID_SIGNUP_TOKEN);

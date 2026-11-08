@@ -29,9 +29,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import com.shineunsigan.snsg.auth.application.AuthProperties;
-import com.shineunsigan.snsg.auth.application.CompleteSignUpUseCase;
-import com.shineunsigan.snsg.auth.application.ReissueTokenUseCase;
-import com.shineunsigan.snsg.auth.application.SocialLoginUseCase;
+import com.shineunsigan.snsg.auth.application.CompleteSignUpFacade;
+import com.shineunsigan.snsg.auth.application.ReissueTokenFacade;
+import com.shineunsigan.snsg.auth.application.SocialLoginFacade;
 import com.shineunsigan.snsg.auth.application.dto.result.SocialAuthResult;
 import com.shineunsigan.snsg.auth.application.dto.result.TokenResult;
 import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
@@ -80,13 +80,13 @@ class AuthControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private SocialLoginUseCase socialLoginUseCase;
+    private SocialLoginFacade socialLoginFacade;
 
     @MockitoBean
-    private CompleteSignUpUseCase completeSignUpUseCase;
+    private CompleteSignUpFacade completeSignUpFacade;
 
     @MockitoBean
-    private ReissueTokenUseCase reissueTokenUseCase;
+    private ReissueTokenFacade reissueTokenFacade;
 
     @MockitoBean
     private AuthProperties authProperties;
@@ -98,7 +98,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("기존 회원 콜백은 refresh를 쿠키로 심고 프론트엔드로 보낸다. 토큰은 URL에 넣지 않는다")
     void callbackForExistingUser() throws Exception {
-        when(socialLoginUseCase.authenticate(SocialProvider.KAKAO, "code"))
+        when(socialLoginFacade.authenticate(SocialProvider.KAKAO, "code"))
                 .thenReturn(new SocialAuthResult.LoggedIn(new TokenResult("access", REFRESH_TOKEN)));
 
         mockMvc.perform(get("/api/v1/auth/kakao/callback").param("code", "code"))
@@ -111,7 +111,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("신규 사용자 콜백은 가입 토큰 쿠키를 심고 signUp 표시와 함께 보낸다")
     void callbackForNewUser() throws Exception {
-        when(socialLoginUseCase.authenticate(SocialProvider.KAKAO, "code"))
+        when(socialLoginFacade.authenticate(SocialProvider.KAKAO, "code"))
                 .thenReturn(new SocialAuthResult.SignUpRequired("signup-token"));
 
         mockMvc.perform(get("/api/v1/auth/kakao/callback").param("code", "code"))
@@ -124,7 +124,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("재발급 응답 본문에는 access token만 담고 refresh는 쿠키로만 내보낸다")
     void reissueDoesNotLeakRefreshToken() throws Exception {
-        when(reissueTokenUseCase.reissue(REFRESH_TOKEN)).thenReturn(new TokenResult("new-access", "new-refresh"));
+        when(reissueTokenFacade.reissue(REFRESH_TOKEN)).thenReturn(new TokenResult("new-access", "new-refresh"));
 
         mockMvc.perform(post("/api/v1/auth/tokens").cookie(new Cookie(AuthCookieFactory.REFRESH_TOKEN, REFRESH_TOKEN)))
                 .andExpect(status().isOk())
@@ -137,7 +137,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("저장된 토큰과 다르면 401 INVALID_REFRESH_TOKEN")
     void reissueWithInvalidToken() throws Exception {
-        when(reissueTokenUseCase.reissue(REFRESH_TOKEN))
+        when(reissueTokenFacade.reissue(REFRESH_TOKEN))
                 .thenThrow(new BusinessException(AuthErrorCode.INVALID_REFRESH_TOKEN));
 
         mockMvc.perform(post("/api/v1/auth/tokens").cookie(new Cookie(AuthCookieFactory.REFRESH_TOKEN, REFRESH_TOKEN)))
@@ -148,7 +148,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("가입을 마치면 가입 토큰 쿠키를 지우고 refresh 쿠키를 심는다")
     void signUpReplacesCookies() throws Exception {
-        when(completeSignUpUseCase.completeSignUp(any())).thenReturn(new TokenResult("access", REFRESH_TOKEN));
+        when(completeSignUpFacade.completeSignUp(any())).thenReturn(new TokenResult("access", REFRESH_TOKEN));
 
         signUp("""
                 {"name": "김민트", "nickname": "민트초코", "gender": "FEMALE", "birthDate": "1996-04-12"}
@@ -171,7 +171,7 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.errors[0].field").value("gender"))
                 .andExpect(jsonPath("$.errors[0].message").value("성별을 선택해주세요."));
 
-        verify(completeSignUpUseCase, never()).completeSignUp(any());
+        verify(completeSignUpFacade, never()).completeSignUp(any());
     }
 
     @Test
@@ -187,7 +187,7 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.errors[0].field").value("name"))
                 .andExpect(jsonPath("$.errors[0].message").value(NAME_MESSAGE));
 
-        verify(completeSignUpUseCase, never()).completeSignUp(any());
+        verify(completeSignUpFacade, never()).completeSignUp(any());
     }
 
     @Test
@@ -219,7 +219,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("이메일이 빈 문자열이면 없음으로 보고 받는다")
     void signUpAcceptsEmptyEmail() throws Exception {
-        when(completeSignUpUseCase.completeSignUp(any())).thenReturn(new TokenResult("access", REFRESH_TOKEN));
+        when(completeSignUpFacade.completeSignUp(any())).thenReturn(new TokenResult("access", REFRESH_TOKEN));
 
         signUp("""
                 {"name": "김민트", "nickname": "민트초코", "email": "", "gender": "FEMALE", "birthDate": "1996-04-12"}
@@ -275,7 +275,7 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.errors").doesNotExist());
 
-        verify(completeSignUpUseCase, never()).completeSignUp(any());
+        verify(completeSignUpFacade, never()).completeSignUp(any());
     }
 
     @Test
@@ -292,7 +292,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("업무 오류(409 DUPLICATED_NICKNAME) 응답에는 errors가 없다")
     void businessErrorHasNoErrors() throws Exception {
-        when(completeSignUpUseCase.completeSignUp(any()))
+        when(completeSignUpFacade.completeSignUp(any()))
                 .thenThrow(new BusinessException(UserErrorStub.DUPLICATED_NICKNAME));
 
         signUp("""
@@ -312,7 +312,7 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"))
                 .andExpect(jsonPath("$.errors").doesNotExist());
 
-        verify(reissueTokenUseCase, never()).reissue(any());
+        verify(reissueTokenFacade, never()).reissue(any());
     }
 
     @Test
@@ -326,7 +326,7 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(cookie().maxAge(AuthCookieFactory.REFRESH_TOKEN, 0));
 
-        verify(reissueTokenUseCase).logout(userId);
+        verify(reissueTokenFacade).logout(userId);
         SecurityContextHolder.clearContext();
     }
 

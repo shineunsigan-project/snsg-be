@@ -20,7 +20,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
-public class ReissueTokenUseCase {
+public class ReissueTokenFacade {
 
     private final TokenPort tokenPort;
     private final RefreshTokenStorePort refreshTokenStorePort;

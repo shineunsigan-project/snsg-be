@@ -12,7 +12,7 @@
 └── <domain>/
     ├── presentation/             # Controller, errorhandler
     │   └── dto/request, dto/response
-    ├── application/              # XxxCommandService, XxxQueryService
+    ├── application/              # XxxCommandService, XxxQueryService, XxxFacade
     │   ├── port/in/              # inbound: XxxUseCase (타 도메인 전용 입구)
     │   ├── port/out/             # outbound: XxxPort (infrastructure가 구현)
     │   ├── event/                # 타 도메인에 알리는 이벤트 (발행 도메인 소유)
@@ -35,37 +35,42 @@
   - DB: `domain/repository` 인터페이스 ← `infrastructure/persistence`의 `XxxRepositoryImpl`
   - 그 외 외부 기술(Redis, Kafka, 외부 API, 타 도메인 등): `application/port/out`의 `XxxPort` ← `infrastructure`의 `XxxAdapter`
 - presentation은 infrastructure를 import하지 않는다. 같은 도메인의 presentation과 infrastructure가 같은 설정값을 읽어야 하면 그 설정 record를 application에 둔다. 예: refresh 쿠키 수명(presentation)과 Redis TTL(infrastructure)은 `auth/application/AuthProperties` 하나에서 읽는다.
-- 계층 방향, infrastructure 참조 금지, 도메인 간 참조 허용 대상, 도메인 간 순환 금지, common의 도메인 import 금지는 ArchUnit 테스트(`ArchitectureTest`)가 검사한다. 리뷰에 맡기지 않는다. 검사 범위는 `.claude/rules/testing.md`의 ArchUnit 항목.
+- 계층 방향, infrastructure 참조 금지, 도메인 간 참조 허용 대상, 도메인 간 순환 금지, common의 도메인 import 금지, facade의 `@Transactional` 금지, Command·Query 서비스의 이벤트 발행 포트 외 `port/out` 의존 금지는 ArchUnit 테스트(`ArchitectureTest`)가 검사한다. 리뷰에 맡기지 않는다. 검사 범위는 `.claude/rules/testing.md`의 ArchUnit 항목.
 
-## Service와 UseCase
+## Service와 Facade
 
 | | 담당 | 의존할 수 있는 것 | 트랜잭션 |
 |---|---|---|---|
 | `XxxCommandService` | 자기 도메인의 쓰기 | repository, 이벤트 발행 포트 | `@Transactional` |
 | `XxxQueryService` | 자기 도메인의 조회 | repository | 읽기 전용 |
-| `XxxUseCase` (행위별 클래스) | 흐름 조합 | 자기 도메인의 `port/out`(외부 API·저장소·타 도메인), Command·Query 서비스 | **걸지 않는다** |
+| `XxxFacade` (행위별 클래스) | 흐름 조합 | 자기 도메인의 `port/out`(외부 API·Redis·파일 저장소·타 도메인), Command·Query 서비스 | **걸지 않는다** |
 
 - **Command·Query 서비스는 repository와 이벤트 발행 포트만 의존한다.** 외부 API, 타 도메인 호출, 다른 기술(Redis 등)은 여기 들어오지 않는다.
-  - **같은 도메인의 다른 서비스도 주입하지 않는다.** 서비스끼리 엮이면 트랜잭션이 중첩되고 의존이 번진다. 조합은 UseCase가 한다.
-  - `port/out`을 서비스에 넣고 싶어지면, 그 흐름을 UseCase로 옮긴다. 이벤트 발행 포트만 예외다.
+  - **같은 도메인의 다른 서비스도 주입하지 않는다.** 서비스끼리 엮이면 트랜잭션이 중첩되고 의존이 번진다. 조합은 facade가 한다.
+  - `port/out`을 서비스에 넣고 싶어지면, 그 흐름을 facade로 옮긴다. 이벤트 발행 포트만 예외다.
   - **설정(`@ConfigurationProperties` record)은 의존으로 세지 않는다.** I/O도 호출할 메서드도 없는 값 묶음이라, 규칙이 막으려는 외부 시스템·타 도메인과 성격이 다르다. 설정값은 `@Value` 대신 record로 묶어 주입한다.
   - 의존이 4개를 넘으면 애그리거트 경계가 잘못 그어진 건 아닌지 다시 본다. 한 애그리거트의 구성요소 수가 상한이다.
-- **외부 호출이나 타 도메인 호출, 여러 서비스 조합이 필요한 흐름은 `XxxUseCase` 클래스가 맡는다.** 행위마다 하나씩 만든다(`SocialLoginUseCase`, `CompleteSignUpUseCase`).
+- **facade(`XxxFacade`)는 아래 두 경우에만 만든다.** application 패키지에 두고, 행위마다 하나씩 만든다(`SocialLoginFacade`, `CompleteSignUpFacade`). 트랜잭션을 걸지 않는다.
+  - **이벤트 발행 포트가 아닌 `port/out`을 호출하는 흐름.** 외부 API, Redis, 파일 저장소, 다른 도메인이 여기 든다. 다른 도메인은 지금은 코드 참조 adapter, 서비스 분리 후에는 Feign → 상대의 `/internal` 컨트롤러다. 이유: 외부 호출을 트랜잭션 밖에 둔다.
+  - **같은 도메인의 여러 서비스를 조합하는 흐름.** 이유: 서비스끼리 주입하지 않는다.
   - 이렇게 두면 **트랜잭션 안에 외부 호출이 들어갈 수 없다.** 규칙으로 막는 게 아니라 구조가 막는다. 외부 API가 느려져 DB 커넥션이 말라붙는 사고를 구조적으로 차단한다.
-- 가진 데이터가 없는 도메인은 Command 서비스 없이 UseCase만 가질 수 있다. auth가 그렇다. 자기 테이블이 생기면 그때 만든다.
+- "다른 도메인 동기 호출"은 별도 기준이 아니다. facade는 다른 도메인의 서비스를 직접 부르지 않고 자기 `port/out`만 부르므로 첫째 경우에 든다.
+- facade에는 비즈니스 규칙을 두지 않는다. 규칙은 엔티티·서비스에 둔다.
+- facade가 다른 facade를 부르지 않는다.
+- 복잡도는 facade를 만드는 기준이 아니다. 흐름이 길어도 위 두 경우가 아니면 서비스에 둔다.
+- 가진 데이터가 없는 도메인은 Command 서비스 없이 facade만 가질 수 있다. auth가 그렇다. 자기 테이블이 생기면 그때 만든다.
 - 서비스가 커져 한눈에 안 들어오면(대략 150줄) 책임별로 나눈다. 행위별로 나누지 않는다.
 
 ## Port
 
 - inbound `port/in/XxxUseCase`: 타 도메인이 이 도메인을 호출하는 입구만 둔다 (코드 참조, 타 도메인 이벤트 수신). `port/in` 목록이 곧 도메인 간 계약이다.
-- **UseCase는 행위별로 만든다.** 단 자기 도메인 안에서 Command/Query 서비스만으로 끝나는 일에는 만들지 않는다. 만드는 경우는 둘이다.
-  - 타 도메인이 호출해야 할 때
-  - 여러 서비스를 조합해야 할 때
-- **구현은 `XxxCommandService`·`XxxQueryService`가 UseCase를 구현한다.** UseCase 구현만을 위한 별도 클래스를 만들지 않는다.
-- 사용자 요청은 `port/in` UseCase가 아니다. Controller는 같은 도메인의 application을 직접 호출한다. 대개 Service이고, 조합 흐름이면 행위별 UseCase 클래스다(위 "Service와 UseCase", `.claude/rules/api.md` Controller 절).
-- 같은 기능을 사용자와 타 도메인이 모두 쓰면 Service가 UseCase를 구현하고, Controller는 Service를 그대로 호출한다.
+- **UseCase는 행위별로 만들고, 타 도메인이 호출해야 할 때만 만든다.** 자기 도메인 안에서만 쓰는 흐름에는 만들지 않는다. 여러 서비스 조합은 facade가 맡는다.
+- **`UseCase` 접미사는 `port/in` 인터페이스에만 쓴다.** 다른 도메인(코드 참조·이벤트 수신)이 부르지 않는 행위별 클래스는 `XxxFacade`다. 이름만 보고 도메인 간 계약인지 알 수 있게 한다.
+- **구현은 `XxxCommandService`·`XxxQueryService`가 UseCase를 구현한다.** 흐름이 facade 기준에 해당하면 facade가 구현한다(`UploadProfileImageFacade`, `RevokeAuthFacade`).
+- 사용자 요청은 UseCase가 아니다. Controller는 같은 도메인의 Service나 facade를 직접 호출한다(`.claude/rules/api.md` Controller 절).
+- 같은 기능을 사용자와 타 도메인이 모두 쓰면 Service(facade 기준에 해당하면 facade)가 UseCase를 구현하고, Controller는 그 클래스를 그대로 호출한다.
 - UseCase는 기능 단위로 나누고 이름은 동사로 시작한다 (`CreateMatchingUseCase`, `AcceptMatchingUseCase`). 하나의 Service가 여러 UseCase를 구현해도 된다.
-- UseCase 구현만을 위한 별도 facade/adapter 클래스는 만들지 않는다. 여러 Service를 조합해야 할 때만 둔다.
+- UseCase 구현만을 위한 별도 facade/adapter 클래스, 즉 서비스 메서드 하나로 넘기기만 하는 클래스는 만들지 않는다. facade 기준(Service와 Facade 절)에 해당하는 흐름이면 facade가 `port/in`을 구현해도 된다.
 - 서비스 분리 시 UseCase 하나가 `/internal/v1` API 하나가 된다. 호출 측 adapter는 HTTP 클라이언트로 교체한다.
 - outbound `port/out/XxxPort`: application이 필요로 하는 외부 기능. 기술 이름이 아니라 역할로 이름 짓는다 (`UserSettingPort`, `MatchingEventPort`).
   - 포트 이름은 도메인마다 겹쳐도 된다(auth·schedule 모두 `UserPort`). 단 **adapter는 Spring 빈이라 단순 클래스명이 다른 도메인과 같으면 빈 이름이 겹쳐 기동이 실패한다**(`ConflictingBeanDefinitionException`). 겹치면 앞에 자기 도메인 이름을 붙인다. 예: auth의 `UserAdapter`가 있어 schedule은 `ScheduleUserAdapter`·`SchedulePlaceAdapter`다.
@@ -109,8 +114,8 @@
 - 발행: Service는 `port/out/XxxEventPort`로 발행하고, `infrastructure/event/XxxEventAdapter`가 `ApplicationEventPublisher`로 구현한다. Kafka 도입 시 adapter만 교체한다.
 - 도메인 간 이벤트는 기본적으로 결과적 일관성으로 처리한다.
   - 리스너: `@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)`
-  - 리스너가 호출하는 UseCase 구현: `@Transactional(propagation = Propagation.REQUIRES_NEW)`. 없으면 AFTER_COMMIT 시점이라 수신 측 DB 변경이 저장되지 않는다.
-  - **트랜잭션 밖에서 발행한 이벤트는 AFTER_COMMIT 리스너에 도착하지 않는다.** 커밋할 트랜잭션이 없기 때문이다. 트랜잭션을 걸지 않는 UseCase(예: auth의 UseCase)에서 발행하지 않는다.
+  - 리스너가 호출하는 UseCase 구현: `@Transactional(propagation = Propagation.REQUIRES_NEW)`. 없으면 AFTER_COMMIT 시점이라 수신 측 DB 변경이 저장되지 않는다. 구현이 facade면 facade에는 걸지 않고 DB를 바꾸는 서비스 메서드에 건다.
+  - **트랜잭션 밖에서 발행한 이벤트는 AFTER_COMMIT 리스너에 도착하지 않는다.** 커밋할 트랜잭션이 없기 때문이다. 트랜잭션을 걸지 않는 facade(예: auth의 facade)에서 발행하지 않는다.
 - 같은 트랜잭션(`@EventListener`)은 두 도메인 변경이 반드시 원자적이어야 할 때만 쓰고, 그 이유와 "서비스 분리 시 saga 필요"를 주석으로 남긴다.
 - AFTER_COMMIT 방식은 수신 실패 시 이벤트가 유실된다. 유실되면 안 되는 이벤트가 생기면 Spring Modulith(Event Publication Registry) 도입을 제안한다.
 - **유실이 보안·정합성 문제로 번지는 이벤트는 수신 측에 안전망을 함께 둔다.** 이벤트는 즉시 정리용이고, 안전망이 최종 보장이다.

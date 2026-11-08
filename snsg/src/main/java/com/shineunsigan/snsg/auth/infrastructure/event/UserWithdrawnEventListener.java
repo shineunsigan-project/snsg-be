@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
-import com.shineunsigan.snsg.auth.application.RevokeAuthUseCase;
+import com.shineunsigan.snsg.auth.application.port.in.RevokeAuthUseCase;
 import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
 import com.shineunsigan.snsg.user.application.event.UserWithdrawnEvent;
 import com.shineunsigan.snsg.user.domain.constants.WithdrawReason;
@@ -15,7 +15,7 @@ import lombok.RequiredArgsConstructor;
  * user 도메인의 탈퇴 이벤트를 받아 인증 흔적을 지운다.
  * <p>
  * 이벤트가 유실돼 refresh token이 남아도 재발급 시점에 사용자가 유효한지 다시 확인하므로 막힌다
- * ({@code ReissueTokenUseCase}).
+ * ({@code ReissueTokenFacade}).
  */
 @Component
 @RequiredArgsConstructor
