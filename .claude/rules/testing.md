@@ -55,4 +55,5 @@ paths:
 - 패키지 의존 규칙(`.claude/rules/package-structure.md`)은 ArchUnit 테스트 `com.shineunsigan.snsg.ArchitectureTest`가 검사한다. 규칙 하나에 테스트 메서드 하나다.
   - 프로덕션 클래스만 검사한다(`ImportOption.Predefined.DO_NOT_INCLUDE_TESTS`). 테스트 코드는 다른 도메인을 import해도 걸리지 않는다.
   - 도메인은 base package 바로 아래 패키지 중 `common`을 뺀 것으로 자동 인식한다. 도메인 이름을 적어두지 않으므로 도메인을 추가해도 테스트를 고치지 않는다. base package 바로 아래 클래스(`SnsgApplication`)와 base package 밖(라이브러리)으로 향하는 의존은 보지 않는다.
+  - 클래스 이름 접미사로 대상을 고르는 규칙이 있다. `Facade`로 끝나는 클래스와 그 메서드에 `@Transactional`(Spring·jakarta)이 없는지, `CommandService`·`QueryService`로 끝나는 클래스가 `application.port.out`의 타입 중 `EventPort`로 끝나지 않는 것에 의존하지 않는지 본다. 이름 규칙을 벗어나면 규칙이 조용히 빠지므로 클래스 이름을 바꿀 때 함께 본다.
   - Spring 컨텍스트 없이 돈다. `./gradlew test --tests '*Architecture*'`로 따로 돌릴 수 있다.
