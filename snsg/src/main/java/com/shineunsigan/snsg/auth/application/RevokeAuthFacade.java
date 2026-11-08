@@ -4,6 +4,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
+import com.shineunsigan.snsg.auth.application.port.in.RevokeAuthUseCase;
 import com.shineunsigan.snsg.auth.application.port.out.RefreshTokenStorePort;
 import com.shineunsigan.snsg.auth.application.port.out.SocialUnlinkPort;
 import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
@@ -20,11 +21,12 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class RevokeAuthUseCase {
+public class RevokeAuthFacade implements RevokeAuthUseCase {
 
     private final RefreshTokenStorePort refreshTokenStorePort;
     private final SocialUnlinkPort socialUnlinkPort;
 
+    @Override
     public void revoke(UUID userId, SocialProvider provider, String providerUserId, boolean unlinkSocial) {
         refreshTokenStorePort.delete(userId);
 

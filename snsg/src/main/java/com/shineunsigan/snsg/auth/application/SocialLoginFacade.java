@@ -25,7 +25,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
-public class SocialLoginUseCase {
+public class SocialLoginFacade {
 
     private final List<SocialLoginPort> socialLoginPorts;
     private final UserPort userPort;

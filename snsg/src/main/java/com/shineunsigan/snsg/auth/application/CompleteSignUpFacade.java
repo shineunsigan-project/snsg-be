@@ -20,7 +20,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
-public class CompleteSignUpUseCase {
+public class CompleteSignUpFacade {
 
     /** 업로드 API가 돌려주는 경로. 클라이언트가 임의의 외부 주소를 넣지 못하게 막는다. */
     private static final String UPLOADED_IMAGE_PREFIX = "/images/profiles/";

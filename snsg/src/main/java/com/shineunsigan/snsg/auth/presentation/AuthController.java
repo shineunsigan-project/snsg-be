@@ -22,9 +22,9 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.shineunsigan.snsg.auth.application.CompleteSignUpUseCase;
-import com.shineunsigan.snsg.auth.application.ReissueTokenUseCase;
-import com.shineunsigan.snsg.auth.application.SocialLoginUseCase;
+import com.shineunsigan.snsg.auth.application.CompleteSignUpFacade;
+import com.shineunsigan.snsg.auth.application.ReissueTokenFacade;
+import com.shineunsigan.snsg.auth.application.SocialLoginFacade;
 import com.shineunsigan.snsg.auth.application.dto.result.SocialAuthResult;
 import com.shineunsigan.snsg.auth.application.dto.result.TokenResult;
 import com.shineunsigan.snsg.auth.domain.constants.SocialProvider;
@@ -50,9 +50,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuthController {
 
-    private final SocialLoginUseCase socialLoginUseCase;
-    private final CompleteSignUpUseCase completeSignUpUseCase;
-    private final ReissueTokenUseCase reissueTokenUseCase;
+    private final SocialLoginFacade socialLoginFacade;
+    private final CompleteSignUpFacade completeSignUpFacade;
+    private final ReissueTokenFacade reissueTokenFacade;
     private final AuthCookieFactory cookieFactory;
 
     @Value("${app.frontend-redirect-uri}")
@@ -70,7 +70,7 @@ public class AuthController {
             description = "소셜 인증 페이지로 이동. Location 헤더에 주소가 담긴다", content = @Content))
     public ResponseEntity<Void> authorize(@PathVariable SocialProvider provider) {
         return ResponseEntity.status(302)
-                .location(URI.create(socialLoginUseCase.authorizeUrl(provider)))
+                .location(URI.create(socialLoginFacade.authorizeUrl(provider)))
                 .build();
     }
 
@@ -84,7 +84,7 @@ public class AuthController {
     @ApiResponses(@io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "302",
             description = "프론트엔드로 이동. 쿠키가 심어진다", content = @Content))
     public ResponseEntity<Void> callback(@PathVariable SocialProvider provider, @RequestParam("code") String code) {
-        SocialAuthResult result = socialLoginUseCase.authenticate(provider, code);
+        SocialAuthResult result = socialLoginFacade.authenticate(provider, code);
 
         if (result instanceof SocialAuthResult.LoggedIn loggedIn) {
             return redirectToFrontend(cookieFactory.refreshToken(loggedIn.tokens().refreshToken()), false);
@@ -104,7 +104,7 @@ public class AuthController {
         requireCookie(signUpToken, AuthErrorCode.INVALID_SIGNUP_TOKEN);
 
         return ResponseEntity.ok(
-                ApiResponse.success(SignUpSessionResponse.from(completeSignUpUseCase.findSession(signUpToken))));
+                ApiResponse.success(SignUpSessionResponse.from(completeSignUpFacade.findSession(signUpToken))));
     }
 
     @SecurityRequirements
@@ -118,7 +118,7 @@ public class AuthController {
             @RequestPart("image") MultipartFile image) throws IOException {
         requireCookie(signUpToken, AuthErrorCode.INVALID_SIGNUP_TOKEN);
 
-        String profileImageUrl = completeSignUpUseCase.uploadProfileImage(signUpToken, image.getBytes());
+        String profileImageUrl = completeSignUpFacade.uploadProfileImage(signUpToken, image.getBytes());
 
         return ResponseEntity.ok(ApiResponse.success(new ProfileImageResponse(profileImageUrl)));
     }
@@ -135,7 +135,7 @@ public class AuthController {
             @CookieValue(value = AuthCookieFactory.SIGN_UP_TOKEN, required = false) String signUpToken,
             @Valid @RequestBody SignUpRequest request) {
         requireCookie(signUpToken, AuthErrorCode.INVALID_SIGNUP_TOKEN);
-        TokenResult result = completeSignUpUseCase.completeSignUp(request.toCommand(signUpToken));
+        TokenResult result = completeSignUpFacade.completeSignUp(request.toCommand(signUpToken));
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookieFactory.refreshToken(result.refreshToken()).toString())
@@ -153,7 +153,7 @@ public class AuthController {
     public ResponseEntity<ApiResponse<TokenResponse>> reissue(
             @CookieValue(value = AuthCookieFactory.REFRESH_TOKEN, required = false) String refreshToken) {
         requireCookie(refreshToken, AuthErrorCode.INVALID_REFRESH_TOKEN);
-        TokenResult result = reissueTokenUseCase.reissue(refreshToken);
+        TokenResult result = reissueTokenFacade.reissue(refreshToken);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookieFactory.refreshToken(result.refreshToken()).toString())
@@ -164,7 +164,7 @@ public class AuthController {
     @Operation(summary = "로그아웃",
             description = "서버에 보관된 refresh token을 지우고 쿠키를 만료시킨다. 이미 발급된 access token은 만료까지 유효하므로 클라이언트에서 버린다.")
     public ResponseEntity<ApiResponse<Void>> logout(@AuthenticationPrincipal UUID userId) {
-        reissueTokenUseCase.logout(userId);
+        reissueTokenFacade.logout(userId);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookieFactory.expired(AuthCookieFactory.REFRESH_TOKEN).toString())
