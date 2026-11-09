@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.user.domain.repository;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,7 +20,9 @@ public interface UserRepository {
     Optional<User> findById(UUID id);
 
     /**
-     * 대소문자를 무시하고 비교한다. 탈퇴한 사용자의 닉네임은 보지 않는다.
+     * 닉네임 중복 판정(POL-U3)을 여기서만 한다. 대소문자를 무시하고 비교한다.
+     * 탈퇴하지 않은 회원이 쓰고 있거나, 삭제되지 않은 닉네임 이력 중 보호 기간({@code reserved_until})이
+     * {@code now}보다 뒤인 행이 있으면 참이다. 탈퇴한 회원의 현재 닉네임은 보지 않는다.
      */
-    boolean existsByNickname(String nickname);
+    boolean isNicknameTaken(String nickname, LocalDateTime now);
 }

@@ -168,6 +168,43 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseProfileImageResponse"
       security: []
+  /api/v1/users/nickname-availability:
+    get:
+      tags:
+      - 사용자
+      summary: 닉네임 사용 가능 여부
+      description: |-
+        입력한 닉네임을 쓸 수 있는지 알려준다. 가입 닉네임 입력 화면과 프로필 수정 화면에서 닉네임 칸을 벗어날 때 부른다.
+        결과는 안내용이다. 가입·프로필 수정 API가 저장할 때 같은 검사를 다시 하므로, 여기서 true였어도 그 사이 다른 사람이 쓰면 가입·수정이 DUPLICATED_NICKNAME으로 실패할 수 있다.
+        토큰은 선택이다. 가입 중에는 토큰 없이 부른다. 토큰이 있으면 본인의 현재 닉네임은 사용 가능(true)으로 본다(대소문자 무시).
+        토큰이 틀리거나 만료돼도 401이 아니라 익명으로 처리한다. 이때는 본인 닉네임도 사용 중으로 나온다.
+        판정 순서: 형식(2~10자의 한글·영문·숫자·.·_)이 틀리면 INVALID_FORMAT, 본인의 현재 닉네임이면 true,
+        다른 회원이 쓰고 있거나 보호 기간(변경 전 14일, 탈퇴 90일)이 남았으면 DUPLICATED. 대소문자는 무시한다.
+        DUPLICATED는 사용 중과 보호 중을 구분하지 않는다. 보호 중임을 알리면 다른 회원의 탈퇴·변경 여부가 드러나기 때문이다.
+        조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
+      operationId: checkNicknameAvailability
+      parameters:
+      - name: nickname
+        in: query
+        description: 확인할 닉네임. 2~10자의 한글·영문·숫자·.·_
+        required: true
+        schema:
+          type: string
+        example: 민트초코
+      responses:
+        "200":
+          description: 판정 결과. 형식 오류·중복도 200이고 data.available과 data.reason으로 알려준다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseNicknameAvailabilityResponse"
+        "400":
+          description: "INVALID_REQUEST: nickname 파라미터가 없다. 빈 값(?nickname=)은 400이\
+            \ 아니라 200 INVALID_FORMAT이다"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseNicknameAvailabilityResponse"
   /api/v1/regions:
     get:
       tags:
@@ -524,6 +561,38 @@ components:
           type: string
           description: 저장된 사진 경로. 가입 요청의 profileImageUrl에 그대로 넣는다
           example: /images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png
+    ApiResponseNicknameAvailabilityResponse:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/NicknameAvailabilityResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    NicknameAvailabilityResponse:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: 쓸 수 있는 닉네임이면 true
+          example: false
+        reason:
+          type: string
+          description: |-
+            쓸 수 없는 이유. available이 true면 null이다.
+            INVALID_FORMAT: 2~10자의 한글·영문·숫자·.·_가 아니다. 형식 안내 문구를 보여준다.
+            DUPLICATED: 다른 회원이 쓰고 있거나 보호 기간(변경 전 14일, 탈퇴 90일)이 남은 닉네임이다. 둘을 구분하지 않는다. 다른 닉네임을 입력하게 한다
+          enum:
+          - INVALID_FORMAT
+          - DUPLICATED
+          example: DUPLICATED
     ApiResponseListRegionResponse:
       type: object
       properties:
