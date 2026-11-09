@@ -25,8 +25,8 @@ API 키는 Linear Settings → Account → Security & access → Personal API ke
 ### 자주 쓰는 명령
 
 ```bash
-# 이슈 만들기
-linear issue create --team SHI --project "쉬는시간 MVP" -l BE -l 사용자 -t "<제목>" -d "<본문>"
+# 이슈 만들기. 본문은 아래 "본문 템플릿" 형식으로 파일에 써서 넘긴다
+linear issue create --team SHI --project "쉬는시간 MVP" -l BE -l 사용자 -t "<제목>" --description-file <본문.md>
 
 # 조회
 linear issue list --team SHI --all-states -A   # 상태·담당자 무관 전체
@@ -71,6 +71,28 @@ linear issue update SHI-<번호> -s "In Progress" -a @me
 
 - **BE와 FE 작업은 이슈를 나눈다.** 저장소(snsg-be, snsg-fr)가 다르면 브랜치와 PR이 달라지고, 한 PR ↔ 한 이슈가 기본이다. 한 이슈에 PR이 여럿 붙으면 마지막 PR이 머지돼야 상태가 바뀌어 진행 상황이 흐려진다.
 - 작업을 시작할 때 이슈를 직접 **In Progress**로 바꾼다(`linear issue update SHI-<번호> -s "In Progress" -a @me`). 아래 자동 전환은 PR이 열린 뒤에만 움직여서, 그 전까지는 아무도 작업 중인지 알 수 없다.
+
+### 본문 템플릿 (BE)
+
+BE 이슈 본문은 세 절만 쓴다. Linear 웹에서는 SHI 팀 템플릿 `BE 작업`을 고르면 본문과 라벨 `BE`, 프로젝트 `쉬는시간 MVP`가 채워진다.
+
+```markdown
+## 개요
+
+(왜 하는지 한두 문장. 기능 명세 작업 번호가 있으면 함께 적는다. 예: 기능 명세 T-11)
+
+## 범위
+
+* (무엇을 바꾸는지. API·마이그레이션·도메인 단위로)
+
+## 범위 밖
+
+* (넘긴 일이 있을 때만. 없으면 이 절을 지운다)
+```
+
+- 절 이름은 FE 이슈와 같게 둔다. FE 이슈는 이 세 절에 결정·임시 계약 등을 더해 쓴다.
+- 결정과 그 이유는 PR의 background에, 실제로 돌린 검증은 PR의 test에 남긴다. 이슈에 따로 적지 않는다. 이슈 본문이 진행 기록으로 길어지지 않게 하기 위해서다.
+- 진행 상황은 이슈 상태와 연결된 PR이 보여준다.
 
 ## GitHub 연동
 
