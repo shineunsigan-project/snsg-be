@@ -10,6 +10,7 @@ paths:
 - 클라이언트용: `/api/v1/<resources>`. 리소스는 복수형 kebab-case 명사 (`/api/v1/user-settings`).
 - 서비스 간 내부 호출용: `/internal/v1/<resources>`. 외부에 노출하지 않는다.
 - 동사 대신 하위 리소스로 표현한다: `PATCH /api/v1/matchings/{id}/approval`
+- 요청자 자신의 리소스는 id 대신 `me`로 가리킨다. 대상은 인증 주체로 정해진다. 예: `DELETE /api/v1/users/me`(탈퇴), `DELETE /api/v1/schedules/{scheduleId}/participants/me`(참여 취소).
 - prefix를 두는 이유:
   - `/api`: 이후 생길 수 있는 SSR 페이지, 외부 연동(webhook 등), actuator·문서 경로와 구분하고, 보안·CORS·게이트웨이 라우팅을 prefix 하나로 적용하기 위해
   - `/v1`: 호환되지 않는 변경이 필요할 때, 바로 바꿀 수 없는 클라이언트(배포 전에 이미 열려 있던 웹 페이지, 외부 연동)를 v1에 둔 채 v2를 병행 배포하기 위해. 버전은 breaking change가 있을 때만 올린다
@@ -17,7 +18,7 @@ paths:
 
 ## Controller
 
-- 사용자용 Controller는 같은 도메인의 application에 의존한다. 자기 도메인 안에서 끝나는 일은 Service(`UserController`, `RegionController`), 이벤트 발행 포트가 아닌 `port/out`(외부 API·Redis·파일 저장소·타 도메인) 호출이나 여러 서비스 조합이 필요한 흐름은 행위별 facade `XxxFacade`다(`AuthController`, `ScheduleController`). 기준은 `.claude/rules/package-structure.md` Service와 Facade 절.
+- 사용자용 Controller는 같은 도메인의 application에 의존한다. 자기 도메인 안에서 끝나는 일은 Service(`UserController`, `RegionController`, `ScheduleController`의 참여 취소), 이벤트 발행 포트가 아닌 `port/out`(외부 API·Redis·파일 저장소·타 도메인) 호출이나 여러 서비스 조합이 필요한 흐름은 행위별 facade `XxxFacade`다(`AuthController`, `ScheduleController`의 개설·참여). 한 Controller 안에서도 엔드포인트마다 따로 정한다. 기준은 `.claude/rules/package-structure.md` Service와 Facade 절.
 - `/internal/v1` Controller(서비스 분리 후)는 `application/port/in`의 UseCase에 의존한다.
 - 반환 타입은 `ResponseEntity<ApiResponse<XxxResponse>>`. Entity나 Result를 그대로 반환하지 않는다.
 - 요청은 `@Valid` + Request record의 Bean Validation으로 형식만 검증한다. 비즈니스 규칙 검증은 domain에서 한다.
@@ -63,6 +64,7 @@ paths:
   - `code`와 `message`는 **실패 전용**이다. 성공 응답에서는 비어 있어 JSON에 나가지 않는다.
   - `errors`(`[{field, message}]`)는 **요청 DTO의 Bean Validation 필드 오류일 때만** 담긴다(`code`는 `INVALID_REQUEST`). JSON 변환 실패(enum 밖 값, 없는 날짜, 타입 오류), `BusinessException`, 404·405 등에는 담지 않는다. 정상적인 FE 입력으로는 나오지 않는 값이라 필드별 안내가 필요 없다.
 - 성공: `ApiResponse.success(data)` 또는 `ApiResponse.success()`. **성공 코드 체계는 두지 않는다.**
+  - 돌려줄 값이 없으면 반환 타입을 `ResponseEntity<ApiResponse<Void>>`로 두고 `ApiResponse.success()`를 200으로 준다. 본문은 `{"isSuccess":true}`다. 예: 로그아웃, 탈퇴, 일정 참여·참여 취소.
   - FE가 성공을 분기해야 하면 code가 아니라 `data`의 필드로 준다(예: `isNewUser`). code로 분기하면 코드가 하나 늘 때 FE가 조용히 깨진다.
   - 화면 문구는 FE가 가진다. 성공 메시지를 서버가 내려주면 문구 하나 바꾸는 데 서버 배포가 필요하다.
 - 실패: `BusinessException(<Domain>ErrorCode)`를 던지고, `common.web`의 전역 예외 처리에서 `ApiResponse.error(...)`로 변환한다.

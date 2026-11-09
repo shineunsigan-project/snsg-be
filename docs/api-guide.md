@@ -43,7 +43,7 @@
 | 상태 | code | 언제 |
 | --- | --- | --- |
 | 400 | `INVALID_REQUEST` | 필수값 누락, 잘못된 JSON 등 요청 형식 오류. 필드 검증 실패면 `errors`에 틀린 필드가 담긴다 |
-| 404·405·415 등 | `INVALID_REQUEST` | 없는 경로, 지원하지 않는 메서드나 Content-Type. 상태 코드는 원래 값 그대로다 |
+| 404·405·415 등 | `INVALID_REQUEST` | 없는 경로, 지원하지 않는 메서드나 Content-Type. 상태 코드는 원래 값 그대로다. 경로는 맞는데 대상이 없어서 나는 404는 업무 코드(`SCHEDULE_NOT_FOUND` 등)로 온다. 상태 코드가 아니라 `code`로 구분한다 |
 | 401 | `UNAUTHENTICATED` | 인증이 필요한 API에 토큰이 없거나 만료·무효 |
 | 500 | `INTERNAL_ERROR` | 서버 오류 |
 
@@ -366,6 +366,101 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   ```
 - **두 번 눌렸을 때**: 같은 사용자의 요청은 서버에서 차례로 처리된다. 두 번째 요청은 첫 번째가 만든 일정과 시작 시각이 같아 409 `SCHEDULE_TIME_CONFLICT`가 되고, **중복 개설은 생기지 않는다.** 그래도 첫 응답을 받기 전까지 [일정 열기] 버튼을 막는다. 첫 응답을 받지 못한 채 다시 보내 409를 받았다면 첫 요청이 이미 성공했을 수 있다.
 
+### 참여
+
+`POST /api/v1/schedules/{scheduleId}/participants`. 일정에 멤버로 참여한다.
+
+- **부르는 화면**: 일정 상세(DTL-03)의 [참여하기].
+- **인증이 필요하다.** 토큰이 없거나 만료되면 401 `UNAUTHENTICATED`다. 재발급 후 다시 부르고, 재발급도 실패하면 로그인 화면으로 간다.
+- **요청 본문은 없다.** 경로의 `scheduleId`(UUID 문자열)만 보낸다. 참여하는 사람은 토큰의 사용자다.
+- 성공하면 **200이고 `data`가 없다.**
+  ```json
+  { "isSuccess": true }
+  ```
+- **성공이든 실패든 일정 상세를 다시 불러 화면을 그린다.** 이 API의 응답은 상세를 돌려주지 않는다. 일정 상세 API는 아직 없다. 생기면 그 API로 다시 그린다.
+- 마지막 자리가 차면 일정은 모집 마감이 된다. 마지막 한 자리에 두 사람이 동시에 참여하면 한 명만 성공하고 다른 한 명은 409 `RECRUIT_CLOSED`다.
+- **참여를 취소한 뒤 다시 참여할 수 있다.** 모집 중이면 [참여하기]를 다시 보여준다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 401 | `UNAUTHENTICATED` | 토큰이 없거나 만료·무효 | 재발급 후 다시 부르고, 실패하면 로그인 화면으로 |
+  | 401 | `USER_NOT_ACTIVE` | 탈퇴한 사용자(남은 access token으로 호출) | 로그인 화면으로 |
+  | 404 | `SCHEDULE_NOT_FOUND` | 없거나 삭제된 일정 | 일정 목록 화면으로 보내고 토스트로 `message`("찾을 수 없는 일정이에요.")를 보여준다. 일정 상세 API의 404와 같은 처리다 |
+  | 409 | `HOST_CANNOT_JOIN` | 내가 연 일정 | 상세를 다시 불러 그린다 |
+  | 409 | `ALREADY_JOINED` | 이미 참여 확정한 일정(두 번 눌렸을 때 포함) | 상세를 다시 불러 그린다. 참여는 된 상태다 |
+  | 409 | `RECRUIT_CLOSED` | 모집이 끝났다. 정원이 찼거나, 시작 시각이 됐거나(같은 시각 포함), 취소·완료된 일정 | 상세를 다시 불러 그린다 |
+  | 409 | `SCHEDULE_TIME_CONFLICT` | 내가 개설했거나 참여 확정한 예정 일정과 시작 시각이 12시간 미만으로 떨어진다. 정확히 12시간 차이는 허용한다 | `message`를 보여준다 |
+  | 400 | `INVALID_REQUEST` | `scheduleId`가 UUID 형식이 아니다 | 정상 화면 흐름에서는 나지 않는다 |
+
+  여러 조건에 걸리면 **`USER_NOT_ACTIVE` → `SCHEDULE_NOT_FOUND` → `HOST_CANNOT_JOIN` → `ALREADY_JOINED` → `RECRUIT_CLOSED` → `SCHEDULE_TIME_CONFLICT`** 순서로 앞의 것이 온다. 예를 들어 이미 참여한 일정이 그 참여로 마감됐어도 `ALREADY_JOINED`이고, 모집이 끝난 일정에는 시간이 겹쳐도 `RECRUIT_CLOSED`다.
+
+  `SCHEDULE_NOT_FOUND`(404)는 없는 경로의 404(`INVALID_REQUEST`)와 **`code`로 구분한다.** 상태 코드만 보고 처리하지 않는다.
+
+  ```json
+  { "isSuccess": false, "code": "USER_NOT_ACTIVE", "message": "이용할 수 없는 사용자예요. 다시 로그인해주세요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "SCHEDULE_NOT_FOUND", "message": "찾을 수 없는 일정이에요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "HOST_CANNOT_JOIN", "message": "내가 연 일정에는 참여할 수 없어요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "ALREADY_JOINED", "message": "이미 참여한 일정이에요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "RECRUIT_CLOSED", "message": "모집이 끝난 일정이에요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "SCHEDULE_TIME_CONFLICT", "message": "앞뒤 12시간 안에 참여하는 다른 일정이 있어요." }
+  ```
+- **두 번 눌렸을 때**: 참여는 한 번만 된다. 두 번째 요청은 409 `ALREADY_JOINED`이고, 상태는 한 번 참여한 것과 같다. 그래도 첫 응답을 받기 전까지 [참여하기] 버튼을 막는다.
+
+### 참여 취소
+
+`DELETE /api/v1/schedules/{scheduleId}/participants/me`. 내 참여를 취소한다.
+
+- **부르는 화면**: 일정 상세의 참여 취소 확인 팝업(DTL-07)의 [확인].
+- **인증이 필요하다.** 토큰이 없거나 만료되면 401 `UNAUTHENTICATED`다. 재발급 후 다시 부르고, 재발급도 실패하면 로그인 화면으로 간다.
+- **요청 본문은 없다.** 경로의 `scheduleId`(UUID 문자열)만 보낸다. 취소하는 사람은 토큰의 사용자다.
+- 성공하면 **200이고 `data`가 없다.**
+  ```json
+  { "isSuccess": true }
+  ```
+- **성공이든 실패든 일정 상세를 다시 불러 화면을 그린다.** 일정 상세 API는 아직 없다. 생기면 그 API로 다시 그린다.
+- **시작 후에도 완료(시작 + 12시간) 전까지 취소할 수 있다.** 시작 + 12시간이 되면(같은 시각 포함) 취소할 수 없다.
+- 시작 전에 취소해 자리가 나면 마감됐던 모집이 다시 열린다. **시작 후 취소로 자리가 나도 모집은 다시 열리지 않는다.**
+- **취소한 뒤 다시 참여할 수 있다**(위 참여 API).
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 401 | `UNAUTHENTICATED` | 토큰이 없거나 만료·무효 | 재발급 후 다시 부르고, 실패하면 로그인 화면으로 |
+  | 404 | `SCHEDULE_NOT_FOUND` | 없거나 삭제된 일정 | 일정 목록 화면으로 보내고 토스트로 `message`("찾을 수 없는 일정이에요.")를 보여준다. 일정 상세 API의 404와 같은 처리다 |
+  | 409 | `HOST_CANNOT_LEAVE` | 내가 연 일정. 개설자는 참여를 취소할 수 없다 | 상세를 다시 불러 그린다 |
+  | 409 | `NOT_PARTICIPANT` | 참여 확정 상태가 아니다. 참여한 적 없음, 이미 취소함 포함 | 상세를 다시 불러 그린다. 재시도해도 안전하다 |
+  | 409 | `PARTICIPATION_NOT_CANCELABLE` | 취소됐거나 완료된(시작 + 12시간이 지난) 일정 | 상세를 다시 불러 그린다 |
+  | 400 | `INVALID_REQUEST` | `scheduleId`가 UUID 형식이 아니다 | 정상 화면 흐름에서는 나지 않는다 |
+
+  여러 조건에 걸리면 **`SCHEDULE_NOT_FOUND` → `HOST_CANNOT_LEAVE` → `NOT_PARTICIPANT` → `PARTICIPATION_NOT_CANCELABLE`** 순서로 앞의 것이 온다. 예를 들어 이미 취소한 사람은 일정이 완료됐어도 `NOT_PARTICIPANT`다.
+
+  `SCHEDULE_NOT_FOUND`(404)는 없는 경로의 404(`INVALID_REQUEST`)와 **`code`로 구분한다.**
+
+  ```json
+  { "isSuccess": false, "code": "SCHEDULE_NOT_FOUND", "message": "찾을 수 없는 일정이에요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "HOST_CANNOT_LEAVE", "message": "내가 연 일정은 참여를 취소할 수 없어요. 일정 전체 취소를 이용해주세요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "NOT_PARTICIPANT", "message": "참여 중인 일정이 아니에요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "PARTICIPATION_NOT_CANCELABLE", "message": "취소되었거나 끝난 일정은 참여를 취소할 수 없어요." }
+  ```
+- **두 번 눌렸을 때**: 취소는 한 번만 된다. 두 번째 요청은 409 `NOT_PARTICIPANT`이고, **재시도해도 안전하다.** 첫 응답을 받지 못해 다시 보냈다가 `NOT_PARTICIPANT`를 받았다면 첫 요청이 이미 성공한 것이다.
+
 ## 화면별로 쓰는 API
 
 | 화면 | 호출 | 응답에 따른 처리 |
@@ -385,8 +480,10 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 일정 개설 (활동 선택) | `GET /api/v1/activity-categories` | 받은 순서대로 활동을 그린다 |
 | 일정 목록 (활동 필터) | `GET /api/v1/activity-categories` | 받은 순서대로 필터를 그린다 |
 | 일정 개설 ([일정 열기]) | `POST /api/v1/schedules` | 201이면 내가 연 일정 목록(LIST-05)으로 이동하고 팝업을 띄운다. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 그 밖의 400·409는 해당 입력을 다시 고르게 한다. 응답 전까지 버튼을 막는다 |
+| 일정 상세 ([참여하기]) | `POST /api/v1/schedules/{scheduleId}/participants` | 200이든 409든 상세를 다시 불러 그린다. 409 `SCHEDULE_TIME_CONFLICT`면 `message`를 보여준다. 404 `SCHEDULE_NOT_FOUND`면 일정 목록으로 보내고 토스트. 응답 전까지 버튼을 막는다 |
+| 일정 상세 (참여 취소 팝업 [확인]) | `DELETE /api/v1/schedules/{scheduleId}/participants/me` | 200이든 409든 상세를 다시 불러 그린다. 409 `NOT_PARTICIPANT`는 이미 취소된 상태다. 404 `SCHEDULE_NOT_FOUND`면 일정 목록으로 보내고 토스트 |
 
-장소 후보·일정 개설 외의 일정 API(목록·상세·참여 등)와 알림 API는 아직 없다. 생기면 이 표에 추가한다.
+일정 목록·상세 등 위 표에 없는 일정 API와 알림 API는 아직 없다. 생기면 이 표에 추가한다.
 
 ## 로컬에서 서버 띄우기
 

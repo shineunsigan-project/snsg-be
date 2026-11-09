@@ -36,9 +36,15 @@ paths:
 - `@DataJpaTest`는 `@Entity`와 Spring Data repository만 등록한다. `@Repository` 구현체를 쓰려면 `@Import`로 직접 넣는다.
 - `@DataJpaTest`는 기본적으로 DataSource를 임베디드 DB로 바꿔치기한다. **우리 스키마는 PostgreSQL 전용 문법(부분 유니크 인덱스)에 의존하므로 반드시 실제 PostgreSQL로 돌린다.** `@AutoConfigureTestDatabase(replace = NONE)`로 `.env`가 가리키는 로컬 PostgreSQL 컨테이너(`snsg-postgres`)에 붙인다. Testcontainers는 쓰지 않는다(의존성 없음). 임베디드로 돌리면 제약이 아예 만들어지지 않아, 테스트는 통과하는데 운영에서 중복 데이터가 들어간다.
 - **DB 연결 수는 "캐시된 테스트 컨텍스트 수 × Hikari 풀 크기"다.** Spring은 컨텍스트를 구성(`@Import` 조합 등)별로 캐시해 JVM이 끝날 때까지 닫지 않고, 컨텍스트마다 풀을 하나씩 잡는다. 기본 풀(10)로는 DB 슬라이스 구성이 열 개쯤 되면 PostgreSQL `max_connections`(100)를 넘어 `FATAL: sorry, too many clients already`로 컨텍스트가 뜨지 않는다. 그래서 `snsg/build.gradle`의 test 태스크가 `spring.datasource.hikari.maximum-pool-size`를 3으로 둔다(SHI-156에서 DB 테스트 컨텍스트가 늘며 간헐 실패가 났다).
-  - 한 테스트에서 동시에 쓰는 연결이 셋을 넘어야 하면 이 값을 함께 본다. 지금 가장 많이 쓰는 곳은 `ScheduleCommandServiceTest`의 동시 개설(둘)이다.
+  - 한 테스트에서 동시에 쓰는 연결이 셋을 넘어야 하면 이 값을 함께 본다. 지금 가장 많이 쓰는 곳은 `ScheduleCommandServiceTest`의 동시 개설·동시 참여(각 둘)다.
   - 실패가 간헐적이라 한 번 통과한 결과로 안심하지 않는다. DB 슬라이스 구성을 더한 작업은 `./gradlew cleanTest build`로 전체를 다시 돌려 확인한다.
 - 한 대상 클래스에 Mockito 흐름 테스트와 실제 PostgreSQL 테스트가 함께 필요하면, 테스트 클래스 이름 규칙(대상 이름 + `Test`)을 지키며 `@Nested` 클래스로 나눠 각자 애너테이션을 단다. 예: `ScheduleCommandServiceTest`의 `Flow`(Mockito), `Concurrency`·`SavedSchedule`(`@DataJpaTest`).
+- 잠금(`.claude/rules/package-structure.md` "동시 요청과 잠금")은 실제 PostgreSQL에서 **커밋까지 거치는** 동시성 테스트로 확인한다. 테스트 트랜잭션 하나 안에서는 잠금이 경쟁하지 않는다. 예: `ScheduleCommandServiceTest.Concurrency`(동시 개설, 마지막 자리 동시 참여).
+  - 클래스에 `@Transactional(propagation = Propagation.NOT_SUPPORTED)`를 달아 테스트 트랜잭션을 끄고, 서비스 호출이 각자 커밋하게 한다.
+  - 두 스레드를 `CountDownLatch` 둘(준비·출발)로 맞춰 동시에 부르고, 성공 수·실패의 ErrorCode·DB에 커밋된 행을 단정한다.
+  - 커밋한 행은 `@AfterEach`에서 그 테스트만 쓰는 id(무작위 개설자 id) 기준으로 지운다. DB를 모든 워크트리가 공유하므로 테이블 전체를 지우지 않는다.
+  - 새 동시성 테스트는 이 중첩 클래스에 메서드로 더한다. DB 슬라이스 구성(`@Import` 조합)이 늘면 컨텍스트와 연결 풀이 늘어난다(위 DB 연결 수 항목).
+  - 간헐 실패를 sleep·재시도로 덮지 않는다. 잠금이 트랜잭션 안에 있는지, 판정보다 먼저인지, 그 행을 처음 읽는 조회에 걸렸는지부터 본다. 통과는 `cleanTest`로 여러 번 돌려 확인한다(SHI-171은 3회).
 - `@EnableJpaAuditing`은 `SnsgApplication`이 아니라 `common/config/JpaAuditingConfig`에 둔다. 메인 클래스에 붙이면 `@WebMvcTest`가 `jpaAuditingHandler`를 만들려다 "JPA metamodel must not be empty"로 실패한다.
 - 감사 필드를 검증하는 JPA 슬라이스 테스트는 `@Import`에 `JpaAuditingConfig`를 함께 넣는다.
 - `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`에 있고 스타터는 `spring-boot-starter-webmvc-test`. Service는 `@MockitoBean`으로 대체한다.
