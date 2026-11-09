@@ -40,7 +40,7 @@ class RevokeAuthFacadeTest {
     void revokeOnUserRequest() {
         revokeAuthFacade.revoke(USER_ID, SocialProvider.KAKAO, PROVIDER_USER_ID, true);
 
-        verify(refreshTokenStorePort).delete(USER_ID);
+        verify(refreshTokenStorePort).deleteAll(USER_ID);
         verify(socialUnlinkPort).unlink(SocialProvider.KAKAO, PROVIDER_USER_ID);
     }
 
@@ -49,7 +49,7 @@ class RevokeAuthFacadeTest {
     void doesNotUnlinkWhenAlreadyUnlinked() {
         revokeAuthFacade.revoke(USER_ID, SocialProvider.KAKAO, PROVIDER_USER_ID, false);
 
-        verify(refreshTokenStorePort).delete(USER_ID);
+        verify(refreshTokenStorePort).deleteAll(USER_ID);
         verify(socialUnlinkPort, never()).unlink(any(), anyString());
     }
 
@@ -62,6 +62,6 @@ class RevokeAuthFacadeTest {
         assertThatCode(() -> revokeAuthFacade.revoke(USER_ID, SocialProvider.KAKAO, PROVIDER_USER_ID, true))
                 .doesNotThrowAnyException();
 
-        verify(refreshTokenStorePort).delete(USER_ID);
+        verify(refreshTokenStorePort).deleteAll(USER_ID);
     }
 }

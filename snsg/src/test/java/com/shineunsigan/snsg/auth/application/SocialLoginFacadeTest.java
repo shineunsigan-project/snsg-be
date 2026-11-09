@@ -2,6 +2,8 @@ package com.shineunsigan.snsg.auth.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -68,13 +70,13 @@ class SocialLoginFacadeTest {
         when(socialLoginPort.fetchUser(AUTH_CODE)).thenReturn(SOCIAL_USER);
         when(userPort.findIdBySocialAccount(SocialProvider.KAKAO, "kakao-1")).thenReturn(Optional.of(userId));
         when(tokenPort.issueAccessToken(userId)).thenReturn("access");
-        when(tokenPort.issueRefreshToken(userId)).thenReturn("refresh");
+        when(tokenPort.issueRefreshToken(eq(userId), anyString())).thenReturn("refresh");
 
         SocialAuthResult result = socialLoginFacade.authenticate(SocialProvider.KAKAO, AUTH_CODE);
 
         assertThat(result).isInstanceOf(SocialAuthResult.LoggedIn.class);
         assertThat(((SocialAuthResult.LoggedIn) result).tokens().accessToken()).isEqualTo("access");
-        verify(refreshTokenStorePort).save(userId, "refresh");
+        verify(refreshTokenStorePort).save(eq(userId), anyString(), eq("refresh"));
         verify(signUpSessionPort, never()).save(any());
     }
 
