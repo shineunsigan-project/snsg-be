@@ -39,6 +39,7 @@ paths:
   - 한 테스트에서 동시에 쓰는 연결이 셋을 넘어야 하면 이 값을 함께 본다. 지금 가장 많이 쓰는 곳은 `ScheduleCommandServiceTest`의 동시 개설·동시 참여(각 둘)다.
   - 실패가 간헐적이라 한 번 통과한 결과로 안심하지 않는다. DB 슬라이스 구성을 더한 작업은 `./gradlew cleanTest build`로 전체를 다시 돌려 확인한다.
 - 한 대상 클래스에 Mockito 흐름 테스트와 실제 PostgreSQL 테스트가 함께 필요하면, 테스트 클래스 이름 규칙(대상 이름 + `Test`)을 지키며 `@Nested` 클래스로 나눠 각자 애너테이션을 단다. 예: `ScheduleCommandServiceTest`의 `Flow`(Mockito), `Concurrency`·`SavedSchedule`(`@DataJpaTest`).
+- **DB를 모든 워크트리가 공유하므로, 사용자로 범위가 좁혀지지 않는 쿼리(모집 중 일정 목록 등) 테스트에는 다른 테스트·워크트리의 행이 섞인다.** 테스트마다 무작위 키(무작위 `categoryId` 등)로 행을 넣고 그 키를 필터로 걸어 넣은 행만 골라 단정한다. 다른 필터(지역·날짜·커서)를 볼 때도 그 키를 함께 건다. 시각 경계는 `now`를 인자로 받는 repository 메서드에 고정 시각을 넘겨 본다. 예: `ScheduleRepositoryImplTest`의 모집 중 목록 테스트.
 - 잠금(`.claude/rules/package-structure.md` "동시 요청과 잠금")은 실제 PostgreSQL에서 **커밋까지 거치는** 동시성 테스트로 확인한다. 테스트 트랜잭션 하나 안에서는 잠금이 경쟁하지 않는다. 예: `ScheduleCommandServiceTest.Concurrency`(동시 개설, 마지막 자리 동시 참여).
   - 클래스에 `@Transactional(propagation = Propagation.NOT_SUPPORTED)`를 달아 테스트 트랜잭션을 끄고, 서비스 호출이 각자 커밋하게 한다.
   - 두 스레드를 `CountDownLatch` 둘(준비·출발)로 맞춰 동시에 부르고, 성공 수·실패의 ErrorCode·DB에 커밋된 행을 단정한다.
@@ -57,7 +58,7 @@ paths:
   - 모든 워크트리가 Redis를 공유한다(`.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의"). 테스트는 고정된 키(고정 UUID 사용자·세션)를 쓰고, 만든 키를 `@AfterEach`에서 이름으로 지운다. 패턴으로 찾아 지우지 않는다. 다른 작업의 키까지 지운다.
 - `@WebMvcTest`에서 Spring Security를 쓰려면 `spring-boot-starter-security-test`가 있어야 한다. 이 모듈이 `@AutoConfigureMockMvc`에 보안 자동 설정을 넣는다. 없으면 `HttpSecurity` 빈도 `@AuthenticationPrincipal` 리졸버도 없다.
 - 인가 규칙과 401 형식은 auth에서 `@Import`로 `SecurityConfig`와 인증 진입점(entry point)을 넣고, 토큰 검증 adapter를 `@MockitoBean`으로 대체해 검증한다.
-  - 예: `auth/infrastructure/security/SecurityConfigTest`. `@WebMvcTest(controllers = 대상 컨트롤러)`에 `SecurityConfig`·`JwtAuthenticationFilter`·`JwtAuthenticationEntryPoint`를 `@Import`하고 `TokenPort`와 컨트롤러가 의존하는 서비스를 `@MockitoBean`으로 둔다. 테스트 코드는 ArchUnit 검사 대상이 아니라 다른 도메인 컨트롤러를 대상으로 삼아도 된다. 지금은 `UserController`를 대상으로 공개 경로(닉네임 사용 가능 여부)와 인증 필요 경로(`/api/v1/users/me`의 조회·수정·사진 업로드)를 함께 본다.
+  - 예: `auth/infrastructure/security/SecurityConfigTest`. `@WebMvcTest(controllers = 대상 컨트롤러)`에 `SecurityConfig`·`JwtAuthenticationFilter`·`JwtAuthenticationEntryPoint`를 `@Import`하고 `TokenPort`와 컨트롤러가 의존하는 서비스를 `@MockitoBean`으로 둔다. 테스트 코드는 ArchUnit 검사 대상이 아니라 다른 도메인 컨트롤러를 대상으로 삼아도 된다. 지금은 `UserController`·`ScheduleController`를 대상으로 공개 경로(닉네임 사용 가능 여부, `GET /api/v1/schedules`)와 인증 필요 경로(`/api/v1/users/me`의 조회·수정·사진 업로드, `GET /api/v1/schedules/participating`·`/hosted`, `POST /api/v1/schedules`)를 함께 본다.
   - 대상 컨트롤러에 의존이 늘면 이 테스트와 그 컨트롤러의 `@WebMvcTest`에 `@MockitoBean`을 함께 더해야 컨텍스트가 뜬다.
   - `SecurityConfig`는 `CorsConfigurationSource` 빈을 주입받는데, 실제 빈은 `common/config/CorsConfig`가 설정값으로 만든다. 슬라이스에는 올라오지 않으므로 빈 `UrlBasedCorsConfigurationSource`를 nested `@TestConfiguration`으로 준다. CORS 규칙은 이 테스트의 대상이 아니다.
 - 다른 도메인의 컨트롤러 테스트는 auth를 import하지 않는다. `@AutoConfigureMockMvc(addFilters = false)`로 필터를 끄고 `SecurityContextHolder`에 `UsernamePasswordAuthenticationToken(userId, null, List.of())`을 직접 넣는다.

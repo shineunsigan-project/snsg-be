@@ -27,12 +27,15 @@ paths:
   - 제약마다 `message`에 화면에 그대로 보여줄 문구를 준다. domain ErrorCode와 같은 문구를 쓰고, 값이 비었을 때(`@NotNull`)도 그 필드의 형식 문구를 쓴다. 다른 도메인의 상수는 import할 수 없으므로 정규식·문구가 두 곳에 적히는 것은 허용한다(`.claude/rules/package-structure.md` 도메인 간 참조의 값 상수 중복).
 - **Request DTO를 만드는 기준**: 필드가 둘 이상이거나 검증 제약(`@NotBlank`, `@Size` 등)이 붙으면 만든다. 파라미터 하나를 그대로 넘길 뿐이면 만들지 않고 `@RequestParam`·`@PathVariable`로 받아 Command를 만든다. 필드 하나짜리 껍데기 record는 읽는 사람에게 아무것도 알려주지 않는다.
   - 단 **나중에 필드가 늘어날 것이 분명하면** 처음부터 만든다. 공개된 API의 요청 형태를 바꾸면 FE도 함께 고쳐야 한다.
-  - 쿼리·경로 파라미터는 둘 이상이어도 검증 제약이 없으면 DTO 없이 `@RequestParam`·`@PathVariable`로 받는다. 필드 수 기준은 요청 본문(JSON)에 적용한다. 파라미터마다 이름·필수 여부·문서(`@Parameter`)가 메서드 시그니처에 바로 보이고, 생략과 빈 값 구분(아래 항목)도 그 자리에서 드러난다. 예: `PlaceCandidateController`(`categoryId`, `regionCode`), `KakaoWebhookController`(`user_id`, `referrer_type`).
+  - 쿼리·경로 파라미터는 둘 이상이어도 검증 제약이 없으면 DTO 없이 `@RequestParam`·`@PathVariable`로 받는다. 필드 수 기준은 요청 본문(JSON)에 적용한다. 파라미터마다 이름·필수 여부·문서(`@Parameter`)가 메서드 시그니처에 바로 보이고, 생략과 빈 값 구분(아래 항목)도 그 자리에서 드러난다. 예: `PlaceCandidateController`(`categoryId`, `regionCode`), `KakaoWebhookController`(`user_id`, `referrer_type`), `ScheduleController`의 모집 중 목록(`categoryIds`, `regionCodes`, `startDate`, `endDate`, `cursor`, `size`. 범위를 벗어난 `size`는 제약 대신 잘라낸다. 아래 목록 절).
 - 선택 쿼리 파라미터에서 생략과 빈 값을 다르게 다뤄야 하면 `@RequestParam(required = false) String`으로 받고 `defaultValue`를 주지 않는다. 생략은 `null`, `?x=`는 `""`로 들어온다. `defaultValue`를 주면 빈 값도 기본값으로 바뀌어 구분이 사라진다. 예: `PlaceCandidateController`의 `regionCode`(생략은 활성 지역 전체, 빈 값은 400 `INVALID_REGION`).
+  - 빈 값의 뜻은 API마다 정해 문서에 적는다. 모집 중 일정 목록의 `categoryIds=`·`regionCodes=`는 400이 아니라 "맞는 일정 없음"(200, 빈 결과)이다. 모르는 값이 빈 결과인 것과 같게 맞췄다.
+  - 여러 값을 받는 `List<…>` 파라미터는 빈 값이 `null`이나 빈 문자열 원소로 섞여 들어오므로 받은 뒤 걸러낸다. 예: `RecruitingScheduleFilter`.
 - 인증 주체는 `@AuthenticationPrincipal UUID userId`로 받는다. 인증 필터가 principal에 userId(UUID)를 넣는다.
   - 공개 경로(토큰 없이 호출하는 엔드포인트)에서는 principal이 `"anonymousUser"`라 null이 들어온다. 타입이 맞지 않아도 예외 없이 null이므로 공개 경로에서는 쓰지 않는다.
   - 예외는 **선택 인증 API**다. 공개 경로지만 토큰이 있으면 응답이 달라진다. 이때만 받아서 쓰고, 유효한 토큰이면 userId, 토큰이 없거나 틀리거나 만료됐으면 null이다. null은 익명으로 다룬다. 인증 필터가 틀린 토큰도 그냥 통과시키므로 **틀린 토큰은 401이 아니라 익명**이 된다. 예: `UserController`의 닉네임 사용 가능 여부(토큰이 있으면 본인의 현재 닉네임을 사용 가능으로 본다).
   - 토큰 없이 호출하는 엔드포인트는 `SecurityConfig`에서 HTTP 메서드와 경로를 정확히 지정해 연다. `/api/v1/auth/**`처럼 prefix 전체를 열면 같은 prefix에 생긴 인증 필요 API까지 열린다. 우리 API에서는 `POST /api/v1/auth/tokens`(재발급)가 공개이고 `DELETE /api/v1/auth/tokens`(로그아웃)는 인증이 필요하다. 경로가 같고 메서드만 다르므로 경로만 지정하면 로그아웃·탈퇴가 열린다.
+    - 하위 경로도 같다. `GET /api/v1/schedules`(모집 중 목록)는 공개이고 `GET /api/v1/schedules/participating`·`/hosted`는 인증이 필요하다. 그래서 `/api/v1/schedules` 정확한 경로 하나만 연다. 일정 상세(`GET /api/v1/schedules/{scheduleId}`)를 열 때 `/api/v1/schedules/*` 패턴을 쓰면 두 목록도 함께 열린다. `SecurityConfigTest`가 두 목록의 401을 단정하므로 그대로 두면 테스트가 깨진다.
   - 공개 경로는 API를 만들 때 하나씩 추가한다. 아직 없는 경로를 미리 적어두지 않는다.
 - 인증 필터는 공개 경로를 포함한 **모든 요청**에서 돈다. 필터는 토큰이 있을 때만 해석해 principal을 채우고, 없거나 틀리면 그냥 통과시킨다. 인가 판단은 `authorizeHttpRequests`가, 401 응답 생성은 `AuthenticationEntryPoint`가 한다.
   - 공개 경로에서도 principal이 채워져야 한다. 일정 상세처럼 비로그인도 보지만 보는 사람에 따라 응답이 달라지는 API가 있다(참여자면 "참여 취소", 아니면 "참여하기").
@@ -70,6 +73,18 @@ paths:
 - 실패: `BusinessException(<Domain>ErrorCode)`를 던지고, `common.web`의 전역 예외 처리에서 `ApiResponse.error(...)`로 변환한다.
 - `<Domain>ErrorCode`는 `domain/exception`에 두고 `ErrorCode`를 구현하며, `ErrorType`과 메시지를 가진다. `ErrorType` → `HttpStatus` 변환은 전역 예외 처리에서만 한다.
 - 특정 Controller 전용 처리가 필요할 때만 `presentation/errorhandler`에 `@RestControllerAdvice(assignableTypes = XxxController.class)`를 둔다.
+
+## 목록 (커서 페이지)
+
+첫 사례는 일정 목록 3종(`ScheduleController`, SHI-172)이다. 이후 목록 API도 이 형식을 따른다.
+
+- 응답 `data`는 `{items, nextCursor}`다. 다음 페이지가 없으면 `nextCursor`는 `null`, 맞는 것이 없으면 200에 `items = []`, `nextCursor = null`이다.
+- 정렬은 (정렬 키, id) 오름차순이고, 다음 페이지는 keyset(마지막 항목의 (정렬 키, id)보다 뒤)으로 자른다. offset을 쓰지 않는다. 쿼리 작성은 `.claude/rules/package-structure.md` 인프라 규약의 목록 쿼리 절.
+- 커서는 마지막 항목의 (정렬 키, id)를 URL-safe Base64(패딩 없음)로 인코딩한 불투명 문자열이다. 문자가 `[A-Za-z0-9_-]`뿐이라 FE가 인코딩 없이 쿼리에 붙인다. FE는 내용을 해석하지 않는다. 예: `ScheduleCursor`.
+  - 해석할 수 없는 커서는 그 도메인 ErrorCode의 `INVALID_CURSOR`(400)다. FE는 커서 없이 처음부터 다시 부른다.
+- 한 건 더(size + 1) 읽어 다음 페이지가 있는지 정한다. 남은 개수가 size와 딱 맞아도 마지막 페이지에서 `nextCursor = null`이 나가, FE가 빈 페이지를 한 번 더 부르지 않는다.
+- `size`는 생략하면 기본값, 상한을 넘으면 상한, 1보다 작으면 1로 **잘라낸다.** 오류로 내지 않는다. 기본값·상한은 설정 record로 읽는다(`schedule.page-size-default: 20`, `schedule.page-size-max: 50`).
+- 공개 목록 API에서 여러 값을 받는 필터는 빈 값·중복을 뺀 뒤 개수 상한을 두고, 넘으면 400 `INVALID_REQUEST`다. 값을 아주 많이 보내면 IN 조건의 바인드 파라미터가 DB 한도를 넘어 500이 나므로 요청 단계에서 끊는다. 예: 모집 중 일정 목록의 `categoryIds`·`regionCodes`는 각각 20개.
 
 ## 문서
 
