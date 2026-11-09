@@ -28,7 +28,7 @@ import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
 import jakarta.persistence.EntityManager;
 
 /**
- * 시간 겹침 쿼리, 일정 잠금 조회, 일정 목록 3종 쿼리, 상태 전환 일괄 UPDATE와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
+ * 시간 겹침 쿼리, 일정 잠금 조회와 잠금 없는 조회, 일정 목록 3종 쿼리, 상태 전환 일괄 UPDATE와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
  * 일정·참여 행은 native INSERT로 넣는다. 사용자 id는 테스트마다 무작위라 다른 데이터와 섞이지 않는다.
  * 테스트 트랜잭션은 롤백된다.
  */
@@ -151,6 +151,25 @@ class ScheduleRepositoryImplTest {
         UUID schedule = insertSchedule(row().deleted(true));
 
         assertThat(scheduleRepository.findByIdForUpdate(schedule)).isEmpty();
+    }
+
+    // 일정 조회(잠금 없음)
+
+    @Test
+    @DisplayName("삭제되지 않은 일정은 잠금 없는 조회로 찾는다")
+    void findsNotDeletedSchedule() {
+        UUID schedule = insertSchedule(row());
+
+        assertThat(scheduleRepository.findById(schedule))
+                .hasValueSatisfying(found -> assertThat(found.getId()).isEqualTo(schedule));
+    }
+
+    @Test
+    @DisplayName("삭제된 일정은 잠금 없는 조회로 찾지 않는다")
+    void deletedScheduleIsNotFound() {
+        UUID schedule = insertSchedule(row().deleted(true));
+
+        assertThat(scheduleRepository.findById(schedule)).isEmpty();
     }
 
     // DB 제약

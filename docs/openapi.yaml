@@ -211,7 +211,7 @@ paths:
       summary: 참여
       description: |-
         일정에 멤버로 참여한다. 일정 상세 화면의 [참여하기]에서 부른다. 로그인이 필요하다. 요청 본문은 없다.
-        성공하면 200이고 data는 없다. 성공이든 실패든 일정 상세를 다시 불러 화면을 그린다(상세 API는 아직 없다).
+        성공하면 200이고 data는 없다. 성공이든 실패든 일정 상세(GET /api/v1/schedules/{scheduleId})를 다시 불러 화면을 그린다.
         마지막 자리가 차면 일정은 모집 마감이 된다. 마지막 자리에 동시에 둘이 들어오면 한 명만 성공하고 다른 한 명은 409 RECRUIT_CLOSED다.
         참여를 취소한 뒤 다시 참여할 수 있다.
         두 번 눌려 같은 요청이 두 번 와도 참여는 한 번이다. 두 번째 요청은 409 ALREADY_JOINED이고, 상태는 한 번 참여한 것과 같다.
@@ -529,6 +529,50 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiResponseNicknameAvailabilityResponse"
+  /api/v1/schedules/{scheduleId}:
+    get:
+      tags:
+      - 일정
+      summary: 일정 상세
+      description: |-
+        일정 하나의 내용과 보는 사람이 누를 수 있는 버튼을 준다. 일정 상세 화면(DTL)에 들어올 때,
+        그리고 참여·참여 취소·일정 취소를 부른 뒤(성공이든 실패든) 다시 불러 화면을 그린다.
+        토큰은 선택이다. 토큰 없이 부르면 viewerRole = GUEST이고, 토큰이 있으면 그 사용자의 역할(HOST·PARTICIPANT·NON_PARTICIPANT)과
+        그에 맞는 availableActions가 온다. 틀리거나 만료된 토큰은 401이 아니라 토큰이 없는 것(GUEST)으로 처리한다.
+        버튼은 availableActions에 든 동작만 활성으로 그린다. 비활성 버튼의 문구(모집 마감·완료·취소됨 등)는 displayStatus를 보고 FE가 정한다.
+        시작 시각이 지났는데 아직 모집 중으로 저장된 일정(상태 전환 전)도 displayStatus = RECRUITMENT_CLOSED로 온다.
+        장소는 개설 시점의 값이다. 일정 취소 사유는 아직 응답에 없다(일정 전체 취소 API와 함께 생긴다).
+        조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
+      operationId: getDetail
+      parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: 일정 상세. availableActions의 버튼만 활성으로 그린다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseScheduleDetailResponse"
+        "400":
+          description: "INVALID_REQUEST: scheduleId가 UUID 형식이 아니다. 정상 화면 흐름에서는 나지\
+            \ 않는다"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseScheduleDetailResponse"
+        "404":
+          description: |-
+            SCHEDULE_NOT_FOUND: 없거나 삭제된 일정. "찾을 수 없는 일정이에요." 토스트를 보여주고 목록 화면으로 간다.
+            없는 경로의 404(INVALID_REQUEST)와는 code로 구분한다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseScheduleDetailResponse"
   /api/v1/schedules/participating:
     get:
       tags:
@@ -791,7 +835,7 @@ paths:
       summary: 참여 취소
       description: |-
         내 참여를 취소한다. 참여 취소 확인 팝업의 [확인]에서 부른다. 로그인이 필요하다. 요청 본문은 없다.
-        성공하면 200이고 data는 없다. 성공이든 실패든 일정 상세를 다시 불러 화면을 그린다(상세 API는 아직 없다).
+        성공하면 200이고 data는 없다. 성공이든 실패든 일정 상세(GET /api/v1/schedules/{scheduleId})를 다시 불러 화면을 그린다.
         시작 후에도 완료(시작 + 12시간) 전까지 취소할 수 있다. 시작 전에 취소해 자리가 나면 마감된 모집이 다시 열리고,
         시작 후 취소로 자리가 나도 모집은 다시 열리지 않는다. 취소한 뒤 다시 참여할 수 있다.
         두 번 눌려 같은 요청이 두 번 와도 취소는 한 번이다. 두 번째 요청은 409 NOT_PARTICIPANT이고, 재시도해도 안전하다.
@@ -1262,6 +1306,218 @@ components:
           format: date-time
           description: "개설 일시. 한국 시간, 오프셋 없는 ISO-8601. NEW 배지를 붙일지 정할 때 쓴다"
           example: 2026-11-10T09:12:34.567
+    ApiResponseScheduleDetailResponse:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/ScheduleDetailResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    ScheduleDetailAgeGroup:
+      type: object
+      description: "연령대. 십의 자리를 먼저 비교하고, 같으면 초반 < 중반 < 후반이다"
+      properties:
+        decade:
+          type: integer
+          format: int32
+          description: 십의 자리 × 10. 20이면 20대다. 만 18·19세는 10이다
+          example: 20
+        phase:
+          type: string
+          description: "EARLY 초반(일의 자리 0~3), MID 중반(4~6), LATE 후반(7~9). 18·19세는 10대\
+            \ 후반(LATE)이다"
+          enum:
+          - EARLY
+          - MID
+          - LATE
+          example: LATE
+    ScheduleDetailCategory:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 활동 ID
+          example: 01a19cc6-3d80-7000-8000-000000000001
+        name:
+          type: string
+          description: 활동 이름. 지금은 고를 수 없는(숨긴) 활동이어도 이름이 온다. 활동 정보를 찾을 수 없으면 빈 문자열
+          example: 보드게임
+    ScheduleDetailHost:
+      type: object
+      properties:
+        nickname:
+          type: string
+          description: 닉네임. 탈퇴했으면 "탈퇴한 사용자"
+          example: 민트초코
+        profileImageUrl:
+          type: string
+          description: 프로필 사진 경로. 도메인 없이 경로만 온다. 탈퇴했으면 기본 이미지 경로
+          example: /images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png
+        withdrawn:
+          type: boolean
+          description: 탈퇴한 개설자면 true. 화면에 탈퇴 표시를 붙일 때 쓴다
+          example: false
+    ScheduleDetailParticipantSummary:
+      type: object
+      properties:
+        count:
+          type: integer
+          format: int32
+          description: 확정 참여자 수. 개설자를 포함한다
+          example: 3
+        maleCount:
+          type: integer
+          format: int32
+          description: 남자 수. 탈퇴한 참여자도 센다. 성별을 알 수 없는 참여자는 남자·여자 어느 쪽에도 세지 않는다
+          example: 1
+        femaleCount:
+          type: integer
+          format: int32
+          description: 여자 수. 세는 기준은 maleCount와 같다
+          example: 2
+        minAgeGroup:
+          $ref: "#/components/schemas/ScheduleDetailAgeGroup"
+          description: 가장 낮은 연령대. 탈퇴한 참여자는 빼고 고른다. 연령대를 아는 참여자가 없으면(전원 탈퇴) null
+        maxAgeGroup:
+          $ref: "#/components/schemas/ScheduleDetailAgeGroup"
+          description: 가장 높은 연령대. 고르는 기준은 minAgeGroup과 같다. 연령대를 아는 참여자가 없으면 null
+    ScheduleDetailPlace:
+      type: object
+      properties:
+        name:
+          type: string
+          description: 장소 이름
+          example: 레드버튼 홍대점
+        roadAddress:
+          type: string
+          description: 도로명 주소
+          example: 서울특별시 마포구 와우산로 1
+        addressDetail:
+          type: string
+          description: 상세주소. 없으면 빈 문자열
+          example: 2층
+        latitude:
+          type: number
+          description: 위도(WGS84)
+          example: 37.55
+        longitude:
+          type: number
+          description: 경도(WGS84)
+          example: 126.92
+        regionName:
+          type: string
+          description: "지역 이름(시군구). 지역 정보를 찾을 수 없으면 빈 문자열이고, 그때는 지역을 표시하지 않는다"
+          example: 마포구
+    ScheduleDetailResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 일정 ID
+          example: 01a1c3d4-0000-7000-8000-000000000001
+        title:
+          type: string
+          description: 활동명(일정 제목)
+          example: 보드게임 같이 해요
+        description:
+          type: string
+          description: 간략 설명. 줄바꿈이 들어 있을 수 있다
+          example: 처음 오시는 분도 환영해요. 룰은 같이 배우면서 해요.
+        startAt:
+          type: string
+          format: date-time
+          description: "시작 일시. 한국 시간, 오프셋 없는 ISO-8601"
+          example: 2026-11-14T19:30:00
+        createdAt:
+          type: string
+          format: date-time
+          description: "개설 일시. 한국 시간, 오프셋 없는 ISO-8601"
+          example: 2026-11-10T09:12:34.567
+        durationType:
+          type: string
+          description: "예상 소요 시간. SHORT 1시간 내외(60분), NORMAL 2시간 내외(120분), LONG 3시간\
+            \ 이상(180분)"
+          enum:
+          - SHORT
+          - NORMAL
+          - LONG
+          example: NORMAL
+        category:
+          $ref: "#/components/schemas/ScheduleDetailCategory"
+          description: 활동
+        host:
+          $ref: "#/components/schemas/ScheduleDetailHost"
+          description: 개설자
+        confirmedCount:
+          type: integer
+          format: int32
+          description: 확정 인원. 개설자를 포함한다
+          example: 3
+        capacity:
+          type: integer
+          format: int32
+          description: 정원. 개설자를 포함한다
+          example: 6
+        remainingSeats:
+          type: integer
+          format: int32
+          description: 남은 자리 = capacity − confirmedCount. 0이면 정원이 찼다
+          example: 3
+        participantSummary:
+          $ref: "#/components/schemas/ScheduleDetailParticipantSummary"
+          description: 확정 참여자(개설자 포함) 요약
+        place:
+          $ref: "#/components/schemas/ScheduleDetailPlace"
+          description: 장소. 개설 시점의 값이다. 장소 정보가 나중에 바뀌어도 이 일정에는 개설 때 값이 그대로 온다
+        displayStatus:
+          type: string
+          description: |-
+            화면에 보여줄 상태. 서버가 일정 상태·모집 상태·시각을 합쳐 정한다. FE는 이 값만 보고 배지와 비활성 버튼 문구를 정한다.
+            RECRUITING: 모집 중. RECRUITMENT_CLOSED: 모집 마감(정원이 찼거나 시작 시각이 지났다).
+            COMPLETED: 완료(시작 + 12시간이 지났다). CANCELED: 일정 취소됨(개설자가 취소했다)
+          enum:
+          - CANCELED
+          - COMPLETED
+          - RECRUITMENT_CLOSED
+          - RECRUITING
+          example: RECRUITING
+        viewerRole:
+          type: string
+          description: |-
+            보는 사람의 역할. GUEST: 로그인하지 않았다(토큰이 없거나 틀렸다). HOST: 일정을 연 사람.
+            PARTICIPANT: 멤버로 참여 확정했다. NON_PARTICIPANT: 로그인했지만 참여하지 않았다(참여를 취소한 사람 포함)
+          enum:
+          - GUEST
+          - HOST
+          - PARTICIPANT
+          - NON_PARTICIPANT
+          example: NON_PARTICIPANT
+        availableActions:
+          type: array
+          description: |-
+            지금 누를 수 있는 동작. 들어 있는 동작의 버튼만 활성으로 그린다. 비어 있으면 누를 수 있는 버튼이 없다.
+            LOGIN_TO_JOIN: [참여하기]를 누르면 로그인 화면으로 보낸다(GUEST, 모집 중).
+            JOIN: [참여하기](NON_PARTICIPANT, 모집 중). CANCEL_PARTICIPATION: [참여 취소](PARTICIPANT, 모집 중·모집 마감).
+            CANCEL_SCHEDULE: [일정 취소](HOST, 취소·완료되지 않았고 시작 전)
+          example:
+          - JOIN
+          items:
+            type: string
+            enum:
+            - LOGIN_TO_JOIN
+            - JOIN
+            - CANCEL_PARTICIPATION
+            - CANCEL_SCHEDULE
     ApiResponseListRegionResponse:
       type: object
       properties:

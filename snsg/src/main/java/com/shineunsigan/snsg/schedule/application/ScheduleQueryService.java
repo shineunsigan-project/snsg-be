@@ -9,9 +9,13 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardPageResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQueryResult;
+import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
+import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
@@ -22,7 +26,7 @@ import com.shineunsigan.snsg.schedule.domain.repository.ScheduleRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 일정 목록 3종(모집 중, 참여한, 개설한). 커서 페이지로 읽어 카드로 바꾼다.
+ * 일정 목록 3종(모집 중, 참여한, 개설한)과 일정 상세. 목록은 커서 페이지로 읽어 카드로 바꾼다.
  * <p>
  * 한 페이지보다 한 건 더 읽어 다음 페이지가 있는지 정한다. 총 건수가 페이지 크기의 배수여도 빈 페이지를 한 번 더 부르지 않게 하기 위해서다.
  * 지금 시각은 요청마다 한 번 잡아 쿼리 조건과 표시 상태에 함께 쓴다.
@@ -59,6 +63,23 @@ public class ScheduleQueryService {
         int pageSize = pageSize(size);
         LocalDateTime now = LocalDateTime.now();
         return toPage(scheduleRepository.findHosted(userId, startAfter(now), after, pageSize + 1), pageSize, now);
+    }
+
+    /**
+     * 삭제되지 않은 일정을 잠금 없이 읽고, 지금 시각 한 번으로 표시 상태·보는 사람의 역할·누를 수 있는 동작을 정한다.
+     * 참여 행은 지연 로딩이라 트랜잭션 안에서 결과로 바꾼다.
+     *
+     * @param viewerId 로그인하지 않았으면 {@code null}
+     */
+    public ScheduleDetailQueryResult findDetail(UUID scheduleId, UUID viewerId) {
+        Schedule schedule = scheduleRepository.findById(scheduleId)
+                .orElseThrow(() -> new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND));
+        LocalDateTime now = LocalDateTime.now();
+        ViewerRole viewerRole = schedule.viewerRole(viewerId);
+        String categoryName = findCategoryNames(List.of(schedule)).getOrDefault(schedule.getCategoryId(), "");
+        return ScheduleDetailQueryResult.of(schedule, categoryName,
+                schedule.displayStatus(now, scheduleProperties.completionAfter()), viewerRole,
+                schedule.availableActions(viewerRole, now, scheduleProperties.completionAfter()));
     }
 
     private static ScheduleCursor decodeCursor(String cursor) {

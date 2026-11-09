@@ -53,7 +53,8 @@
     - 예: `UserWithdrawalCommandService`는 User 애그리거트 구성요소 다섯(users, 소셜 계정, 약관, 닉네임 이력, 탈퇴 기록)의 repository와 이벤트 발행 포트를 쓴다. 탈퇴·비식별이 애그리거트 전체를 다루므로 상한 안이다.
 - **facade(`XxxFacade`)는 아래 두 경우에만 만든다.** application 패키지에 두고, 행위마다 하나씩 만든다(`SocialLoginFacade`, `CompleteSignUpFacade`). 트랜잭션을 걸지 않는다.
   - **이벤트 발행 포트가 아닌 `port/out`을 호출하는 흐름.** 외부 API, Redis, 파일 저장소, 다른 도메인이 여기 든다. 다른 도메인은 지금은 코드 참조 adapter, 서비스 분리 후에는 Feign → 상대의 `/internal` 컨트롤러다. 이유: 외부 호출을 트랜잭션 밖에 둔다.
-    - 조회도 같다. 읽은 결과에 다른 도메인 값(이름 등)을 붙여야 하면 QueryService는 자기 데이터만 읽고 facade가 포트를 불러 붙인다. 포트는 건마다 부르지 않고 요청당 한 번 불러 맵으로 붙인다. 예: `ListSchedulesFacade`(`ScheduleQueryService`로 일정 카드를 읽고 `RegionPort.findAll`을 한 번 불러 지역 이름을 붙인다).
+    - 조회도 같다. 읽은 결과에 다른 도메인 값(이름 등)을 붙여야 하면 QueryService는 자기 데이터만 읽고 facade가 포트를 불러 붙인다. 포트는 건마다 부르지 않고 요청당 한 번 불러 맵으로 붙인다. 예: `ListSchedulesFacade`(`ScheduleQueryService`로 일정 카드를 읽고 `RegionPort.findAll`을 한 번 불러 지역 이름을 붙인다), `GetScheduleDetailFacade`(개설자와 확정 참여자 ID를 모아 `UserPort.findProfiles`를 한 번 부른다).
+    - `GetScheduleDetailFacade`는 맵에서 꺼낸 값이 있는지 따로 확인하지 않는다. user `FindUserProfilesUseCase`가 "요청한 서로 다른 ID마다 항목이 정확히 하나 있다"(탈퇴자·행이 없는 ID도 가려서 넣는다)를 javadoc에 계약으로 두기 때문이다. 이 계약을 바꾸면 이 facade도 함께 고친다.
   - **같은 도메인의 여러 서비스를 조합하는 흐름.** 이유: 서비스끼리 주입하지 않는다.
   - 이렇게 두면 **트랜잭션 안에 외부 호출이 들어갈 수 없다.** 규칙으로 막는 게 아니라 구조가 막는다. 외부 API가 느려져 DB 커넥션이 말라붙는 사고를 구조적으로 차단한다.
 - "다른 도메인 동기 호출"은 별도 기준이 아니다. facade는 다른 도메인의 서비스를 직접 부르지 않고 자기 `port/out`만 부르므로 첫째 경우에 든다.
@@ -92,6 +93,8 @@
 - 코드 참조: `A.application` → `A.application.port.out.XxxPort` ← `A.infrastructure.client.XxxAdapter` → `B.application.port.in.XxxUseCase`
 - 이벤트: `B.infrastructure.event`의 리스너가 `A.application.event`의 이벤트를 받아 `B.application.port.in.XxxUseCase`를 호출한다.
 - 상대 도메인의 Result·이벤트는 adapter/리스너 안에서 자기 DTO(Command)로 변환한다.
+- 상대가 준 값으로 계산하는 규칙이 받는 쪽 화면·흐름의 규칙이면 받는 쪽 도메인에 둔다. 그 계산을 위해 상대 도메인에 계약(UseCase·Result 필드)을 늘리지 않는다. 받는 쪽 adapter가 상대 Result·enum을 자기 값으로 바꾸고, 계산은 자기 domain에서 한다.
+  - 예: 일정 상세의 참여자 요약(성별 수, 최소·최대 연령대). user `FindUserProfilesUseCase`가 준 연령대(`AgeGroupResult`, user `AgePhase`)를 `ScheduleUserAdapter`가 schedule의 `ScheduleAgeGroupResult`·`AgePhase`로 바꾸고, 비교는 schedule `ParticipantAgeGroup`, 요약은 `ParticipantSummary`가 한다.
 - **enum도 도메인마다 각자 소유한다.** 상대 도메인 enum은 **infrastructure의 adapter·리스너에서만** 참조하고, 그 자리에서 자기 enum(또는 필요한 값)으로 바꾼다. application·domain·presentation은 상대 도메인 enum을 참조하지 않는다. 포트와 UseCase로 경계를 세워놓고 enum 한 줄로 구멍을 내지 않기 위해서다.
   - 계약 전용 enum을 따로 만들지 않는다. 계약에 실린 도메인 enum(`domain/constants`)을 그대로 쓴다. 예외: 계약에 내보내면 안 되는 값이 있는 enum만 그 도메인에 계약용 enum을 따로 둔다.
   - 변환은 `default` 없는 switch로 쓴다. 값을 추가하면 컴파일이 깨져 변환 누락을 잡는다.
@@ -168,6 +171,7 @@
 - **hard delete 하지 않는다.** 삭제는 `BaseEntity.delete()`로 `isDeleted`만 바꾼다.
 - 조회는 삭제되지 않은 행만 본다. 전역 필터로 숨기지 않고 repository 쿼리에 조건을 명시한다. 관리자·통계 조회에서 빠져나오기 쉽고, 조인된 연관에서 조용히 누락되지 않는다.
   - 삭제된 행까지 읽어야 하는 메서드는 이름에 드러내고(`IncludingDeleted`), javadoc에 쓸 곳을 적어 묶는다. 활성 여부 판정에는 쓰지 않는다. 삭제된 행이 통과한다. 예: `UserRepository.findAllByIdIncludingDeleted`(탈퇴자를 가려 보여주는 `FindUserProfilesUseCase` 전용), `UserSocialAccountRepository`·`UserNicknameHistoryRepository`의 `findAllByUserIdIncludingDeleted`(탈퇴 회원 비식별 전용).
+  - JPA repository(`JpaRepository`)의 내장 `findById`는 삭제된 행도 준다. 삭제 조건을 단 JPQL 메서드는 내장 메서드와 다른 이름으로 둔다. 예: `ScheduleRepository.findById`(잠금 없는 단건 조회)는 `ScheduleJpaRepository.findNotDeletedById`(`isDeleted = false` 명시)로 구현한다.
 - 개수 계산(정원 등)도 같은 조건으로 센다.
 - 유니크 제약은 삭제되지 않은 행에만 건다. PostgreSQL 부분 유니크 인덱스를 쓴다.
   ```sql

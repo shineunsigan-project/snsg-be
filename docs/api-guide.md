@@ -460,6 +460,130 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   ```
 - **두 번 눌렸을 때**: 같은 사용자의 요청은 서버에서 차례로 처리된다. 두 번째 요청은 첫 번째가 만든 일정과 시작 시각이 같아 409 `SCHEDULE_TIME_CONFLICT`가 되고, **중복 개설은 생기지 않는다.** 그래도 첫 응답을 받기 전까지 [일정 열기] 버튼을 막는다. 첫 응답을 받지 못한 채 다시 보내 409를 받았다면 첫 요청이 이미 성공했을 수 있다.
 
+### 일정 상세
+
+`GET /api/v1/schedules/{scheduleId}`. 일정 하나의 내용과, 보는 사람이 지금 누를 수 있는 버튼을 준다.
+
+- **부르는 화면**: 일정 상세 화면(DTL). 목록의 카드를 눌러 들어올 때 부른다. 그리고 **참여·참여 취소·일정 취소를 부른 뒤에는 성공이든 실패든 이 API를 다시 불러 화면을 그린다.**
+- **토큰은 선택이다.**
+  - 토큰 없이 부르면 `viewerRole`이 `GUEST`다. 비로그인 사용자도 상세를 볼 수 있다.
+  - 로그인한 사용자는 access token을 붙여 부른다. 그래야 `viewerRole`과 `availableActions`가 그 사람에 맞게 온다. 붙이지 않으면 개설자·참여자도 `GUEST`로 보인다.
+  - 토큰이 틀리거나 만료돼도 **401이 오지 않는다.** 토큰 없이 부른 것(`GUEST`)과 같게 처리된다. 로그인했는데 `GUEST`가 오면 토큰이 만료된 것이니 재발급 후 다시 부른다.
+- **요청 본문은 없다.** 경로의 `scheduleId`(UUID 문자열, 목록 카드의 `id`)만 보낸다.
+- 응답 예시:
+
+  ```json
+  {
+    "isSuccess": true,
+    "data": {
+      "id": "01a1c3d4-0000-7000-8000-000000000001",
+      "title": "보드게임 같이 해요",
+      "description": "처음 오시는 분도 환영해요. 룰은 같이 배우면서 해요.",
+      "startAt": "2026-11-14T19:30:00",
+      "createdAt": "2026-11-10T09:12:34.567",
+      "durationType": "NORMAL",
+      "category": { "id": "01a19cc6-3d80-7000-8000-000000000001", "name": "보드게임" },
+      "host": { "nickname": "민트초코", "profileImageUrl": "/images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png", "withdrawn": false },
+      "confirmedCount": 3,
+      "capacity": 6,
+      "remainingSeats": 3,
+      "participantSummary": {
+        "count": 3, "maleCount": 1, "femaleCount": 2,
+        "minAgeGroup": { "decade": 20, "phase": "LATE" },
+        "maxAgeGroup": { "decade": 30, "phase": "EARLY" }
+      },
+      "place": {
+        "name": "레드버튼 홍대점", "roadAddress": "서울특별시 마포구 와우산로 1", "addressDetail": "2층",
+        "latitude": 37.5500000, "longitude": 126.9200000, "regionName": "마포구"
+      },
+      "displayStatus": "RECRUITING",
+      "viewerRole": "NON_PARTICIPANT",
+      "availableActions": ["JOIN"]
+    }
+  }
+  ```
+
+  | 필드 | 의미 |
+  | --- | --- |
+  | `id` | 일정 ID |
+  | `title` | 활동명(일정 제목) |
+  | `description` | 간략 설명. 줄바꿈이 들어 있을 수 있다 |
+  | `startAt` | 시작 일시. 오프셋 없는 한국 시간 |
+  | `createdAt` | 개설 일시. 오프셋 없는 한국 시간 |
+  | `durationType` | 예상 소요 시간. `SHORT` 1시간 내외(60분), `NORMAL` 2시간 내외(120분), `LONG` 3시간 이상(180분) |
+  | `category.id`·`category.name` | 활동. 이름은 지금은 고를 수 없는(숨긴) 활동이어도 온다. 활동 정보를 찾을 수 없으면 `name`은 **빈 문자열**이다 |
+  | `host.nickname` | 개설자 닉네임. 개설자가 탈퇴했으면 `"탈퇴한 사용자"` |
+  | `host.profileImageUrl` | 개설자 프로필 사진 경로(도메인 없이 경로만). 탈퇴했으면 기본 이미지 경로 |
+  | `host.withdrawn` | 개설자가 탈퇴했으면 `true`. 탈퇴 표시를 붙일 때 쓴다 |
+  | `confirmedCount` | 확정 인원. 개설자를 포함한다 |
+  | `capacity` | 정원. 개설자를 포함한다 |
+  | `remainingSeats` | 남은 자리 = `capacity` − `confirmedCount`. 0이면 정원이 찼다 |
+  | `participantSummary.count` | 확정 참여자 수(개설자 포함) |
+  | `participantSummary.maleCount`·`femaleCount` | 남자·여자 수. 탈퇴한 참여자도 성별대로 센다. 성별을 알 수 없는 참여자(사용자 정보를 찾을 수 없음)는 어느 쪽에도 세지 않으므로 둘을 더한 값이 `count`보다 작을 수 있다 |
+  | `participantSummary.minAgeGroup`·`maxAgeGroup` | 참여자 중 가장 낮은·높은 연령대. 탈퇴한 참여자는 빼고 고른다. 십의 자리를 먼저 비교하고 같으면 초반 < 중반 < 후반이다(20대 후반 < 30대 초반). **연령대를 아는 참여자가 없으면(전원 탈퇴) 둘 다 `null`** 이고, 그때는 연령대를 표시하지 않는다 |
+  | `…AgeGroup.decade` | 십의 자리 × 10. 20이면 20대다 |
+  | `…AgeGroup.phase` | `EARLY` 초반, `MID` 중반, `LATE` 후반. "20대 후반"처럼 그린다 |
+  | `place.name`·`roadAddress`·`addressDetail` | 장소 이름, 도로명 주소, 상세주소. 상세주소가 없으면 **빈 문자열**이다 |
+  | `place.latitude`·`longitude` | 위도·경도(WGS84). 지도 핀에 쓴다 |
+  | `place.regionName` | 지역 이름(시군구). 지역 정보를 찾을 수 없으면 **빈 문자열**이고, 그때는 지역을 표시하지 않는다 |
+  | `displayStatus` | 화면에 보여줄 상태. 아래 표 |
+  | `viewerRole` | 보는 사람의 역할. 아래 표 |
+  | `availableActions` | 지금 누를 수 있는 동작. 아래 표. 비어 있으면 누를 수 있는 버튼이 없다 |
+
+  `minAgeGroup`·`maxAgeGroup` 말고는 null이 아니다. 장소는 **개설 시점의 값**이다. 장소 정보가 나중에 바뀌어도 이 일정에는 개설 때 값이 그대로 온다.
+
+- `displayStatus`는 목록과 같은 값이다. 상세에서는 네 값이 모두 올 수 있다.
+
+  | 값 | 화면 문구 | 언제 |
+  | --- | --- | --- |
+  | `RECRUITING` | 모집 중 | 그 밖의 경우 |
+  | `RECRUITMENT_CLOSED` | 모집 마감 | 정원이 찼거나 시작 시각이 지났다. 시작 시각이 지났는데 서버가 아직 상태를 바꾸기 전이어도 이 값이다 |
+  | `COMPLETED` | 일정 완료 | 시작 + 12시간이 지났다 |
+  | `CANCELED` | 일정 취소됨 | 개설자가 일정을 취소했다 |
+
+- `viewerRole`:
+
+  | 값 | 누구 |
+  | --- | --- |
+  | `GUEST` | 로그인하지 않았다(토큰이 없거나 틀리거나 만료됐다) |
+  | `HOST` | 일정을 연 사람 |
+  | `PARTICIPANT` | 멤버로 참여 확정한 사람 |
+  | `NON_PARTICIPANT` | 로그인했지만 참여하지 않은 사람. 참여를 취소한 사람도 여기다 |
+
+- `availableActions`: **들어 있는 동작의 버튼만 활성으로 그린다.** 버튼을 보일지, 비활성 버튼에 어떤 문구(모집 마감·일정 완료·일정 취소됨 등)를 쓸지는 `viewerRole`과 `displayStatus`를 보고 FE가 정한다.
+
+  | 값 | 버튼 | 누가, 언제 | 누르면 |
+  | --- | --- | --- | --- |
+  | `LOGIN_TO_JOIN` | [참여하기] | `GUEST`, 모집 중 | 로그인 화면으로 보낸다 |
+  | `JOIN` | [참여하기] | `NON_PARTICIPANT`, 모집 중 | 참여 API(`POST /api/v1/schedules/{scheduleId}/participants`) |
+  | `CANCEL_PARTICIPATION` | [참여 취소] | `PARTICIPANT`, 모집 중·모집 마감(완료 전이면 시작 후도 포함) | 참여 취소 확인 팝업(DTL-07) → 참여 취소 API |
+  | `CANCEL_SCHEDULE` | [일정 취소] | `HOST`, 취소·완료되지 않았고 시작 전(정원이 차 마감됐어도 시작 전이면 온다) | 일정 전체 취소 API. **아직 없다**(T-15에서 생긴다). 그때까지 이 값을 받아도 부를 API가 없다 |
+
+  역할과 상태별로 정리하면 다음과 같다. 빈칸은 빈 배열이다.
+
+  | `displayStatus` | `GUEST` | `NON_PARTICIPANT` | `PARTICIPANT` | `HOST` |
+  | --- | --- | --- | --- | --- |
+  | `RECRUITING` | `LOGIN_TO_JOIN` | `JOIN` | `CANCEL_PARTICIPATION` | `CANCEL_SCHEDULE` |
+  | `RECRUITMENT_CLOSED`(정원이 차 마감, 시작 전) | | | `CANCEL_PARTICIPATION` | `CANCEL_SCHEDULE` |
+  | `RECRUITMENT_CLOSED`(시작 시각이 지남) | | | `CANCEL_PARTICIPATION` | |
+  | `COMPLETED` | | | | |
+  | `CANCELED` | | | | |
+
+- 일정 취소 사유(`cancellation`)는 **아직 응답에 없다.** 일정 전체 취소 API와 함께 생긴다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 404 | `SCHEDULE_NOT_FOUND` | 없거나 삭제된 일정 | 토스트로 `message`("찾을 수 없는 일정이에요.")를 보여주고 일정 목록 화면으로 간다 |
+  | 400 | `INVALID_REQUEST` | `scheduleId`가 UUID 형식이 아니다 | 정상 화면 흐름에서는 나지 않는다 |
+
+  `SCHEDULE_NOT_FOUND`(404)는 없는 경로의 404(`INVALID_REQUEST`)와 **`code`로 구분한다.** 이 API에는 401이 없다.
+
+  ```json
+  { "isSuccess": false, "code": "SCHEDULE_NOT_FOUND", "message": "찾을 수 없는 일정이에요." }
+  ```
+- 조회만 하므로 **같은 요청을 몇 번 다시 보내도 된다.** 실패하면 그대로 재시도한다.
+
 ### 참여
 
 `POST /api/v1/schedules/{scheduleId}/participants`. 일정에 멤버로 참여한다.
@@ -471,7 +595,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   ```json
   { "isSuccess": true }
   ```
-- **성공이든 실패든 일정 상세를 다시 불러 화면을 그린다.** 이 API의 응답은 상세를 돌려주지 않는다. 일정 상세 API는 아직 없다. 생기면 그 API로 다시 그린다.
+- **성공이든 실패든 일정 상세(`GET /api/v1/schedules/{scheduleId}`)를 다시 불러 화면을 그린다.** 이 API의 응답은 상세를 돌려주지 않는다.
 - 마지막 자리가 차면 일정은 모집 마감이 된다. 마지막 한 자리에 두 사람이 동시에 참여하면 한 명만 성공하고 다른 한 명은 409 `RECRUIT_CLOSED`다.
 - **참여를 취소한 뒤 다시 참여할 수 있다.** 모집 중이면 [참여하기]를 다시 보여준다.
 - 오류:
@@ -522,7 +646,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   ```json
   { "isSuccess": true }
   ```
-- **성공이든 실패든 일정 상세를 다시 불러 화면을 그린다.** 일정 상세 API는 아직 없다. 생기면 그 API로 다시 그린다.
+- **성공이든 실패든 일정 상세(`GET /api/v1/schedules/{scheduleId}`)를 다시 불러 화면을 그린다.**
 - **시작 후에도 완료(시작 + 12시간) 전까지 취소할 수 있다.** 시작 + 12시간이 되면(같은 시각 포함) 취소할 수 없다.
 - 시작 전에 취소해 자리가 나면 마감됐던 모집이 다시 열린다. **시작 후 취소로 자리가 나도 모집은 다시 열리지 않는다.**
 - **취소한 뒤 다시 참여할 수 있다**(위 참여 API).
@@ -709,13 +833,14 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 일정 개설 (활동 선택) | `GET /api/v1/activity-categories` | 받은 순서대로 활동을 그린다 |
 | 일정 목록 (활동 필터) | `GET /api/v1/activity-categories` | 받은 순서대로 필터를 그린다 |
 | 일정 개설 ([일정 열기]) | `POST /api/v1/schedules` | 201이면 내가 연 일정 목록(LIST-05)으로 이동하고 팝업을 띄운다. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 그 밖의 400·409는 해당 입력을 다시 고르게 한다. 응답 전까지 버튼을 막는다 |
+| 일정 상세 (진입, 참여·참여 취소 뒤) | `GET /api/v1/schedules/{scheduleId}` (로그인했으면 access token 포함) | `availableActions`에 든 버튼만 활성으로 그린다. 비활성 버튼 문구는 `displayStatus`로 정한다. `LOGIN_TO_JOIN`을 누르면 로그인 화면으로. 404 `SCHEDULE_NOT_FOUND`면 토스트 후 일정 목록으로 |
 | 일정 상세 ([참여하기]) | `POST /api/v1/schedules/{scheduleId}/participants` | 200이든 409든 상세를 다시 불러 그린다. 409 `SCHEDULE_TIME_CONFLICT`면 `message`를 보여준다. 404 `SCHEDULE_NOT_FOUND`면 일정 목록으로 보내고 토스트. 응답 전까지 버튼을 막는다 |
 | 일정 상세 (참여 취소 팝업 [확인]) | `DELETE /api/v1/schedules/{scheduleId}/participants/me` | 200이든 409든 상세를 다시 불러 그린다. 409 `NOT_PARTICIPANT`는 이미 취소된 상태다. 404 `SCHEDULE_NOT_FOUND`면 일정 목록으로 보내고 토스트 |
 | 일정 목록 · 모집 중 탭 (LIST-01·02, 필터 LIST-03) | `GET /api/v1/schedules` (토큰 없이) | 탭 진입과 필터 변경 때 `cursor` 없이 부르고, 끝까지 스크롤하면 `cursor=nextCursor`로 다음 페이지를 붙인다. `nextCursor`가 null이면 더 부르지 않는다. 빈 `items`면 결과 없음. 400 `INVALID_DATE_FILTER`면 날짜를 다시 고르게 하고, `INVALID_CURSOR`면 처음부터 다시 부른다 |
 | 일정 목록 · 참여한 일정 탭 (LIST-04) | `GET /api/v1/schedules/participating` | 페이지 넘기기는 모집 중 탭과 같다. `CANCELED`는 "일정 취소됨"으로 그린다. 401이면 재발급 후 다시 부른다 |
 | 일정 목록 · 개설한 일정 탭 (LIST-05), 개설 직후 내가 연 일정 (CRT-07) | `GET /api/v1/schedules/hosted` | 개설 201을 받은 뒤 이 목록으로 와서 부른다. 방금 연 일정이 들어 있다. 페이지 넘기기·401 처리는 위와 같다 |
 
-일정 상세 등 위 표에 없는 일정 API와 알림 API는 아직 없다. 생기면 이 표에 추가한다.
+일정 전체 취소 등 위 표에 없는 일정 API와 알림 API는 아직 없다. 생기면 이 표에 추가한다.
 
 ## 로컬에서 서버 띄우기
 

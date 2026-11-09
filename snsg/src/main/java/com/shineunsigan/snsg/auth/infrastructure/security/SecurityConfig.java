@@ -42,6 +42,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/place-candidates").permitAll()
                         // 정확한 경로만 연다. 하위 경로(/participating, /hosted)는 인증이 필요하다
                         .requestMatchers(HttpMethod.GET, "/api/v1/schedules").permitAll()
+                        // 순서가 중요하다. 아래 {scheduleId} 패턴은 /participating·/hosted와도 맞으므로 두 목록을 먼저 막는다
+                        .requestMatchers(HttpMethod.GET, "/api/v1/schedules/participating", "/api/v1/schedules/hosted")
+                        .authenticated()
+                        // 일정 상세. 토큰이 선택이다. 있으면 보는 사람의 역할과 버튼이 달라진다. 하위 경로는 걸리지 않는다
+                        .requestMatchers(HttpMethod.GET, "/api/v1/schedules/{scheduleId}").permitAll()
                         // 토큰이 선택이다. 있으면 본인의 현재 닉네임을 사용 가능으로 본다
                         .requestMatchers(HttpMethod.GET, "/api/v1/users/nickname-availability").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/signup", "/api/v1/auth/signup/profile-image",

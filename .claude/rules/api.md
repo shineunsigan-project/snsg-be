@@ -33,9 +33,10 @@ paths:
   - 여러 값을 받는 `List<…>` 파라미터는 빈 값이 `null`이나 빈 문자열 원소로 섞여 들어오므로 받은 뒤 걸러낸다. 예: `RecruitingScheduleFilter`.
 - 인증 주체는 `@AuthenticationPrincipal UUID userId`로 받는다. 인증 필터가 principal에 userId(UUID)를 넣는다.
   - 공개 경로(토큰 없이 호출하는 엔드포인트)에서는 principal이 `"anonymousUser"`라 null이 들어온다. 타입이 맞지 않아도 예외 없이 null이므로 공개 경로에서는 쓰지 않는다.
-  - 예외는 **선택 인증 API**다. 공개 경로지만 토큰이 있으면 응답이 달라진다. 이때만 받아서 쓰고, 유효한 토큰이면 userId, 토큰이 없거나 틀리거나 만료됐으면 null이다. null은 익명으로 다룬다. 인증 필터가 틀린 토큰도 그냥 통과시키므로 **틀린 토큰은 401이 아니라 익명**이 된다. 예: `UserController`의 닉네임 사용 가능 여부(토큰이 있으면 본인의 현재 닉네임을 사용 가능으로 본다).
+  - 예외는 **선택 인증 API**다. 공개 경로지만 토큰이 있으면 응답이 달라진다. 이때만 받아서 쓰고, 유효한 토큰이면 userId, 토큰이 없거나 틀리거나 만료됐으면 null이다. null은 익명으로 다룬다. 인증 필터가 틀린 토큰도 그냥 통과시키므로 **틀린 토큰은 401이 아니라 익명**이 된다. 예: `UserController`의 닉네임 사용 가능 여부(토큰이 있으면 본인의 현재 닉네임을 사용 가능으로 본다), `ScheduleController`의 일정 상세(토큰이 있으면 보는 사람의 역할과 버튼이 달라진다).
   - 토큰 없이 호출하는 엔드포인트는 `SecurityConfig`에서 HTTP 메서드와 경로를 정확히 지정해 연다. `/api/v1/auth/**`처럼 prefix 전체를 열면 같은 prefix에 생긴 인증 필요 API까지 열린다. 우리 API에서는 `POST /api/v1/auth/tokens`(재발급)가 공개이고 `DELETE /api/v1/auth/tokens`(로그아웃)는 인증이 필요하다. 경로가 같고 메서드만 다르므로 경로만 지정하면 로그아웃·탈퇴가 열린다.
     - 하위 경로도 같다. `GET /api/v1/schedules`(모집 중 목록)는 공개이고 `GET /api/v1/schedules/participating`·`/hosted`는 인증이 필요하다. 그래서 `/api/v1/schedules` 정확한 경로 하나만 연다. 일정 상세(`GET /api/v1/schedules/{scheduleId}`)를 열 때 `/api/v1/schedules/*` 패턴을 쓰면 두 목록도 함께 열린다. `SecurityConfigTest`가 두 목록의 401을 단정하므로 그대로 두면 테스트가 깨진다.
+    - 경로 변수 패턴(`/api/v1/schedules/{scheduleId}`)은 같은 prefix의 고정 경로(`/participating`·`/hosted`)와도 맞는다. 인증이 필요한 고정 경로를 정확히 지정해 `authenticated()`로 먼저 두고, 그 뒤에 경로 변수 패턴을 `permitAll()`로 연다. 매처는 위에서부터 처음 맞는 것이 적용되므로 순서가 바뀌면 두 목록이 열린다. 순서가 중요하다는 주석을 남긴다. `{scheduleId}` 한 단계 패턴은 하위 경로(`/participants` 등)에 걸리지 않는다.
   - 공개 경로는 API를 만들 때 하나씩 추가한다. 아직 없는 경로를 미리 적어두지 않는다.
 - 인증 필터는 공개 경로를 포함한 **모든 요청**에서 돈다. 필터는 토큰이 있을 때만 해석해 principal을 채우고, 없거나 틀리면 그냥 통과시킨다. 인가 판단은 `authorizeHttpRequests`가, 401 응답 생성은 `AuthenticationEntryPoint`가 한다.
   - 공개 경로에서도 principal이 채워져야 한다. 일정 상세처럼 비로그인도 보지만 보는 사람에 따라 응답이 달라지는 API가 있다(참여자면 "참여 취소", 아니면 "참여하기").
