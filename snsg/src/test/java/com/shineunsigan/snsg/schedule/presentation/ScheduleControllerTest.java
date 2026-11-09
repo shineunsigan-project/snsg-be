@@ -5,11 +5,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,6 +20,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -31,14 +36,22 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
+import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.common.web.GlobalExceptionHandler;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.command.CreateScheduleCommand;
+import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListItemResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
+import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
+import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
 /**
- * 요청 단계에서 정한 규칙(필수값, 앞뒤 공백을 뺀 제목·설명 길이, 예상 소요 값)과 성공 응답 형태만 본다.
+ * 요청 단계에서 정한 규칙(필수값, 앞뒤 공백을 뺀 제목·설명 길이, 예상 소요 값, 목록 쿼리 파라미터)과 성공 응답 형태만 본다.
  * <p>
  * auth를 import하지 않는다. 인증 필터는 auth 패키지를 스캔에서 빼서 올리지 않고,
  * 인증 주체는 SecurityContext에 직접 넣는다.
@@ -50,6 +63,7 @@ import com.shineunsigan.snsg.schedule.application.dto.command.CreateScheduleComm
 class ScheduleControllerTest {
 
     private static final UUID USER_ID = UUID.randomUUID();
+    private static final UUID CATEGORY_ID = UUID.randomUUID();
     private static final String TITLE_MESSAGE = "활동명은 1~20자로 적어주세요.";
     private static final String DESCRIPTION_MESSAGE = "10자 이상 적어주세요.";
 
@@ -64,6 +78,9 @@ class ScheduleControllerTest {
 
     @MockitoBean
     private ScheduleCommandService scheduleCommandService;
+
+    @MockitoBean
+    private ListSchedulesFacade listSchedulesFacade;
 
     @BeforeEach
     void authenticate() {
@@ -166,6 +183,139 @@ class ScheduleControllerTest {
                 .andExpect(jsonPath("$.data").doesNotExist());
 
         verify(scheduleCommandService).leave(scheduleId, USER_ID);
+    }
+
+    // 목록 3종
+
+    @Test
+    @DisplayName("모집 중 목록은 200과 카드 필드, nextCursor를 준다. 장소 필드는 없다")
+    void listsRecruiting() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        when(listSchedulesFacade.listRecruiting(any())).thenReturn(page(scheduleId, "next-cursor"));
+
+        mockMvc.perform(get("/api/v1/schedules"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.data.items[0].id").value(scheduleId.toString()))
+                .andExpect(jsonPath("$.data.items[0].category.id").value(CATEGORY_ID.toString()))
+                .andExpect(jsonPath("$.data.items[0].category.name").value("보드게임"))
+                .andExpect(jsonPath("$.data.items[0].title").value("보드게임 같이 해요"))
+                .andExpect(jsonPath("$.data.items[0].regionName").value("마포구"))
+                .andExpect(jsonPath("$.data.items[0].startAt").value("2026-11-14T19:30:00"))
+                .andExpect(jsonPath("$.data.items[0].confirmedCount").value(2))
+                .andExpect(jsonPath("$.data.items[0].capacity").value(6))
+                .andExpect(jsonPath("$.data.items[0].remainingSeats").value(4))
+                .andExpect(jsonPath("$.data.items[0].displayStatus").value("RECRUITING"))
+                .andExpect(jsonPath("$.data.items[0].createdAt").value("2026-11-10T09:00:00"))
+                .andExpect(jsonPath("$.data.items[0].place").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].placeName").doesNotExist())
+                .andExpect(jsonPath("$.data.nextCursor").value("next-cursor"));
+    }
+
+    @Test
+    @DisplayName("참여한 목록은 200이고 SecurityContext의 사용자로 facade를 부른다. 마지막 페이지면 nextCursor는 null")
+    void listsParticipating() throws Exception {
+        when(listSchedulesFacade.listParticipating(USER_ID, "c", 10)).thenReturn(page(UUID.randomUUID(), null));
+
+        mockMvc.perform(get("/api/v1/schedules/participating").param("cursor", "c").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].regionName").value("마포구"))
+                .andExpect(jsonPath("$.data.items[0].place").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].placeName").doesNotExist())
+                .andExpect(jsonPath("$.data.nextCursor").value(nullValue()));
+
+        verify(listSchedulesFacade).listParticipating(USER_ID, "c", 10);
+    }
+
+    @Test
+    @DisplayName("개설한 목록은 200이고 SecurityContext의 사용자로 facade를 부른다")
+    void listsHosted() throws Exception {
+        when(listSchedulesFacade.listHosted(USER_ID, null, null)).thenReturn(page(UUID.randomUUID(), "next"));
+
+        mockMvc.perform(get("/api/v1/schedules/hosted"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].displayStatus").value("RECRUITING"))
+                .andExpect(jsonPath("$.data.items[0].place").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].placeName").doesNotExist())
+                .andExpect(jsonPath("$.data.nextCursor").value("next"));
+
+        verify(listSchedulesFacade).listHosted(USER_ID, null, null);
+    }
+
+    @Test
+    @DisplayName("반복한 categoryIds·regionCodes는 목록으로, 날짜·커서·size는 그대로 facade에 넘어간다")
+    void repeatedParametersBecomeLists() throws Exception {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        when(listSchedulesFacade.listRecruiting(any())).thenReturn(new ScheduleListResult(List.of(), null));
+
+        mockMvc.perform(get("/api/v1/schedules")
+                        .param("categoryIds", first.toString(), second.toString())
+                        .param("regionCodes", "11440", "11410")
+                        .param("startDate", "2026-11-14")
+                        .param("endDate", "2026-11-15")
+                        .param("cursor", "abc")
+                        .param("size", "30"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<ListRecruitingSchedulesCommand> command =
+                ArgumentCaptor.forClass(ListRecruitingSchedulesCommand.class);
+        verify(listSchedulesFacade).listRecruiting(command.capture());
+        assertThat(command.getValue().categoryIds()).containsExactly(first, second);
+        assertThat(command.getValue().regionCodes()).containsExactly("11440", "11410");
+        assertThat(command.getValue().startDate()).hasToString("2026-11-14");
+        assertThat(command.getValue().endDate()).hasToString("2026-11-15");
+        assertThat(command.getValue().cursor()).isEqualTo("abc");
+        assertThat(command.getValue().size()).isEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("빈 값으로 보낸 categoryIds·regionCodes는 400이 아니라 200이다")
+    void blankListParametersAreAccepted() throws Exception {
+        when(listSchedulesFacade.listRecruiting(any())).thenReturn(new ScheduleListResult(List.of(), null));
+
+        mockMvc.perform(get("/api/v1/schedules").param("categoryIds", "").param("regionCodes", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"startDate=2026-13-01", "size=abc", "categoryIds=abc"})
+    @DisplayName("없는 날짜, 숫자가 아닌 size, UUID가 아닌 categoryIds는 400 INVALID_REQUEST")
+    void malformedParameters(String query) throws Exception {
+        mockMvc.perform(get("/api/v1/schedules?" + query))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        verify(listSchedulesFacade, never()).listRecruiting(any());
+    }
+
+    @Test
+    @DisplayName("facade가 INVALID_DATE_FILTER를 던지면 400과 그 code")
+    void invalidDateFilter() throws Exception {
+        when(listSchedulesFacade.listRecruiting(any()))
+                .thenThrow(new BusinessException(ScheduleErrorCode.INVALID_DATE_FILTER));
+
+        mockMvc.perform(get("/api/v1/schedules").param("startDate", "2026-11-15").param("endDate", "2026-11-14"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_DATE_FILTER"));
+    }
+
+    @Test
+    @DisplayName("facade가 INVALID_CURSOR를 던지면 400과 그 code")
+    void invalidCursor() throws Exception {
+        when(listSchedulesFacade.listHosted(USER_ID, "broken", null))
+                .thenThrow(new BusinessException(ScheduleErrorCode.INVALID_CURSOR));
+
+        mockMvc.perform(get("/api/v1/schedules/hosted").param("cursor", "broken"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_CURSOR"));
+    }
+
+    private static ScheduleListResult page(UUID scheduleId, String nextCursor) {
+        ScheduleCardResult card = new ScheduleCardResult(scheduleId, CATEGORY_ID, "보드게임", "보드게임 같이 해요", "11440",
+                LocalDateTime.of(2026, 11, 14, 19, 30), 2, 6, 4, DisplayStatus.RECRUITING,
+                LocalDateTime.of(2026, 11, 10, 9, 0));
+        return new ScheduleListResult(List.of(new ScheduleListItemResult(card, "마포구")), nextCursor);
     }
 
     private ResultActions perform(String body) throws Exception {

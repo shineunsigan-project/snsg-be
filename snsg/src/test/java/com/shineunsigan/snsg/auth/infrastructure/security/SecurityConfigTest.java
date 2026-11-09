@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.auth.infrastructure.security;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
@@ -10,6 +11,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +32,12 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import com.shineunsigan.snsg.auth.application.port.out.TokenPort;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
+import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
+import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
+import com.shineunsigan.snsg.schedule.presentation.ScheduleController;
 import com.shineunsigan.snsg.user.application.UploadProfileImageFacade;
 import com.shineunsigan.snsg.user.application.UserCommandService;
 import com.shineunsigan.snsg.user.application.UserProfileCommandService;
@@ -40,7 +49,7 @@ import com.shineunsigan.snsg.user.presentation.UserController;
  * 실제 {@link SecurityConfig}와 인증 필터·진입점을 올려 공개 경로의 인가 규칙을 본다.
  * 토큰 검증 adapter만 mock으로 바꾼다.
  */
-@WebMvcTest(controllers = UserController.class)
+@WebMvcTest(controllers = {UserController.class, ScheduleController.class})
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, JwtAuthenticationEntryPoint.class,
         SecurityConfigTest.CorsTestConfig.class})
 class SecurityConfigTest {
@@ -75,6 +84,18 @@ class SecurityConfigTest {
 
     @MockitoBean
     private UploadProfileImageFacade uploadProfileImageFacade;
+
+    @MockitoBean
+    private CreateScheduleFacade createScheduleFacade;
+
+    @MockitoBean
+    private JoinScheduleFacade joinScheduleFacade;
+
+    @MockitoBean
+    private ScheduleCommandService scheduleCommandService;
+
+    @MockitoBean
+    private ListSchedulesFacade listSchedulesFacade;
 
     @Test
     @DisplayName("닉네임 사용 가능 여부는 토큰 없이 부를 수 있다")
@@ -129,6 +150,29 @@ class SecurityConfigTest {
     void uploadProfileImageRequiresToken() throws Exception {
         mockMvc.perform(multipart(ME + "/profile-image")
                         .file(new MockMultipartFile("image", "me.png", MediaType.IMAGE_PNG_VALUE, new byte[] {1})))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    @DisplayName("모집 중 일정 목록은 토큰 없이 부를 수 있다")
+    void recruitingSchedulesWithoutToken() throws Exception {
+        when(listSchedulesFacade.listRecruiting(any())).thenReturn(new ScheduleListResult(List.of(), null));
+
+        mockMvc.perform(get("/api/v1/schedules"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("참여한·개설한 일정 목록과 일정 개설은 토큰 없이 부를 때 401")
+    void mySchedulesAndCreateRequireToken() throws Exception {
+        mockMvc.perform(get("/api/v1/schedules/participating"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        mockMvc.perform(get("/api/v1/schedules/hosted"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        mockMvc.perform(post("/api/v1/schedules").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
