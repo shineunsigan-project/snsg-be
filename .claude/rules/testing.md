@@ -24,6 +24,7 @@ paths:
 ## 쓰지 않는 테스트
 
 - 설정만 추가한 변경. 앱이 뜨는지, DB·Redis에 붙는지는 실행으로 확인하고 결과를 PR의 test 절에 적는다.
+  - 스케줄러가 실제로 도는지는 `./gradlew bootRun` 로그의 SQL로 확인한다(local 프로파일이 `org.hibernate.SQL: debug`라 0건 갱신도 찍힌다). `format_sql: true`라 SQL 한 문장이 여러 줄로 찍힌다. grep은 줄을 이어 붙인 뒤 하거나, 한 줄에 같이 찍히는 짧은 문자열로 찾는다. 로그는 세션 스크래치패드에 두고 확인 후 지운다(`.claude/rules/temp-files.md`).
 - 라이브러리 객체를 직접 만들어 검증하는 것(`new ObjectMapper()` 등). 앱이 실제로 쓰는 설정과 달라 통과해도 의미가 없다.
 - DTO 변환 메서드(`XxxResponse.from`)처럼 필드를 그대로 옮기는 코드. 변환 중 계산이나 분기가 들어가면 그때 테스트한다.
 - 커버리지 숫자를 목표로 삼지 않는다. 숫자를 채우려고 쓰는 테스트가 위 항목들이다.
@@ -50,6 +51,13 @@ paths:
 - 감사 필드를 검증하는 JPA 슬라이스 테스트는 `@Import`에 `JpaAuditingConfig`를 함께 넣는다.
 - `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`에 있고 스타터는 `spring-boot-starter-webmvc-test`. Service는 `@MockitoBean`으로 대체한다.
 - 테스트는 기본 프로파일(`local`)로 돌고, 설정값은 `snsg/.env`에서 읽는다(`application-local.yaml`의 `spring.config.import`). 새 환경변수를 추가하면 `.env`에도 넣어야 컨텍스트가 뜬다.
+- **테스트에서는 스케줄링이 꺼져 있다.** `snsg/src/test/resources/config/application.yaml`의 `scheduling.enabled: false`가 끈다. `@SpringBootTest` 컨텍스트가 스케줄러를 띄우면 공유 로컬 DB의 실제 데이터에 상태 전환을 커밋한다(`@WebMvcTest`·`@DataJpaTest`는 스케줄러 빈을 올리지 않는다). `SnsgApplicationTests.schedulingIsDisabledInTests`가 꺼진 것과 main 설정이 함께 읽히는 것을 단정한다.
+  - Gradle test 태스크의 `systemProperty`로 끄지 않는다. IDE의 JUnit 러너로 돌리면 적용되지 않아 스케줄러가 켜진다.
+  - 테스트 전용 설정은 `src/test/resources/config/application.yaml`에 둔다. `classpath:/config/`는 `classpath:/`와 함께 읽혀 합쳐지고 우선한다. `src/test/resources/application.yaml`은 같은 경로의 main 설정을 통째로 가리므로 쓰지 않는다.
+- 일괄 UPDATE(`@Modifying`, `.claude/rules/package-structure.md` 일괄 UPDATE 절)는 테이블 전체가 대상이라 공유 DB의 다른 행도 WHERE에 걸릴 수 있다. 테스트 트랜잭션이 롤백해 남지는 않지만, 다른 행을 건드리지 않고 넣은 행만 단정하도록 이렇게 쓴다. 예: `ScheduleRepositoryImplTest`의 상태 전환 테스트.
+  - 기준 시각을 과거 고정 값(예: `2020-01-01T12:00`)으로 넘기고 테스트 행의 시각을 그 근처에 둔다. 실제 개설 데이터(미래 시작)는 조건에 걸리지 않는다.
+  - 바뀐 건수로 단정하지 않는다. 넣은 행의 id로 native SELECT해서 상태와 감사 컬럼(`updated_by`·`updated_at`·`created_by`·`created_at`)을 단정한다. 일괄 UPDATE 뒤 영속성 컨텍스트의 엔티티는 옛 값이라 엔티티로 다시 읽지 않는다.
+  - 경계(기준 시각과 같음 → 바뀜, 1분 뒤 → 그대로), 대상이 아닌 행(취소·삭제·이미 목표 상태)의 감사 값 보존, 더 늦은 기준 시각으로 한 번 더 불러도 `updated_at`이 첫 값으로 남는지(멱등)를 본다.
 - 결과가 경고 로그로만 드러나는 분기는 `OutputCaptureExtension`(`org.springframework.boot.test.system`)으로 로그를 받아 단정한다. Mockito와 함께 쓸 때는 `@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})`. 예: `PlaceCommandServiceTest`.
 - 외부 API adapter는 슬라이스 없이 `MockRestServiceServer.bindTo(RestClient.Builder)`로 테스트한다.
 - 파일 저장소 adapter는 Spring 없이 JUnit `@TempDir` 아래 디렉터리를 설정 record로 넘겨 실제 파일로 테스트한다. 예: `LocalFileStorageAdapterTest`(형식 밖 경로로 디렉터리 안팎의 파일이 지워지지 않는지).
