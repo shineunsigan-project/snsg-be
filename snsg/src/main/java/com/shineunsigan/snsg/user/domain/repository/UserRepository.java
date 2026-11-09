@@ -1,6 +1,8 @@
 package com.shineunsigan.snsg.user.domain.repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,6 +20,13 @@ public interface UserRepository {
     User save(User user);
 
     Optional<User> findById(UUID id);
+
+    /**
+     * 주어진 ID들을 한 번의 쿼리로 읽는다. 삭제된(탈퇴한) 행도 읽는다. 없는 ID는 결과에 없다.
+     * 탈퇴자를 가려 보여주는 조회({@code FindUserProfilesUseCase})에만 쓴다.
+     * 활성 여부 판정에는 쓰지 않는다. 탈퇴자가 통과한다.
+     */
+    List<User> findAllByIdIncludingDeleted(Collection<UUID> ids);
 
     /**
      * 닉네임 중복 판정(POL-U3)을 여기서만 한다. 대소문자를 무시하고 비교한다.

@@ -29,7 +29,7 @@ public class Profile {
     /** 2~10자의 한글·영문·숫자·.·_. 기능명세서 POL-005. */
     public static final String NICKNAME_PATTERN = "^[가-힣a-zA-Z0-9._]{2,10}$";
 
-    private static final String WITHDRAWN_NICKNAME = "탈퇴한 사용자";
+    public static final String WITHDRAWN_NICKNAME = "탈퇴한 사용자";
     private static final LocalDate WITHDRAWN_BIRTH_DATE = LocalDate.of(1900, 1, 1);
     private static final Pattern NICKNAME = Pattern.compile(NICKNAME_PATTERN);
 
