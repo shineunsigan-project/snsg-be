@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -39,15 +40,25 @@ import org.springframework.test.web.servlet.ResultActions;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.common.web.GlobalExceptionHandler;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.command.CreateScheduleCommand;
 import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
+import com.shineunsigan.snsg.schedule.application.dto.result.ParticipantSummaryResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleAgeGroupResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQueryResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleHostResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListItemResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
+import com.shineunsigan.snsg.schedule.domain.constants.AgePhase;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
+import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
+import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
+import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
 /**
@@ -81,6 +92,9 @@ class ScheduleControllerTest {
 
     @MockitoBean
     private ListSchedulesFacade listSchedulesFacade;
+
+    @MockitoBean
+    private GetScheduleDetailFacade getScheduleDetailFacade;
 
     @BeforeEach
     void authenticate() {
@@ -309,6 +323,73 @@ class ScheduleControllerTest {
         mockMvc.perform(get("/api/v1/schedules/hosted").param("cursor", "broken"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_CURSOR"));
+    }
+
+    // 상세
+
+    @Test
+    @DisplayName("상세는 인증 없이 부르면(principal null) 보는 사람 null로 facade를 부르고 200이다")
+    void detailWithoutAuthentication() throws Exception {
+        SecurityContextHolder.clearContext();
+        UUID scheduleId = UUID.randomUUID();
+        when(getScheduleDetailFacade.get(scheduleId, null)).thenReturn(detail(scheduleId, ViewerRole.GUEST));
+
+        mockMvc.perform(get("/api/v1/schedules/{scheduleId}", scheduleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.viewerRole").value("GUEST"));
+
+        verify(getScheduleDetailFacade).get(scheduleId, null);
+    }
+
+    @Test
+    @DisplayName("상세는 인증했으면 그 사용자로 facade를 부른다. 응답 필드를 펼쳐 주고 cancellation은 없다")
+    void detailWithAuthentication() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        when(getScheduleDetailFacade.get(scheduleId, USER_ID))
+                .thenReturn(detail(scheduleId, ViewerRole.NON_PARTICIPANT));
+
+        mockMvc.perform(get("/api/v1/schedules/{scheduleId}", scheduleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(scheduleId.toString()))
+                .andExpect(jsonPath("$.data.category.name").value("보드게임"))
+                .andExpect(jsonPath("$.data.host.nickname").value("민트초코"))
+                .andExpect(jsonPath("$.data.host.withdrawn").value(false))
+                .andExpect(jsonPath("$.data.remainingSeats").value(4))
+                .andExpect(jsonPath("$.data.participantSummary.count").value(2))
+                .andExpect(jsonPath("$.data.participantSummary.minAgeGroup.decade").value(20))
+                .andExpect(jsonPath("$.data.participantSummary.minAgeGroup.phase").value("LATE"))
+                .andExpect(jsonPath("$.data.participantSummary.maxAgeGroup").value(nullValue()))
+                .andExpect(jsonPath("$.data.place.name").value("보드게임카페"))
+                .andExpect(jsonPath("$.data.place.regionName").value("마포구"))
+                .andExpect(jsonPath("$.data.displayStatus").value("RECRUITING"))
+                .andExpect(jsonPath("$.data.viewerRole").value("NON_PARTICIPANT"))
+                .andExpect(jsonPath("$.data.availableActions[0]").value("JOIN"))
+                .andExpect(jsonPath("$.data.cancellation").doesNotExist());
+
+        verify(getScheduleDetailFacade).get(scheduleId, USER_ID);
+    }
+
+    @Test
+    @DisplayName("facade가 SCHEDULE_NOT_FOUND를 던지면 404와 그 code")
+    void detailNotFound() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        when(getScheduleDetailFacade.get(scheduleId, USER_ID))
+                .thenThrow(new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND));
+
+        mockMvc.perform(get("/api/v1/schedules/{scheduleId}", scheduleId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("SCHEDULE_NOT_FOUND"));
+    }
+
+    private static ScheduleDetailResult detail(UUID scheduleId, ViewerRole viewerRole) {
+        ScheduleDetailQueryResult schedule = new ScheduleDetailQueryResult(scheduleId, "보드게임 같이 해요",
+                "처음 오시는 분도 환영해요.", LocalDateTime.of(2026, 11, 14, 19, 30), LocalDateTime.of(2026, 11, 10, 9, 0),
+                DurationType.NORMAL, CATEGORY_ID, "보드게임", UUID.randomUUID(), List.of(), 2, 6, 4,
+                new ScheduleDetailQueryResult.Place("보드게임카페", "서울특별시 마포구 와우산로 1", "2층",
+                        new BigDecimal("37.5500000"), new BigDecimal("126.9200000"), "11440"),
+                DisplayStatus.RECRUITING, viewerRole, List.of(ScheduleAction.JOIN));
+        return new ScheduleDetailResult(schedule, new ScheduleHostResult("민트초코", "/images/default-profile.png", false),
+                new ParticipantSummaryResult(2, 1, 1, new ScheduleAgeGroupResult(20, AgePhase.LATE), null), "마포구");
     }
 
     private static ScheduleListResult page(UUID scheduleId, String nextCursor) {

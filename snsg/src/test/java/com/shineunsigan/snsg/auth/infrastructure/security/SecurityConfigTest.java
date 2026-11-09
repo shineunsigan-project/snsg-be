@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,10 +34,12 @@ import com.shineunsigan.snsg.auth.application.port.out.TokenPort;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
+import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 import com.shineunsigan.snsg.schedule.presentation.ScheduleController;
 import com.shineunsigan.snsg.user.application.UploadProfileImageFacade;
 import com.shineunsigan.snsg.user.application.UserProfileCommandService;
@@ -96,6 +99,9 @@ class SecurityConfigTest {
 
     @MockitoBean
     private ListSchedulesFacade listSchedulesFacade;
+
+    @MockitoBean
+    private GetScheduleDetailFacade getScheduleDetailFacade;
 
     @Test
     @DisplayName("닉네임 사용 가능 여부는 토큰 없이 부를 수 있다")
@@ -161,6 +167,20 @@ class SecurityConfigTest {
 
         mockMvc.perform(get("/api/v1/schedules"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("일정 상세는 토큰 없이 부를 수 있다(401이 아니라 컨트롤러까지 간다). 보는 사람은 null로 넘어간다")
+    void scheduleDetailWithoutToken() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        when(getScheduleDetailFacade.get(scheduleId, null))
+                .thenThrow(new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND));
+
+        mockMvc.perform(get("/api/v1/schedules/{scheduleId}", scheduleId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("SCHEDULE_NOT_FOUND"));
+
+        verify(getScheduleDetailFacade).get(eq(scheduleId), isNull());
     }
 
     @Test

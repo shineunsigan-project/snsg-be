@@ -17,6 +17,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -35,8 +36,11 @@ import com.shineunsigan.snsg.common.exception.CommonErrorCode;
 import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardPageResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQueryResult;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
+import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
+import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
 import com.shineunsigan.snsg.schedule.domain.model.PlaceSnapshot;
@@ -47,7 +51,8 @@ import com.shineunsigan.snsg.schedule.domain.repository.ActivityCategoryReposito
 import com.shineunsigan.snsg.schedule.domain.repository.ScheduleRepository;
 
 /**
- * 목록의 페이지 크기(기본·상한·하한), 날짜 필터 해석과 오류 순서, 다음 페이지 판정(한 건 더 읽기), 카드 변환을 본다.
+ * 목록의 페이지 크기(기본·상한·하한), 날짜 필터 해석과 오류 순서, 다음 페이지 판정(한 건 더 읽기), 카드 변환,
+ * 상세의 없는 일정과 판정 결과 담기를 본다.
  * 쿼리 조건 자체는 ScheduleRepositoryImplTest가 실제 PostgreSQL에서 본다.
  */
 @ExtendWith(MockitoExtension.class)
@@ -241,6 +246,53 @@ class ScheduleQueryServiceTest {
 
         verify(scheduleRepository).findRecruiting(filter.capture(), any(), any(), anyInt());
         assertThat(filter.getValue().matchesNothing()).isTrue();
+    }
+
+    // 상세
+
+    @Test
+    @DisplayName("상세: 일정이 없으면(삭제 포함) SCHEDULE_NOT_FOUND이고 활동을 조회하지 않는다")
+    void detailNotFound() {
+        UUID scheduleId = UUID.randomUUID();
+        when(scheduleRepository.findById(scheduleId)).thenReturn(Optional.empty());
+
+        assertError(() -> scheduleQueryService.findDetail(scheduleId, USER_ID), ScheduleErrorCode.SCHEDULE_NOT_FOUND);
+        verifyNoInteractions(activityCategoryRepository);
+    }
+
+    @Test
+    @DisplayName("상세: 보는 사람의 역할·동작·표시 상태, 확정 참여자 id, 활동 이름, 장소 사본을 담는다. 보는 사람이 null이면 GUEST")
+    void detailFields() {
+        Schedule schedule = schedule(CATEGORY_ID, 0);
+        ActivityCategory category = mock(ActivityCategory.class);
+        when(category.getId()).thenReturn(CATEGORY_ID);
+        when(category.getName()).thenReturn("보드게임");
+        when(scheduleRepository.findById(schedule.getId())).thenReturn(Optional.of(schedule));
+        when(activityCategoryRepository.findAllNotDeletedByIds(List.of(CATEGORY_ID))).thenReturn(List.of(category));
+
+        ScheduleDetailQueryResult guest = scheduleQueryService.findDetail(schedule.getId(), null);
+        ScheduleDetailQueryResult host = scheduleQueryService.findDetail(schedule.getId(), schedule.getHostUserId());
+
+        assertThat(guest.viewerRole()).isEqualTo(ViewerRole.GUEST);
+        assertThat(guest.availableActions()).containsExactly(ScheduleAction.LOGIN_TO_JOIN);
+        assertThat(guest.displayStatus()).isEqualTo(DisplayStatus.RECRUITING);
+        assertThat(guest.categoryName()).isEqualTo("보드게임");
+        assertThat(guest.confirmedUserIds()).containsExactly(schedule.getHostUserId());
+        assertThat(guest.remainingSeats()).isEqualTo(5);
+        assertThat(guest.place().name()).isEqualTo("보드게임카페");
+        assertThat(guest.place().regionCode()).isEqualTo("11440");
+        assertThat(host.viewerRole()).isEqualTo(ViewerRole.HOST);
+        assertThat(host.availableActions()).containsExactly(ScheduleAction.CANCEL_SCHEDULE);
+    }
+
+    @Test
+    @DisplayName("상세: 활동을 찾을 수 없으면 활동 이름은 빈 문자열이다")
+    void detailMissingCategory() {
+        Schedule schedule = schedule(CATEGORY_ID, 0);
+        when(scheduleRepository.findById(schedule.getId())).thenReturn(Optional.of(schedule));
+        when(activityCategoryRepository.findAllNotDeletedByIds(List.of(CATEGORY_ID))).thenReturn(List.of());
+
+        assertThat(scheduleQueryService.findDetail(schedule.getId(), USER_ID).categoryName()).isEmpty();
     }
 
     private void assertRecruitingLimit(Integer size, int expectedLimit) {

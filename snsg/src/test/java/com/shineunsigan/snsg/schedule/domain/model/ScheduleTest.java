@@ -8,12 +8,15 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -24,11 +27,14 @@ import com.shineunsigan.snsg.schedule.domain.constants.HostType;
 import com.shineunsigan.snsg.schedule.domain.constants.ParticipantRole;
 import com.shineunsigan.snsg.schedule.domain.constants.ParticipationStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.RecruitmentStatus;
+import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus;
+import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
 /**
- * 개설의 형식 규칙(제목·설명·시작 일시·인원), 화면 표시 상태 판정, 참여·참여 취소 규칙을 검증한다.
+ * 개설의 형식 규칙(제목·설명·시작 일시·인원), 화면 표시 상태 판정, 참여·참여 취소 규칙,
+ * 상세를 보는 사람의 역할과 누를 수 있는 동작을 검증한다.
  * 설정값은 운영 설정과 같은 값(4~24명, 1시간, 30일, 완료 12시간)을 넣는다.
  */
 class ScheduleTest {
@@ -601,6 +607,164 @@ class ScheduleTest {
 
             assertInvalid(() -> schedule.leave(userId, now, COMPLETION_AFTER), errorCode);
             assertThat(Snapshot.of(schedule)).isEqualTo(before);
+        }
+    }
+
+    @Nested
+    @DisplayName("보는 사람의 역할")
+    class Viewer {
+
+        private final Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+
+        @Test
+        @DisplayName("로그인하지 않았으면(id null) GUEST")
+        void guest() {
+            assertThat(schedule.viewerRole(null)).isEqualTo(ViewerRole.GUEST);
+        }
+
+        @Test
+        @DisplayName("개설자면 HOST")
+        void host() {
+            assertThat(schedule.viewerRole(HOST_ID)).isEqualTo(ViewerRole.HOST);
+        }
+
+        @Test
+        @DisplayName("멤버로 확정 참여했으면 PARTICIPANT")
+        void participant() {
+            UUID userId = UUID.randomUUID();
+            schedule.join(userId, NOW, COMPLETION_AFTER);
+
+            assertThat(schedule.viewerRole(userId)).isEqualTo(ViewerRole.PARTICIPANT);
+        }
+
+        @Test
+        @DisplayName("참여한 적이 없으면 NON_PARTICIPANT")
+        void neverJoined() {
+            assertThat(schedule.viewerRole(UUID.randomUUID())).isEqualTo(ViewerRole.NON_PARTICIPANT);
+        }
+
+        @Test
+        @DisplayName("참여를 취소했으면 NON_PARTICIPANT")
+        void left() {
+            UUID userId = UUID.randomUUID();
+            schedule.join(userId, NOW, COMPLETION_AFTER);
+            schedule.leave(userId, NOW, COMPLETION_AFTER);
+
+            assertThat(schedule.viewerRole(userId)).isEqualTo(ViewerRole.NON_PARTICIPANT);
+        }
+
+        @Test
+        @DisplayName("확정 참여자 id는 개설자와 확정 멤버다. 참여를 취소한 사람은 빠진다")
+        void confirmedUserIds() {
+            UUID stayed = UUID.randomUUID();
+            UUID left = UUID.randomUUID();
+            schedule.join(stayed, NOW, COMPLETION_AFTER);
+            schedule.join(left, NOW, COMPLETION_AFTER);
+            schedule.leave(left, NOW, COMPLETION_AFTER);
+
+            assertThat(schedule.confirmedUserIds()).containsExactlyInAnyOrder(HOST_ID, stayed);
+        }
+    }
+
+    @Nested
+    @DisplayName("누를 수 있는 동작")
+    class Actions {
+
+        /** 표시 상태별 상황. 같은 표시 상태라도 개설자의 일정 취소가 갈리는 경우를 나눈다. */
+        enum Situation {
+
+            /** 시작 1시간 전, 모집 중. */
+            RECRUITING(DisplayStatus.RECRUITING),
+
+            /** 정원이 차 마감된 시작 1시간 전. */
+            CLOSED_FULL_BEFORE_START(DisplayStatus.RECRUITMENT_CLOSED),
+
+            /** 시작 시각 정각. 저장된 모집 상태는 아직 RECRUITING(스케줄러 전)이다. */
+            CLOSED_AT_START_BEFORE_SCHEDULER(DisplayStatus.RECRUITMENT_CLOSED),
+
+            /** 시작 1시간 뒤. 저장된 모집 상태는 아직 RECRUITING(스케줄러 전)이다. */
+            CLOSED_AFTER_START_BEFORE_SCHEDULER(DisplayStatus.RECRUITMENT_CLOSED),
+
+            /** 시작 + 12시간. 저장된 상태는 아직 SCHEDULED(스케줄러 전)다. */
+            COMPLETED(DisplayStatus.COMPLETED),
+
+            /** 개설자가 취소한 일정, 시작 1시간 전. */
+            CANCELED(DisplayStatus.CANCELED);
+
+            private final DisplayStatus displayStatus;
+
+            Situation(DisplayStatus displayStatus) {
+                this.displayStatus = displayStatus;
+            }
+
+            Schedule schedule() {
+                Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+                if (this == CLOSED_FULL_BEFORE_START) {
+                    ReflectionTestUtils.setField(schedule, "recruitmentStatus", RecruitmentStatus.CLOSED);
+                }
+                if (this == CANCELED) {
+                    ReflectionTestUtils.setField(schedule, "status", ScheduleStatus.CANCELED);
+                }
+                return schedule;
+            }
+
+            LocalDateTime now() {
+                return switch (this) {
+                    case RECRUITING, CLOSED_FULL_BEFORE_START, CANCELED -> START_AT.minusHours(1);
+                    case CLOSED_AT_START_BEFORE_SCHEDULER -> START_AT;
+                    case CLOSED_AFTER_START_BEFORE_SCHEDULER -> START_AT.plusHours(1);
+                    case COMPLETED -> START_AT.plusHours(12);
+                };
+            }
+        }
+
+        static Stream<Arguments> table() {
+            List<ScheduleAction> none = List.of();
+            List<ScheduleAction> login = List.of(ScheduleAction.LOGIN_TO_JOIN);
+            List<ScheduleAction> join = List.of(ScheduleAction.JOIN);
+            List<ScheduleAction> leave = List.of(ScheduleAction.CANCEL_PARTICIPATION);
+            List<ScheduleAction> cancel = List.of(ScheduleAction.CANCEL_SCHEDULE);
+            return Stream.of(
+                    // 상황, GUEST, NON_PARTICIPANT, PARTICIPANT, HOST
+                    row(Situation.RECRUITING, login, join, leave, cancel),
+                    row(Situation.CLOSED_FULL_BEFORE_START, none, none, leave, cancel),
+                    row(Situation.CLOSED_AT_START_BEFORE_SCHEDULER, none, none, leave, none),
+                    row(Situation.CLOSED_AFTER_START_BEFORE_SCHEDULER, none, none, leave, none),
+                    row(Situation.COMPLETED, none, none, none, none),
+                    row(Situation.CANCELED, none, none, none, none))
+                    .flatMap(arguments -> arguments);
+        }
+
+        private static Stream<Arguments> row(Situation situation, List<ScheduleAction> guest,
+                List<ScheduleAction> nonParticipant, List<ScheduleAction> participant, List<ScheduleAction> host) {
+            return Stream.of(
+                    Arguments.of(situation, ViewerRole.GUEST, guest),
+                    Arguments.of(situation, ViewerRole.NON_PARTICIPANT, nonParticipant),
+                    Arguments.of(situation, ViewerRole.PARTICIPANT, participant),
+                    Arguments.of(situation, ViewerRole.HOST, host));
+        }
+
+        @ParameterizedTest(name = "{0} × {1} → {2}")
+        @MethodSource("table")
+        @DisplayName("역할 × 표시 상태 조합마다 누를 수 있는 동작")
+        void byRoleAndDisplayStatus(Situation situation, ViewerRole role, List<ScheduleAction> expected) {
+            Schedule schedule = situation.schedule();
+
+            assertThat(schedule.displayStatus(situation.now(), COMPLETION_AFTER)).isEqualTo(situation.displayStatus);
+            assertThat(schedule.availableActions(role, situation.now(), COMPLETION_AFTER))
+                    .containsExactlyElementsOf(expected);
+        }
+
+        @Test
+        @DisplayName("시작 시각이 지났는데 저장된 모집 상태가 RECRUITING이면 표시 상태는 RECRUITMENT_CLOSED이고 GUEST·NON_PARTICIPANT는 누를 것이 없다")
+        void afterStartBeforeScheduler() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+            LocalDateTime now = START_AT.plusMinutes(1);
+
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.RECRUITING);
+            assertThat(schedule.displayStatus(now, COMPLETION_AFTER)).isEqualTo(DisplayStatus.RECRUITMENT_CLOSED);
+            assertThat(schedule.availableActions(ViewerRole.GUEST, now, COMPLETION_AFTER)).isEmpty();
+            assertThat(schedule.availableActions(ViewerRole.NON_PARTICIPANT, now, COMPLETION_AFTER)).isEmpty();
         }
     }
 
