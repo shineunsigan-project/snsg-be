@@ -199,6 +199,16 @@
 - 엔티티와 스키마는 `ddl-auto: validate`가 대조한다. 어긋나면 앱이 뜨지 않는다. Hibernate가 스키마를 만들게 하지 않는다.
 - PostgreSQL 전용 문법(부분 유니크 인덱스 등)을 쓰므로 테스트도 실제 PostgreSQL로 돌린다.
 
+### 동시 요청과 잠금
+
+- 동시에 오면 결과가 어긋나는 판정(정원, 시간 겹침)은 Command 서비스의 트랜잭션 안에서 **잠근 뒤 판정한다.** 잠금은 repository 메서드로 둔다.
+  - 사용자 단위: `pg_advisory_xact_lock`(`ScheduleRepository.lockUser`). 같은 사용자의 개설·참여를 차례로 세워 겹침 검사가 서로의 결과를 보게 한다.
+  - 행 단위: `@Lock(PESSIMISTIC_WRITE)` 조회, 즉 `SELECT … FOR UPDATE`(`ScheduleRepository.findByIdForUpdate`). 같은 일정의 참여·참여 취소를 차례로 세운다.
+- **둘을 함께 잡으면 순서는 항상 사용자 → 일정이다.** 순서가 섞이면 교착이 난다. 일정 하나만 잡는 흐름(참여 취소)은 사용자 잠금을 걸지 않는다.
+- **잠금 조회는 그 트랜잭션에서 그 행을 처음 읽는 조회여야 한다.** 먼저 잠금 없이 읽어 영속성 컨텍스트에 올려두면, 잠근 뒤에도 옛 값(확정 인원·모집 상태)을 쓴다.
+- **잠그는 조회에 연관 컬렉션을 fetch join하지 않는다.** PostgreSQL은 outer join의 nullable 쪽에 `FOR UPDATE`를 걸 수 없고, 잠글 대상은 루트 행 하나면 된다. 구성요소는 잠근 뒤 지연 로딩으로 읽는다(READ COMMITTED라 앞 트랜잭션이 커밋한 행을 본다).
+- **부분 유니크 인덱스 위반을 오류 코드로 바꾸는 곳은 잠금 없이 경쟁이 실제로 나는 곳뿐이다.** 예: 닉네임(`UserRepositoryImpl.save`가 409 `DUPLICATED_NICKNAME`으로 바꾼다). 잠금으로 직렬화한 경로의 인덱스(`uix_participants_confirmed`)는 앱 경로로는 위반되지 않는 마지막 방어선이라 바꾸지 않는다. 위반되면 잠금 버그이므로 500으로 드러나게 둔다.
+
 ### Redis
 
 - 키는 `용도:식별자` 형태로 쓴다. 식별자가 여럿이면 `:`로 잇는다. 예: `refresh:{userId}:{sessionId}`, `sessions:{userId}`, `signup:{token}`.

@@ -41,6 +41,37 @@ public class ScheduleCommandService {
         return scheduleRepository.save(newSchedule(command, place)).getId();
     }
 
+    /**
+     * 멤버로 참여한다. 잠금 순서는 사용자 → 일정이다.
+     * <p>
+     * 사용자 잠금으로 같은 사용자의 개설·참여를 차례로 세워 겹침 검사가 서로의 결과를 보게 한다.
+     * 일정 행 잠금으로 같은 일정의 참여를 차례로 세워 마지막 자리에 두 명이 들어가지 못하게 한다.
+     * 겹침 검사는 개설자·이미 참여·모집 중 아님 판정 뒤에 한다. 그 경우에 시간 겹침으로 안내하지 않는다.
+     */
+    @Transactional
+    public void join(UUID scheduleId, UUID userId) {
+        scheduleRepository.lockUser(userId);
+        Schedule schedule = findScheduleForUpdate(scheduleId);
+        LocalDateTime now = LocalDateTime.now();
+        schedule.validateJoinable(userId, now, scheduleProperties.completionAfter());
+        validateNoOverlap(userId, schedule.getStartAt());
+        schedule.join(userId, now, scheduleProperties.completionAfter());
+    }
+
+    /**
+     * 참여를 취소한다. 일정 행만 잠근다. 취소는 겹침을 만들지 않아 사용자 잠금이 필요 없다.
+     */
+    @Transactional
+    public void leave(UUID scheduleId, UUID userId) {
+        Schedule schedule = findScheduleForUpdate(scheduleId);
+        schedule.leave(userId, LocalDateTime.now(), scheduleProperties.completionAfter());
+    }
+
+    private Schedule findScheduleForUpdate(UUID scheduleId) {
+        return scheduleRepository.findByIdForUpdate(scheduleId)
+                .orElseThrow(() -> new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND));
+    }
+
     private void validateCategoryActive(UUID categoryId) {
         if (activityCategoryRepository.findActiveById(categoryId).isEmpty()) {
             throw new BusinessException(ScheduleErrorCode.INVALID_CATEGORY);

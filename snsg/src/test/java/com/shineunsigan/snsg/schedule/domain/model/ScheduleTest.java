@@ -6,12 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -26,7 +28,7 @@ import com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
 /**
- * 개설의 형식 규칙(제목·설명·시작 일시·인원)과 화면 표시 상태 판정을 검증한다.
+ * 개설의 형식 규칙(제목·설명·시작 일시·인원), 화면 표시 상태 판정, 참여·참여 취소 규칙을 검증한다.
  * 설정값은 운영 설정과 같은 값(4~24명, 1시간, 30일, 완료 12시간)을 넣는다.
  */
 class ScheduleTest {
@@ -303,6 +305,319 @@ class ScheduleTest {
             assertThat(schedule.displayStatus(START_AT, COMPLETION_AFTER)).isEqualTo(DisplayStatus.CANCELED);
             assertThat(schedule.displayStatus(START_AT.plusHours(12), COMPLETION_AFTER))
                     .isEqualTo(DisplayStatus.CANCELED);
+        }
+    }
+
+    @Nested
+    @DisplayName("참여")
+    class Join {
+
+        private final UUID memberId = UUID.randomUUID();
+        private final LocalDateTime joinAt = START_AT.minusHours(1);
+
+        @Test
+        @DisplayName("참여하면 MEMBER·CONFIRMED 행이 더해지고 확정 인원이 1 늘며, 정원 전이면 RECRUITING 그대로다")
+        void joins() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+
+            schedule.join(memberId, joinAt, COMPLETION_AFTER);
+
+            assertThat(rowsOf(schedule, memberId)).singleElement().satisfies(participant -> {
+                assertThat(participant.getRole()).isEqualTo(ParticipantRole.MEMBER);
+                assertThat(participant.getStatus()).isEqualTo(ParticipationStatus.CONFIRMED);
+                assertThat(participant.getSchedule()).isSameAs(schedule);
+            });
+            assertThat(schedule.getConfirmedCount()).isEqualTo(2);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.RECRUITING);
+        }
+
+        @Test
+        @DisplayName("참여로 확정 인원이 정원에 닿으면 CLOSED가 된다")
+        void closesWhenFull() {
+            Schedule schedule = fullAfterOneMoreJoin();
+
+            schedule.join(memberId, joinAt, COMPLETION_AFTER);
+
+            assertThat(schedule.getConfirmedCount()).isEqualTo(4);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.CLOSED);
+        }
+
+        @Test
+        @DisplayName("개설자가 참여하면 HOST_CANNOT_JOIN")
+        void hostCannotJoin() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+
+            assertJoinRejected(schedule, HOST_ID, joinAt, ScheduleErrorCode.HOST_CANNOT_JOIN);
+        }
+
+        @Test
+        @DisplayName("모집이 마감된 일정이어도 개설자는 HOST_CANNOT_JOIN")
+        void hostCannotJoinClosedSchedule() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+            ReflectionTestUtils.setField(schedule, "recruitmentStatus", RecruitmentStatus.CLOSED);
+
+            assertJoinRejected(schedule, HOST_ID, joinAt, ScheduleErrorCode.HOST_CANNOT_JOIN);
+        }
+
+        @Test
+        @DisplayName("이미 확정 참여한 사용자가 다시 참여하면 ALREADY_JOINED")
+        void alreadyJoined() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+            schedule.join(memberId, joinAt, COMPLETION_AFTER);
+
+            assertJoinRejected(schedule, memberId, joinAt, ScheduleErrorCode.ALREADY_JOINED);
+        }
+
+        @Test
+        @DisplayName("그 참여로 정원이 차서 CLOSED가 된 뒤에 다시 참여해도 ALREADY_JOINED")
+        void alreadyJoinedAfterClosedByOwnJoin() {
+            Schedule schedule = fullAfterOneMoreJoin();
+            schedule.join(memberId, joinAt, COMPLETION_AFTER);
+
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.CLOSED);
+            assertJoinRejected(schedule, memberId, joinAt, ScheduleErrorCode.ALREADY_JOINED);
+        }
+
+        @Test
+        @DisplayName("모집 상태가 CLOSED면 RECRUIT_CLOSED")
+        void closedSchedule() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+            ReflectionTestUtils.setField(schedule, "recruitmentStatus", RecruitmentStatus.CLOSED);
+
+            assertJoinRejected(schedule, memberId, joinAt, ScheduleErrorCode.RECRUIT_CLOSED);
+        }
+
+        @Test
+        @DisplayName("저장된 모집 상태가 RECRUITING이어도 시작 시각이 되면 RECRUIT_CLOSED")
+        void atStartBeforeScheduler() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+
+            assertJoinRejected(schedule, memberId, START_AT, ScheduleErrorCode.RECRUIT_CLOSED);
+        }
+
+        @Test
+        @DisplayName("저장된 모집 상태가 RECRUITING이어도 시작 시각이 지났으면 RECRUIT_CLOSED")
+        void afterStartBeforeScheduler() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+
+            assertJoinRejected(schedule, memberId, START_AT.plusMinutes(1), ScheduleErrorCode.RECRUIT_CLOSED);
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = ScheduleStatus.class, names = {"CANCELED", "COMPLETED"})
+        @DisplayName("일정이 취소·완료 상태면 RECRUIT_CLOSED")
+        void canceledOrCompleted(ScheduleStatus status) {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+            ReflectionTestUtils.setField(schedule, "status", status);
+
+            assertJoinRejected(schedule, memberId, joinAt, ScheduleErrorCode.RECRUIT_CLOSED);
+        }
+
+        @Test
+        @DisplayName("참여 → 참여 취소 → 재참여하면 행이 둘(이전 CANCELED, 새 CONFIRMED)이고 확정 인원은 참여 한 번과 같다")
+        void rejoinAddsNewRow() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+
+            schedule.join(memberId, joinAt, COMPLETION_AFTER);
+            schedule.leave(memberId, joinAt, COMPLETION_AFTER);
+            schedule.join(memberId, joinAt, COMPLETION_AFTER);
+
+            assertThat(rowsOf(schedule, memberId))
+                    .extracting(ScheduleParticipant::getStatus)
+                    .containsExactly(ParticipationStatus.CANCELED, ParticipationStatus.CONFIRMED);
+            assertThat(schedule.getConfirmedCount()).isEqualTo(2);
+        }
+
+        /** 정원 4에 확정 3(개설자 + 멤버 2). 한 명 더 들어오면 정원이다. */
+        private Schedule fullAfterOneMoreJoin() {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, 4, NOW);
+            schedule.join(UUID.randomUUID(), joinAt, COMPLETION_AFTER);
+            schedule.join(UUID.randomUUID(), joinAt, COMPLETION_AFTER);
+            return schedule;
+        }
+
+        private void assertJoinRejected(Schedule schedule, UUID userId, LocalDateTime now,
+                ScheduleErrorCode errorCode) {
+            Snapshot before = Snapshot.of(schedule);
+
+            assertInvalid(() -> schedule.join(userId, now, COMPLETION_AFTER), errorCode);
+            assertThat(Snapshot.of(schedule)).isEqualTo(before);
+        }
+    }
+
+    @Nested
+    @DisplayName("참여 취소")
+    class Leave {
+
+        private final UUID memberId = UUID.randomUUID();
+        private final LocalDateTime joinAt = START_AT.minusHours(1);
+
+        @Test
+        @DisplayName("시작 전에 취소하면 행이 CANCELED, 확정 인원 -1이고 RECRUITING 그대로다")
+        void beforeStart() {
+            Schedule schedule = joined(CAPACITY);
+
+            schedule.leave(memberId, START_AT.minusMinutes(1), COMPLETION_AFTER);
+
+            assertThat(rowsOf(schedule, memberId)).singleElement()
+                    .extracting(ScheduleParticipant::getStatus)
+                    .isEqualTo(ParticipationStatus.CANCELED);
+            assertThat(schedule.getConfirmedCount()).isEqualTo(1);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.RECRUITING);
+        }
+
+        @Test
+        @DisplayName("시작 전에 취소하면 CLOSED였던 모집이 RECRUITING으로 돌아간다")
+        void beforeStartReopens() {
+            Schedule schedule = joinedFull();
+
+            schedule.leave(memberId, START_AT.minusMinutes(1), COMPLETION_AFTER);
+
+            assertThat(rowsOf(schedule, memberId)).singleElement()
+                    .extracting(ScheduleParticipant::getStatus)
+                    .isEqualTo(ParticipationStatus.CANCELED);
+            assertThat(schedule.getConfirmedCount()).isEqualTo(3);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.RECRUITING);
+        }
+
+        @Test
+        @DisplayName("시작 시각에 취소하면 행이 CANCELED, 확정 인원 -1이고 CLOSED는 그대로다")
+        void atStartKeepsClosed() {
+            Schedule schedule = joinedFull();
+
+            schedule.leave(memberId, START_AT, COMPLETION_AFTER);
+
+            assertThat(rowsOf(schedule, memberId)).singleElement()
+                    .extracting(ScheduleParticipant::getStatus)
+                    .isEqualTo(ParticipationStatus.CANCELED);
+            assertThat(schedule.getConfirmedCount()).isEqualTo(3);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.CLOSED);
+        }
+
+        @Test
+        @DisplayName("시작 + 12시간 1분 전에 취소해도 되고 CLOSED는 그대로다")
+        void justBeforeCompletion() {
+            Schedule schedule = joinedFull();
+
+            schedule.leave(memberId, START_AT.plusHours(12).minusMinutes(1), COMPLETION_AFTER);
+
+            assertThat(schedule.getConfirmedCount()).isEqualTo(3);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.CLOSED);
+        }
+
+        @Test
+        @DisplayName("시작 후 취소는 저장된 모집 상태가 RECRUITING(스케줄러 전)이어도 그대로 둔다")
+        void afterStartKeepsRecruiting() {
+            Schedule schedule = joined(CAPACITY);
+
+            schedule.leave(memberId, START_AT.plusHours(1), COMPLETION_AFTER);
+
+            assertThat(schedule.getConfirmedCount()).isEqualTo(1);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.RECRUITING);
+        }
+
+        @Test
+        @DisplayName("시작 + 12시간이 되면 스케줄러 전이어도 PARTICIPATION_NOT_CANCELABLE")
+        void atCompletion() {
+            Schedule schedule = joined(CAPACITY);
+
+            assertLeaveRejected(schedule, memberId, START_AT.plusHours(12),
+                    ScheduleErrorCode.PARTICIPATION_NOT_CANCELABLE);
+        }
+
+        @Test
+        @DisplayName("시작 + 12시간이 지났으면 PARTICIPATION_NOT_CANCELABLE")
+        void afterCompletion() {
+            Schedule schedule = joined(CAPACITY);
+
+            assertLeaveRejected(schedule, memberId, START_AT.plusHours(13),
+                    ScheduleErrorCode.PARTICIPATION_NOT_CANCELABLE);
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = ScheduleStatus.class, names = {"CANCELED", "COMPLETED"})
+        @DisplayName("일정이 취소·완료 상태면 시작 전이어도 PARTICIPATION_NOT_CANCELABLE")
+        void canceledOrCompleted(ScheduleStatus status) {
+            Schedule schedule = joined(CAPACITY);
+            ReflectionTestUtils.setField(schedule, "status", status);
+
+            assertLeaveRejected(schedule, memberId, joinAt, ScheduleErrorCode.PARTICIPATION_NOT_CANCELABLE);
+        }
+
+        @Test
+        @DisplayName("개설자가 취소하면 HOST_CANNOT_LEAVE")
+        void hostCannotLeave() {
+            Schedule schedule = joined(CAPACITY);
+
+            assertLeaveRejected(schedule, HOST_ID, joinAt, ScheduleErrorCode.HOST_CANNOT_LEAVE);
+        }
+
+        @Test
+        @DisplayName("참여한 적 없는 사용자는 NOT_PARTICIPANT")
+        void neverJoined() {
+            Schedule schedule = joined(CAPACITY);
+
+            assertLeaveRejected(schedule, UUID.randomUUID(), joinAt, ScheduleErrorCode.NOT_PARTICIPANT);
+        }
+
+        @Test
+        @DisplayName("이미 취소한 사용자는 NOT_PARTICIPANT")
+        void alreadyLeft() {
+            Schedule schedule = joined(CAPACITY);
+            schedule.leave(memberId, joinAt, COMPLETION_AFTER);
+
+            assertLeaveRejected(schedule, memberId, joinAt, ScheduleErrorCode.NOT_PARTICIPANT);
+        }
+
+        @Test
+        @DisplayName("이미 취소한 사용자는 일정이 완료됐어도 NOT_PARTICIPANT")
+        void alreadyLeftCompletedSchedule() {
+            Schedule schedule = joined(CAPACITY);
+            schedule.leave(memberId, joinAt, COMPLETION_AFTER);
+            ReflectionTestUtils.setField(schedule, "status", ScheduleStatus.COMPLETED);
+
+            assertLeaveRejected(schedule, memberId, START_AT.plusHours(13), ScheduleErrorCode.NOT_PARTICIPANT);
+        }
+
+        /** 개설자와 memberId가 확정 참여한 일정. */
+        private Schedule joined(int capacity) {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, capacity, NOW);
+            schedule.join(memberId, joinAt, COMPLETION_AFTER);
+            return schedule;
+        }
+
+        /** 정원 4가 찬 CLOSED 일정. memberId가 그중 한 명이다. */
+        private Schedule joinedFull() {
+            Schedule schedule = joined(4);
+            schedule.join(UUID.randomUUID(), joinAt, COMPLETION_AFTER);
+            schedule.join(UUID.randomUUID(), joinAt, COMPLETION_AFTER);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.CLOSED);
+            return schedule;
+        }
+
+        private void assertLeaveRejected(Schedule schedule, UUID userId, LocalDateTime now,
+                ScheduleErrorCode errorCode) {
+            Snapshot before = Snapshot.of(schedule);
+
+            assertInvalid(() -> schedule.leave(userId, now, COMPLETION_AFTER), errorCode);
+            assertThat(Snapshot.of(schedule)).isEqualTo(before);
+        }
+    }
+
+    private static List<ScheduleParticipant> rowsOf(Schedule schedule, UUID userId) {
+        return schedule.getParticipants().stream()
+                .filter(participant -> participant.getUserId().equals(userId))
+                .toList();
+    }
+
+    /** 거부됐을 때 바뀌면 안 되는 것: 참여 행(사용자·역할·상태), 확정 인원, 모집 상태. */
+    private record Snapshot(List<String> rows, int confirmedCount, RecruitmentStatus recruitmentStatus) {
+
+        static Snapshot of(Schedule schedule) {
+            return new Snapshot(schedule.getParticipants().stream()
+                    .map(participant -> participant.getUserId() + ":" + participant.getRole() + ":"
+                            + participant.getStatus())
+                    .toList(), schedule.getConfirmedCount(), schedule.getRecruitmentStatus());
         }
     }
 

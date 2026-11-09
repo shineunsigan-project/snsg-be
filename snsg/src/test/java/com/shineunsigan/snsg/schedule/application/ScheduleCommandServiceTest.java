@@ -164,11 +164,155 @@ class ScheduleCommandServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("참여 흐름")
+    @ExtendWith(MockitoExtension.class)
+    class JoinFlow {
+
+        @Mock
+        private ScheduleRepository scheduleRepository;
+
+        @Mock
+        private ActivityCategoryRepository activityCategoryRepository;
+
+        private ScheduleCommandService scheduleCommandService;
+
+        private final UUID hostId = UUID.randomUUID();
+        private final UUID userId = UUID.randomUUID();
+        private final Schedule schedule = openSchedule(hostId);
+        private final UUID scheduleId = UUID.randomUUID();
+
+        @BeforeEach
+        void setUp() {
+            scheduleCommandService = new ScheduleCommandService(scheduleRepository, activityCategoryRepository,
+                    Flow.PROPERTIES);
+        }
+
+        @Test
+        @DisplayName("사용자를 잠근 뒤 일정을 잠가 읽고, 그다음 겹침을 검사한다")
+        void locksUserThenScheduleThenChecksOverlap() {
+            when(scheduleRepository.findByIdForUpdate(scheduleId)).thenReturn(Optional.of(schedule));
+
+            scheduleCommandService.join(scheduleId, userId);
+
+            InOrder order = inOrder(scheduleRepository);
+            order.verify(scheduleRepository).lockUser(userId);
+            order.verify(scheduleRepository).findByIdForUpdate(scheduleId);
+            order.verify(scheduleRepository).existsOverlapping(userId, schedule.getStartAt(), Duration.ofHours(12));
+            assertThat(schedule.getConfirmedCount()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("일정이 없으면 SCHEDULE_NOT_FOUND이고 겹침 검사를 하지 않는다")
+        void scheduleNotFound() {
+            when(scheduleRepository.findByIdForUpdate(scheduleId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> scheduleCommandService.join(scheduleId, userId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ScheduleCommandServiceTest::errorCodeOf)
+                    .isEqualTo(ScheduleErrorCode.SCHEDULE_NOT_FOUND);
+            verify(scheduleRepository, never()).existsOverlapping(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("12시간 안에 확정 참여한 일정이 있으면 SCHEDULE_TIME_CONFLICT이고 참여 행이 더해지지 않는다")
+        void overlapIsRejected() {
+            when(scheduleRepository.findByIdForUpdate(scheduleId)).thenReturn(Optional.of(schedule));
+            when(scheduleRepository.existsOverlapping(eq(userId), eq(schedule.getStartAt()), any())).thenReturn(true);
+
+            assertThatThrownBy(() -> scheduleCommandService.join(scheduleId, userId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ScheduleCommandServiceTest::errorCodeOf)
+                    .isEqualTo(ScheduleErrorCode.SCHEDULE_TIME_CONFLICT);
+            assertThat(schedule.getParticipants()).hasSize(1);
+            assertThat(schedule.getConfirmedCount()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("개설자가 참여하면 HOST_CANNOT_JOIN이고 겹침 검사를 하지 않는다")
+        void hostIsRejectedBeforeOverlapCheck() {
+            when(scheduleRepository.findByIdForUpdate(scheduleId)).thenReturn(Optional.of(schedule));
+
+            assertThatThrownBy(() -> scheduleCommandService.join(scheduleId, hostId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ScheduleCommandServiceTest::errorCodeOf)
+                    .isEqualTo(ScheduleErrorCode.HOST_CANNOT_JOIN);
+            verify(scheduleRepository, never()).existsOverlapping(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("이미 참여한 사용자는 ALREADY_JOINED이고 겹침 검사를 하지 않는다")
+        void alreadyJoinedIsRejectedBeforeOverlapCheck() {
+            schedule.join(userId, LocalDateTime.now(), Duration.ofHours(12));
+            when(scheduleRepository.findByIdForUpdate(scheduleId)).thenReturn(Optional.of(schedule));
+
+            assertThatThrownBy(() -> scheduleCommandService.join(scheduleId, userId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ScheduleCommandServiceTest::errorCodeOf)
+                    .isEqualTo(ScheduleErrorCode.ALREADY_JOINED);
+            verify(scheduleRepository, never()).existsOverlapping(any(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("참여 취소 흐름")
+    @ExtendWith(MockitoExtension.class)
+    class LeaveFlow {
+
+        @Mock
+        private ScheduleRepository scheduleRepository;
+
+        @Mock
+        private ActivityCategoryRepository activityCategoryRepository;
+
+        private ScheduleCommandService scheduleCommandService;
+
+        private final UUID userId = UUID.randomUUID();
+        private final UUID scheduleId = UUID.randomUUID();
+
+        @BeforeEach
+        void setUp() {
+            scheduleCommandService = new ScheduleCommandService(scheduleRepository, activityCategoryRepository,
+                    Flow.PROPERTIES);
+        }
+
+        @Test
+        @DisplayName("일정이 없으면 SCHEDULE_NOT_FOUND이고 사용자를 잠그지 않는다")
+        void scheduleNotFound() {
+            when(scheduleRepository.findByIdForUpdate(scheduleId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> scheduleCommandService.leave(scheduleId, userId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ScheduleCommandServiceTest::errorCodeOf)
+                    .isEqualTo(ScheduleErrorCode.SCHEDULE_NOT_FOUND);
+            verify(scheduleRepository, never()).lockUser(any());
+        }
+
+        @Test
+        @DisplayName("일정을 잠가 읽고 참여를 취소한다. 사용자를 잠그지 않는다")
+        void leavesWithoutUserLock() {
+            Schedule schedule = openSchedule(UUID.randomUUID());
+            schedule.join(userId, LocalDateTime.now(), Duration.ofHours(12));
+            when(scheduleRepository.findByIdForUpdate(scheduleId)).thenReturn(Optional.of(schedule));
+
+            scheduleCommandService.leave(scheduleId, userId);
+
+            assertThat(schedule.getConfirmedCount()).isEqualTo(1);
+            verify(scheduleRepository, never()).lockUser(any());
+        }
+    }
+
+    /** 이틀 뒤에 시작하는 모집 중 일정(정원 6). */
+    private static Schedule openSchedule(UUID hostId) {
+        return Schedule.create(hostId, BOARD_GAME_ID, "보드게임 같이 해요", "처음 오시는 분도 환영해요.", DurationType.NORMAL,
+                futureStartAt(), 6, UUID.randomUUID(), PLACE, Flow.PROPERTIES.creationRule(), LocalDateTime.now());
+    }
+
     /**
-     * 테스트 트랜잭션을 끄고 두 스레드가 각자 커밋한다. 커밋한 행은 끝나면 지운다.
+     * 테스트 트랜잭션을 끄고 스레드가 각자 커밋한다. 커밋한 행(이 사용자가 연 일정과 그 참여 행)은 끝나면 지운다.
      */
     @Nested
-    @DisplayName("동시 개설")
+    @DisplayName("동시 요청")
     @DataJpaTest
     @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
     @Import({ScheduleCommandService.class, ScheduleRepositoryImpl.class, ActivityCategoryRepositoryImpl.class,
@@ -241,6 +385,90 @@ class ScheduleCommandServiceTest {
             assertThat(count("""
                     SELECT COUNT(*) FROM schedule_participants
                     WHERE user_id = ? AND role = 'HOST' AND status = 'CONFIRMED'""")).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("마지막 한 자리에 서로 다른 두 사용자가 동시에 참여하면 한 명만 성공하고 다른 한 명은 RECRUIT_CLOSED")
+        void onlyOneOfConcurrentJoinsForLastSeatSucceeds() throws Exception {
+            UUID scheduleId = createScheduleWithCapacity(4);
+            scheduleCommandService.join(scheduleId, UUID.randomUUID());
+            scheduleCommandService.join(scheduleId, UUID.randomUUID());
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            Callable<UUID> joinAsNewUser = () -> {
+                UUID memberId = UUID.randomUUID();
+                ready.countDown();
+                start.await();
+                scheduleCommandService.join(scheduleId, memberId);
+                return memberId;
+            };
+
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            List<UUID> joined = new ArrayList<>();
+            List<Throwable> failures = new ArrayList<>();
+            try {
+                List<Future<UUID>> futures = List.of(executor.submit(joinAsNewUser), executor.submit(joinAsNewUser));
+                ready.await();
+                start.countDown();
+                for (Future<UUID> future : futures) {
+                    try {
+                        joined.add(future.get(30, TimeUnit.SECONDS));
+                    } catch (ExecutionException exception) {
+                        failures.add(exception.getCause());
+                    }
+                }
+            } finally {
+                executor.shutdownNow();
+            }
+
+            assertThat(joined).hasSize(1);
+            assertThat(failures).singleElement()
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ScheduleCommandServiceTest::errorCodeOf)
+                    .isEqualTo(ScheduleErrorCode.RECRUIT_CLOSED);
+            assertThat(countBySchedule("""
+                    SELECT COUNT(*) FROM schedules
+                    WHERE id = ? AND confirmed_count = 4 AND recruitment_status = 'CLOSED'""", scheduleId))
+                    .isEqualTo(1);
+            assertThat(countBySchedule("""
+                    SELECT COUNT(*) FROM schedule_participants
+                    WHERE schedule_id = ? AND status = 'CONFIRMED'""", scheduleId)).isEqualTo(4);
+        }
+
+        @Test
+        @DisplayName("참여 → 참여 취소 → 재참여하면 그 사용자의 행이 둘(CANCELED 1, CONFIRMED 1)로 저장되고 확정 인원이 맞다")
+        void rejoinSavesNewRow() {
+            UUID scheduleId = createScheduleWithCapacity(4);
+            UUID memberId = UUID.randomUUID();
+
+            scheduleCommandService.join(scheduleId, memberId);
+            scheduleCommandService.leave(scheduleId, memberId);
+            scheduleCommandService.join(scheduleId, memberId);
+
+            assertThat(countBySchedule("""
+                    SELECT COUNT(*) FROM schedule_participants
+                    WHERE schedule_id = ? AND user_id = ? AND status = 'CANCELED'""", scheduleId, memberId))
+                    .isEqualTo(1);
+            assertThat(countBySchedule("""
+                    SELECT COUNT(*) FROM schedule_participants
+                    WHERE schedule_id = ? AND user_id = ? AND status = 'CONFIRMED'""", scheduleId, memberId))
+                    .isEqualTo(1);
+            assertThat(countBySchedule("SELECT COUNT(*) FROM schedules WHERE id = ? AND confirmed_count = 2",
+                    scheduleId)).isEqualTo(1);
+        }
+
+        /** 이 클래스의 사용자가 연 일정. 끝나면 deleteCommittedRows가 지운다. */
+        private UUID createScheduleWithCapacity(int capacity) {
+            return scheduleCommandService.create(new CreateScheduleCommand(userId, BOARD_GAME_ID, UUID.randomUUID(),
+                    "보드게임 같이 해요", DurationType.NORMAL, "처음 오시는 분도 환영해요.", futureStartAt(), capacity), PLACE);
+        }
+
+        private long countBySchedule(String sql, Object... parameters) {
+            var query = entityManager.createNativeQuery(sql);
+            for (int i = 0; i < parameters.length; i++) {
+                query.setParameter(i + 1, parameters[i]);
+            }
+            return ((Number) query.getSingleResult()).longValue();
         }
 
         private long count(String sql) {

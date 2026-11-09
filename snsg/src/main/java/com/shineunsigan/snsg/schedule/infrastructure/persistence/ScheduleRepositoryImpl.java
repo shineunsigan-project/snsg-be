@@ -2,6 +2,7 @@ package com.shineunsigan.snsg.schedule.infrastructure.persistence;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Repository;
@@ -25,6 +26,11 @@ public class ScheduleRepositoryImpl implements ScheduleRepository {
     @Override
     public void lockUser(UUID userId) {
         scheduleJpaRepository.lockUser(userId.toString());
+    }
+
+    @Override
+    public Optional<Schedule> findByIdForUpdate(UUID scheduleId) {
+        return scheduleJpaRepository.findByIdForUpdate(scheduleId);
     }
 
     @Override

@@ -54,4 +54,18 @@ public class ScheduleParticipant extends BaseEntity {
     static ScheduleParticipant host(Schedule schedule, UUID userId) {
         return new ScheduleParticipant(schedule, userId, ParticipantRole.HOST);
     }
+
+    /** 참여한 멤버의 확정 행. 참여할 때마다 새 행이다. */
+    static ScheduleParticipant member(Schedule schedule, UUID userId) {
+        return new ScheduleParticipant(schedule, userId, ParticipantRole.MEMBER);
+    }
+
+    boolean isConfirmedBy(UUID userId) {
+        return this.userId.equals(userId) && status == ParticipationStatus.CONFIRMED && !isDeleted();
+    }
+
+    /** 참여 취소. 행은 남기고 상태만 바꾼다. */
+    void cancel() {
+        this.status = ParticipationStatus.CANCELED;
+    }
 }

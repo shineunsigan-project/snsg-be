@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -32,6 +33,8 @@ import org.springframework.test.web.servlet.ResultActions;
 
 import com.shineunsigan.snsg.common.web.GlobalExceptionHandler;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.command.CreateScheduleCommand;
 
 /**
@@ -55,6 +58,12 @@ class ScheduleControllerTest {
 
     @MockitoBean
     private CreateScheduleFacade createScheduleFacade;
+
+    @MockitoBean
+    private JoinScheduleFacade joinScheduleFacade;
+
+    @MockitoBean
+    private ScheduleCommandService scheduleCommandService;
 
     @BeforeEach
     void authenticate() {
@@ -131,6 +140,32 @@ class ScheduleControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         verify(createScheduleFacade, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("참여하면 200이고 data가 없다. 경로의 일정 id와 요청한 사용자로 참여를 부른다")
+    void joinsSchedule() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/schedules/{scheduleId}/participants", scheduleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(joinScheduleFacade).join(scheduleId, USER_ID);
+    }
+
+    @Test
+    @DisplayName("참여를 취소하면 200이고 data가 없다. 경로의 일정 id와 요청한 사용자로 취소를 부른다")
+    void leavesSchedule() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+
+        mockMvc.perform(delete("/api/v1/schedules/{scheduleId}/participants/me", scheduleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(scheduleCommandService).leave(scheduleId, USER_ID);
     }
 
     private ResultActions perform(String body) throws Exception {

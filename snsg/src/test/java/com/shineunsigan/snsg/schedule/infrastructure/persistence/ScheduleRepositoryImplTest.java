@@ -18,7 +18,7 @@ import org.springframework.context.annotation.Import;
 import jakarta.persistence.EntityManager;
 
 /**
- * 시간 겹침 쿼리와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
+ * 시간 겹침 쿼리, 일정 잠금 조회와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
  * 일정·참여 행은 native INSERT로 넣는다. 사용자 id는 테스트마다 무작위라 다른 데이터와 섞이지 않는다.
  * 테스트 트랜잭션은 롤백된다.
  */
@@ -111,6 +111,25 @@ class ScheduleRepositoryImplTest {
         insertParticipant(insertSchedule(row()), UUID.randomUUID(), "HOST", "CONFIRMED", false);
 
         assertThat(overlaps(EXISTING_START)).isFalse();
+    }
+
+    // 일정 잠금 조회
+
+    @Test
+    @DisplayName("삭제되지 않은 일정은 잠금 조회로 찾는다")
+    void findsNotDeletedScheduleForUpdate() {
+        UUID schedule = insertSchedule(row());
+
+        assertThat(scheduleRepository.findByIdForUpdate(schedule))
+                .hasValueSatisfying(found -> assertThat(found.getId()).isEqualTo(schedule));
+    }
+
+    @Test
+    @DisplayName("삭제된 일정은 잠금 조회로 찾지 않는다")
+    void deletedScheduleIsNotFoundForUpdate() {
+        UUID schedule = insertSchedule(row().deleted(true));
+
+        assertThat(scheduleRepository.findByIdForUpdate(schedule)).isEmpty();
     }
 
     // DB 제약
