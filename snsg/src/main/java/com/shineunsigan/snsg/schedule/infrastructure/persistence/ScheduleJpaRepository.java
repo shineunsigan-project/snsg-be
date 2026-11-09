@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -40,4 +41,30 @@ interface ScheduleJpaRepository extends JpaRepository<Schedule, UUID> {
             """)
     boolean existsConfirmedScheduledBetween(@Param("userId") UUID userId, @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
+
+    @Modifying
+    @Query("""
+            update Schedule s
+            set s.recruitmentStatus = com.shineunsigan.snsg.schedule.domain.constants.RecruitmentStatus.CLOSED,
+                s.updatedAt = :now,
+                s.updatedBy = :auditor
+            where s.isDeleted = false
+              and s.status = com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus.SCHEDULED
+              and s.recruitmentStatus = com.shineunsigan.snsg.schedule.domain.constants.RecruitmentStatus.RECRUITING
+              and s.startAt <= :now
+            """)
+    int closeRecruitmentStarted(@Param("now") LocalDateTime now, @Param("auditor") String auditor);
+
+    @Modifying
+    @Query("""
+            update Schedule s
+            set s.status = com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus.COMPLETED,
+                s.updatedAt = :now,
+                s.updatedBy = :auditor
+            where s.isDeleted = false
+              and s.status = com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus.SCHEDULED
+              and s.startAt <= :startedBy
+            """)
+    int completeStartedBy(@Param("startedBy") LocalDateTime startedBy, @Param("now") LocalDateTime now,
+            @Param("auditor") String auditor);
 }

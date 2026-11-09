@@ -77,3 +77,8 @@ schedule:
   completion-after: 12h
   page-size-default: 20
   page-size-max: 50
+  # 상태 전환 스케줄러 주기. @Scheduled가 자리표시자로 읽어 ScheduleProperties에는 두지 않는다.
+  status-transition-interval: 1m
+
+scheduling:
+  enabled: true

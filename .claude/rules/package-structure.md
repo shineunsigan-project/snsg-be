@@ -22,7 +22,7 @@
     │   ├── repository/           # repository 인터페이스
     │   ├── constants/            # enum
     │   └── exception/            # <Domain>ErrorCode (ErrorType + 메시지)
-    └── infrastructure/           # 기술별 하위 패키지: persistence/, client/, event/, redis/, config/ ...
+    └── infrastructure/           # 기술별 하위 패키지: persistence/, client/, event/, redis/, scheduler/, config/ ...
 ```
 
 ## 의존 방향
@@ -224,6 +224,25 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 - **정렬과 커서 비교는 DB에서만 한다.** Java의 `UUID.compareTo`는 부호 있는 비교라 PostgreSQL의 uuid 순서와 다르다. 읽은 목록을 메모리에서 다시 정렬하거나 커서를 Java로 비교하면 페이지 경계에서 중복·누락이 난다.
 - 삭제 조건(`isDeleted = false`)은 루트와 조인한 구성요소 모두에 명시한다(삭제 절).
 
+### 일괄 UPDATE (`@Modifying`)
+
+예: `ScheduleJpaRepository`의 `closeRecruitmentStarted`·`completeStartedBy`(일정 상태 전환).
+
+- **JPA Auditing을 거치지 않는다.** 엔티티를 로드하지 않고 SQL을 바로 보내 `@LastModifiedDate`·`@LastModifiedBy`가 돌지 않는다. `updatedAt`·`updatedBy`를 쿼리에 직접 넣는다. `updatedAt`은 조건 판정에 쓴 기준 시각(now), `updatedBy`는 `Auditor` 상수(스케줄러면 `Auditor.SYSTEM_SCHEDULER`)를 파라미터로 넘긴다.
+- **삭제된 행은 바꾸지 않는다**(`isDeleted = false`). 삭제한 행의 `updated_by`는 삭제한 주체를 가리키는데, 덮어쓰면 그 기록이 사라진다.
+- **바뀔 행만 WHERE에 걸리게 쓴다.** 이미 목표 상태인 행을 다시 갱신하면 감사 값만 덮인다. 예: 모집 마감은 `RECRUITING`만 고른다. 이미 `CLOSED`(정원 도달)인 행의 `updated_by`가 그대로 남는다. 이렇게 쓰면 여러 번 돌아도 결과가 같다(멱등).
+- 시각 경계는 `<=`다. 기준 시각을 서비스가 `LocalDateTime.now()`로 정해 넘긴다.
+- `clearAutomatically`를 걸지 않았다. 지금은 그 트랜잭션에서 UPDATE 하나만 돌아 문제없다. **같은 트랜잭션에서 엔티티를 먼저 읽고 일괄 UPDATE를 부르면, 영속성 컨텍스트의 엔티티는 옛 값을 보인다.** 그런 흐름을 만들면 `@Modifying(clearAutomatically = true)`를 걸거나 순서를 바꾼다.
+
+### 스케줄러
+
+- 스케줄러는 그 도메인의 `infrastructure/scheduler`에 둔다. 같은 도메인의 Command 서비스(흐름이 facade 기준에 들면 facade)를 부르기만 하고, 트랜잭션은 서비스 메서드가 건다. 예: `schedule/infrastructure/scheduler/ScheduleStatusScheduler` → `ScheduleCommandService.closeStartedRecruitments`·`completeFinishedSchedules`.
+  - 서로 독립인 작업은 서비스 메서드를 나눠 각자의 트랜잭션에서 돌린다. 한 작업이 실패해도 다른 작업은 돈다.
+  - `@Component` 클래스라 단순 클래스명이 다른 도메인과 겹치지 않게 짓는다(Port 절의 빈 이름 충돌).
+- 주기는 `@Scheduled(fixedDelayString = "${...}")`로 설정에서 읽는다. `fixedDelay`는 앞 실행이 끝난 뒤 간격을 재서 같은 서버에서 실행이 겹치지 않는다. 키는 그 도메인 설정 아래 둔다(`schedule.status-transition-interval: 1m`, 설정 절의 예외).
+- 조건부 일괄 UPDATE처럼 여러 서버에서 동시에 돌아도 결과가 같은 작업에는 분산 락(ShedLock 등)을 두지 않는다. READ COMMITTED에서 뒤 UPDATE는 앞 커밋을 기다린 뒤 WHERE를 다시 평가해 이미 바뀐 행을 건너뛴다.
+- 켜고 끄는 스위치는 `common/config/SchedulingConfig` 하나다(`@EnableScheduling` + `@ConditionalOnProperty(scheduling.enabled=true)`). `application.yaml`에서 켜고(모든 프로파일), 테스트에서는 끈다(`.claude/rules/testing.md`). 도메인 스케줄러를 더할 때 따로 켜지 않는다. common에 둔 이유는 common 절.
+
 ### Redis
 
 - 키는 `용도:식별자` 형태로 쓴다. 식별자가 여럿이면 `:`로 잇는다. 예: `refresh:{userId}:{sessionId}`, `sessions:{userId}`, `signup:{token}`.
@@ -238,6 +257,7 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 
 - **prefix를 흔한 OS 환경변수 이름(`user`, `home`, `path`, `lang` 등)과 같게 두지 않는다.** Spring은 OS 환경변수도 속성으로 읽어 `USER`를 `user` 속성으로 잡는다. prefix와 정확히 같은 이름의 값이 있으면 Binder가 그 문자열을 record에 바인딩하려 해 기동이 실패할 수 있다. 리눅스 운영 서버에는 `USER`·`HOME`·`PATH`가 항상 있다. 예: 닉네임 정책은 `user.*`가 아니라 `nickname.*`(`user/application/NicknameProperties`)다.
 - 두 규칙이 같은 기간을 쓰면 설정 하나에서 읽는다. 예: `nickname.protect-after-change`는 바꾸기 전 닉네임 보호 기간이자 닉네임 재변경 제한 기간이다.
+- 예외: 애노테이션 속성이 읽는 값은 record를 주입할 자리가 없어 자리표시자(`"${...}"`)로 읽는다. 예: `@Scheduled(fixedDelayString = "${schedule.status-transition-interval}")`. 그 키는 record에 넣지 않고, 넣지 않은 이유를 yaml 주석으로 남긴다(`@ConfigurationProperties`는 모르는 키를 무시한다).
 
 ## 코드 작성
 
@@ -251,7 +271,7 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 - 유틸과 비즈니스 로직 없는 공통 규약만 두고, 관심사별로 나눈다.
   - `common/exception`: `ErrorType`, `ErrorCode` 인터페이스, `BusinessException`, `CommonErrorCode`
   - `common/entity`: `BaseEntity`, `BaseAuditEntity`, `Auditor`
-  - `common/config`: `JpaAuditingConfig`, `SecurityAuditorAware`
+  - `common/config`: `JpaAuditingConfig`, `SecurityAuditorAware`, `SchedulingConfig`, `CorsConfig`·`CorsProperties`, `OpenApiConfig`, `RedisConfig`
   - `common/web`: `ApiResponse`, 전역 예외 처리(`ErrorType` → `HttpStatus` 변환)
 - domain·application은 `common.exception`, `common.entity`만 import한다. `common.web`은 presentation 전용.
 - common은 어떤 도메인도 import하지 않는다.
@@ -264,3 +284,7 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
   - 예: JWT 발급·검증은 auth 도메인의 infrastructure다. 토큰 정책은 기술 유틸이 아니다.
 - 쓰일 곳이 없는 패키지를 미리 만들지 않는다. 빈 `common/util`을 만들어두면 "애매하면 여기"가 된다.
 - common에 넣거나 뺄 때는 트레이드오프를 사용자에게 보고하고, 판단 근거를 이 문서에 남긴다.
+
+판단 기록:
+
+- `common/config/SchedulingConfig`(SHI-173): 스케줄링 스위치(`scheduling.enabled`)다. 지금은 schedule 스케줄러만 쓰지만 기능 명세의 user(탈퇴 비식별)·place(장소 적재) 스케줄러도 같은 스위치를 쓴다. 한 도메인에 두면 다른 도메인이 그 도메인 설정에 기댄다. 비즈니스 로직이 없고 도메인을 import하지 않는다. 메인 클래스에 `@EnableScheduling`을 두지 않는 것은 `JpaAuditingConfig`와 같이 설정으로 끌 수 있어야 해서다. 대가: common/config가 하나 늘어난다. 주기·작업 내용은 각 도메인에 둔다.
