@@ -1,26 +1,36 @@
 package com.shineunsigan.snsg.schedule.presentation;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.shineunsigan.snsg.common.web.ApiResponse;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
+import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
 import com.shineunsigan.snsg.schedule.presentation.dto.request.CreateScheduleRequest;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.CreateScheduleResponse;
+import com.shineunsigan.snsg.schedule.presentation.dto.response.ScheduleCardPageResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 
@@ -35,6 +45,7 @@ public class ScheduleController {
     private final CreateScheduleFacade createScheduleFacade;
     private final JoinScheduleFacade joinScheduleFacade;
     private final ScheduleCommandService scheduleCommandService;
+    private final ListSchedulesFacade listSchedulesFacade;
 
     @PostMapping
     @Operation(summary = "일정 개설",
@@ -136,5 +147,115 @@ public class ScheduleController {
         scheduleCommandService.leave(scheduleId, userId);
 
         return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    /** 파라미터는 모두 선택이다. 기본값을 주지 않는다. 생략은 null이고 size의 기본값은 서버 설정이 정한다. */
+    @SecurityRequirements
+    @GetMapping
+    @Operation(summary = "모집 중 일정 목록",
+            description = """
+                    참여할 수 있는 일정을 카드로 보여준다. 목록 화면의 모집 중 탭에 들어올 때, 필터(활동·지역·날짜)를 바꿀 때,
+                    끝까지 스크롤해 다음 페이지가 필요할 때 부른다. 토큰 없이 부를 수 있고, 토큰을 보내도 응답은 같다.
+                    취소되지 않았고 시작 전인 일정이 모두 온다. 정원이 찬 일정도 displayStatus = RECRUITMENT_CLOSED(모집 마감)로 함께 온다.
+                    정렬은 시작 일시가 빠른 순(같으면 id 순)이다. 한 번에 size개(기본 20, 최대 50)를 주고, 더 있으면 nextCursor를 준다.
+                    다음 페이지는 같은 필터에 cursor = nextCursor를 붙여 부른다. 필터를 바꾸면 cursor 없이 처음부터 부른다.
+                    맞는 일정이 없으면 items는 빈 배열이고 nextCursor는 null이다.
+                    조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
+                    날짜와 커서가 둘 다 틀리면 INVALID_DATE_FILTER가 온다.""")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+                    description = "일정 카드 한 페이지. nextCursor가 null이면 마지막 페이지다"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
+                    description = """
+                            INVALID_REQUEST: categoryIds가 UUID 형식이 아니거나, categoryIds·regionCodes가 중복을 빼고 20개를 넘거나, 날짜가 yyyy-MM-dd 형식이 아니거나 없는 날짜이거나, size가 숫자가 아니다. 정상 화면 흐름에서는 나지 않는다.
+                            INVALID_DATE_FILTER: endDate가 startDate보다 앞선다. 날짜를 다시 고르게 한다.
+                            INVALID_CURSOR: 해석할 수 없는 cursor. cursor 없이 처음부터 다시 부른다""")})
+    public ResponseEntity<ApiResponse<ScheduleCardPageResponse>> listRecruiting(
+            @Parameter(description = """
+                    활동 ID. 활동 목록 API의 id. 여러 개면 categoryIds=a&categoryIds=b처럼 반복해 보내고, 그중 하나에 맞으면 온다.
+                    생략하면 모든 활동이다. 모르는 ID만 보내면 빈 결과다. 빈 값으로 보내지 않는다(맞는 일정이 없어 빈 결과가 된다).
+                    중복을 빼고 최대 20개. 넘으면 400 INVALID_REQUEST""",
+                    example = "01a19cc6-3d80-7000-8000-000000000001")
+            @RequestParam(required = false) List<UUID> categoryIds,
+            @Parameter(description = """
+                    지역 코드. 지역 목록 API의 code. 여러 개면 regionCodes=11440&regionCodes=11410처럼 반복해 보내고, 그중 하나에 맞으면 온다.
+                    활동과 함께 보내면 둘 다 맞는 일정만 온다. 생략하면 모든 지역이다. 모르는 코드만 보내면 빈 결과다.
+                    빈 값으로 보내지 않는다(맞는 일정이 없어 빈 결과가 된다). 중복을 빼고 최대 20개. 넘으면 400 INVALID_REQUEST""",
+                    example = "11440")
+            @RequestParam(required = false) List<String> regionCodes,
+            @Parameter(description = """
+                    시작 날짜 범위의 첫날. yyyy-MM-dd(한국 날짜). 그날 00:00부터 포함한다.
+                    endDate 없이 보내면 그날 하루다. 생략하면(endDate도 없으면) 날짜 제한이 없다. 지난 날짜도 오류가 아니다(빈 결과)""",
+                    example = "2026-11-14")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @Parameter(description = """
+                    시작 날짜 범위의 마지막 날. yyyy-MM-dd(한국 날짜). 그날 23:59까지 포함한다.
+                    startDate 없이 보내면 그날 하루다. startDate와 같으면 그날 하루, startDate보다 앞서면 400 INVALID_DATE_FILTER""",
+                    example = "2026-11-15")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @Parameter(description = "이전 응답의 nextCursor를 그대로 보낸다. 생략하면 첫 페이지다. 해석할 수 없으면 400 INVALID_CURSOR")
+            @RequestParam(required = false) String cursor,
+            @Parameter(description = "한 페이지 개수. 생략하면 20, 50보다 크면 50, 1보다 작으면 1로 맞춘다", example = "20")
+            @RequestParam(required = false) Integer size) {
+        ListRecruitingSchedulesCommand command = new ListRecruitingSchedulesCommand(categoryIds, regionCodes,
+                startDate, endDate, cursor, size);
+
+        return ResponseEntity.ok(ApiResponse.success(
+                ScheduleCardPageResponse.from(listSchedulesFacade.listRecruiting(command))));
+    }
+
+    @GetMapping("/participating")
+    @Operation(summary = "참여한 일정 목록",
+            description = """
+                    내가 멤버로 참여한 일정을 카드로 보여준다. 목록 화면의 참여한 일정 탭에서 부른다. 로그인이 필요하다.
+                    완료 전(시작 + 12시간 전) 일정만 온다. 시작한 일정도 완료 전이면 온다.
+                    개설자가 취소한 일정도 완료 시각 전까지 displayStatus = CANCELED(일정 취소됨)로 남는다.
+                    내가 참여를 취소한 일정과 내가 연 일정은 오지 않는다(내가 연 일정은 개설한 일정 목록에 있다).
+                    정렬·페이지(cursor, size, nextCursor)는 모집 중 목록과 같다. 필터는 없다.
+                    없으면 items는 빈 배열이고 nextCursor는 null이다. 조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.""")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+                    description = "일정 카드 한 페이지. nextCursor가 null이면 마지막 페이지다"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
+                    description = """
+                            INVALID_REQUEST: size가 숫자가 아니다. 정상 화면 흐름에서는 나지 않는다.
+                            INVALID_CURSOR: 해석할 수 없는 cursor. cursor 없이 처음부터 다시 부른다"""),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
+                    description = "UNAUTHENTICATED: 토큰이 없거나 만료·무효. 재발급 후 다시 부르거나 로그인 화면으로 간다")})
+    public ResponseEntity<ApiResponse<ScheduleCardPageResponse>> listParticipating(
+            @AuthenticationPrincipal UUID userId,
+            @Parameter(description = "이전 응답의 nextCursor를 그대로 보낸다. 생략하면 첫 페이지다. 해석할 수 없으면 400 INVALID_CURSOR")
+            @RequestParam(required = false) String cursor,
+            @Parameter(description = "한 페이지 개수. 생략하면 20, 50보다 크면 50, 1보다 작으면 1로 맞춘다", example = "20")
+            @RequestParam(required = false) Integer size) {
+        return ResponseEntity.ok(ApiResponse.success(
+                ScheduleCardPageResponse.from(listSchedulesFacade.listParticipating(userId, cursor, size))));
+    }
+
+    @GetMapping("/hosted")
+    @Operation(summary = "개설한 일정 목록",
+            description = """
+                    내가 연 일정을 카드로 보여준다. 목록 화면의 개설한 일정 탭에서 부르고, 일정 개설에 성공한 뒤 이 화면(내가 연 일정)으로 와서 부른다.
+                    로그인이 필요하다. 완료 전(시작 + 12시간 전) 일정만 온다. 방금 연 일정도 온다.
+                    내가 취소한 일정도 완료 시각 전까지 displayStatus = CANCELED(일정 취소됨)로 남는다. 멤버로 참여만 한 일정은 오지 않는다.
+                    정렬·페이지(cursor, size, nextCursor)는 모집 중 목록과 같다. 필터는 없다.
+                    없으면 items는 빈 배열이고 nextCursor는 null이다. 조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.""")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+                    description = "일정 카드 한 페이지. nextCursor가 null이면 마지막 페이지다"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
+                    description = """
+                            INVALID_REQUEST: size가 숫자가 아니다. 정상 화면 흐름에서는 나지 않는다.
+                            INVALID_CURSOR: 해석할 수 없는 cursor. cursor 없이 처음부터 다시 부른다"""),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
+                    description = "UNAUTHENTICATED: 토큰이 없거나 만료·무효. 재발급 후 다시 부르거나 로그인 화면으로 간다")})
+    public ResponseEntity<ApiResponse<ScheduleCardPageResponse>> listHosted(
+            @AuthenticationPrincipal UUID userId,
+            @Parameter(description = "이전 응답의 nextCursor를 그대로 보낸다. 생략하면 첫 페이지다. 해석할 수 없으면 400 INVALID_CURSOR")
+            @RequestParam(required = false) String cursor,
+            @Parameter(description = "한 페이지 개수. 생략하면 20, 50보다 크면 50, 1보다 작으면 1로 맞춘다", example = "20")
+            @RequestParam(required = false) Integer size) {
+        return ResponseEntity.ok(ApiResponse.success(
+                ScheduleCardPageResponse.from(listSchedulesFacade.listHosted(userId, cursor, size))));
     }
 }

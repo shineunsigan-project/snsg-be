@@ -40,6 +40,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/regions").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/activity-categories").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/place-candidates").permitAll()
+                        // 정확한 경로만 연다. 하위 경로(/participating, /hosted)는 인증이 필요하다
+                        .requestMatchers(HttpMethod.GET, "/api/v1/schedules").permitAll()
                         // 토큰이 선택이다. 있으면 본인의 현재 닉네임을 사용 가능으로 본다
                         .requestMatchers(HttpMethod.GET, "/api/v1/users/nickname-availability").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/signup", "/api/v1/auth/signup/profile-image",

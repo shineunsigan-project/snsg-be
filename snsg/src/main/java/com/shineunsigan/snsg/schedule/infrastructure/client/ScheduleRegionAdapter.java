@@ -1,9 +1,11 @@
 package com.shineunsigan.snsg.schedule.infrastructure.client;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.stereotype.Component;
 
+import com.shineunsigan.snsg.place.application.dto.result.RegionResult;
 import com.shineunsigan.snsg.place.application.port.in.FindRegionUseCase;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleRegionResult;
 import com.shineunsigan.snsg.schedule.application.port.out.RegionPort;
@@ -22,7 +24,17 @@ public class ScheduleRegionAdapter implements RegionPort {
 
     @Override
     public Optional<ScheduleRegionResult> find(String code) {
-        return findRegionUseCase.find(code)
-                .map(region -> new ScheduleRegionResult(region.code(), region.active()));
+        return findRegionUseCase.find(code).map(ScheduleRegionAdapter::toResult);
+    }
+
+    @Override
+    public List<ScheduleRegionResult> findAll() {
+        return findRegionUseCase.findAll().stream()
+                .map(ScheduleRegionAdapter::toResult)
+                .toList();
+    }
+
+    private static ScheduleRegionResult toResult(RegionResult region) {
+        return new ScheduleRegionResult(region.code(), region.sigunguName(), region.active());
     }
 }

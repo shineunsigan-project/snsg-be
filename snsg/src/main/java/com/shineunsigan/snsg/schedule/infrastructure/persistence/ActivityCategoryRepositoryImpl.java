@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.schedule.infrastructure.persistence;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,5 +26,10 @@ public class ActivityCategoryRepositoryImpl implements ActivityCategoryRepositor
     @Override
     public Optional<ActivityCategory> findActiveById(UUID id) {
         return activityCategoryJpaRepository.findByIdAndIsActiveTrueAndIsDeletedFalse(id);
+    }
+
+    @Override
+    public List<ActivityCategory> findAllNotDeletedByIds(Collection<UUID> ids) {
+        return activityCategoryJpaRepository.findByIdInAndIsDeletedFalse(ids);
     }
 }
