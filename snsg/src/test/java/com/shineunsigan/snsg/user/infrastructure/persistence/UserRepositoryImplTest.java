@@ -56,9 +56,10 @@ class UserRepositoryImplTest {
         assertThat(userRepository.isNicknameTaken("민트초코", NOW)).isTrue();
     }
 
+    // 탈퇴 닉네임 보호는 users 행이 아니라 탈퇴 서비스가 남기는 WITHDRAWN 이력이 맡는다.
     @Test
-    @DisplayName("탈퇴한 사용자의 닉네임은 다시 쓸 수 있다")
-    void nicknameOfWithdrawnUserIsReusable() {
+    @DisplayName("이력이 없으면 삭제된 사용자 행의 닉네임은 중복 판정과 닉네임 부분 유니크 인덱스에 걸리지 않는다")
+    void nicknameOfDeletedUserRowIsIgnoredWithoutHistory() {
         User user = userRepository.save(createUser("민트초코"));
         user.withdraw();
         entityManager.flush();
@@ -221,16 +222,16 @@ class UserRepositoryImplTest {
     }
 
     @Test
-    @DisplayName("그 사진 경로를 쓰던 회원이 탈퇴(삭제)했으면 사용 중이 아니다")
-    void profileImageOfDeletedUserIsNotUsed() {
+    @DisplayName("그 사진 경로를 쓰던 회원이 탈퇴(삭제)했어도 비식별 전이면 사용 중이다")
+    void profileImageOfDeletedUserIsStillUsed() {
         String path = uploadedPath();
         User other = userRepository.save(createUser("민트초코", path));
         other.delete();
         entityManager.flush();
         User me = userRepository.save(createUser("레몬티"));
 
-        assertThat(userRepository.isProfileImageUsedByOthers(path, me.getId())).isFalse();
-        assertThat(userRepository.isProfileImageUsedByOthers(path, null)).isFalse();
+        assertThat(userRepository.isProfileImageUsedByOthers(path, me.getId())).isTrue();
+        assertThat(userRepository.isProfileImageUsedByOthers(path, null)).isTrue();
     }
 
     @Test

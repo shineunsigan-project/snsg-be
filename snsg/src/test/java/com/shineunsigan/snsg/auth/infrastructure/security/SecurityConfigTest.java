@@ -39,9 +39,9 @@ import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
 import com.shineunsigan.snsg.schedule.presentation.ScheduleController;
 import com.shineunsigan.snsg.user.application.UploadProfileImageFacade;
-import com.shineunsigan.snsg.user.application.UserCommandService;
 import com.shineunsigan.snsg.user.application.UserProfileCommandService;
 import com.shineunsigan.snsg.user.application.UserQueryService;
+import com.shineunsigan.snsg.user.application.UserWithdrawalCommandService;
 import com.shineunsigan.snsg.user.application.dto.result.NicknameAvailabilityResult;
 import com.shineunsigan.snsg.user.presentation.UserController;
 
@@ -74,7 +74,7 @@ class SecurityConfigTest {
     private TokenPort tokenPort;
 
     @MockitoBean
-    private UserCommandService userCommandService;
+    private UserWithdrawalCommandService userWithdrawalCommandService;
 
     @MockitoBean
     private UserQueryService userQueryService;

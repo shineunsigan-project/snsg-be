@@ -109,26 +109,45 @@ class UserTest {
     }
 
     @Test
-    @DisplayName("탈퇴하면 삭제 표시와 비식별 처리가 함께 일어난다")
+    @DisplayName("탈퇴하면 삭제 표시만 되고 프로필 원본은 그대로다")
     void withdraw() {
         User user = createUser();
 
         user.withdraw();
 
         assertThat(user.isDeleted()).isTrue();
-        assertThat(user.getProfile().getNickname()).isNotEqualTo("민트초코");
-        assertThat(user.getProfile().getProfileImageUrl()).isEqualTo(Profile.DEFAULT_PROFILE_IMAGE_URL);
+        assertThat(user.getProfile().getNickname()).isEqualTo("민트초코");
+        assertThat(user.getProfile().getBirthDate()).isEqualTo(BIRTH_DATE);
+        assertThat(user.getProfile().getProfileImageUrl()).isEqualTo("https://kakao.test/me.png");
+        assertThat(user.getProfile().getGender()).isEqualTo(Gender.FEMALE);
     }
 
     @Test
-    @DisplayName("탈퇴하면 이름과 이메일이 즉시 빈 문자열이 된다")
-    void withdrawClearsNameAndEmail() {
+    @DisplayName("탈퇴해도 이름과 이메일은 원본 그대로 보관된다")
+    void withdrawKeepsNameAndEmail() {
         User user = createUser();
 
         user.withdraw();
 
+        assertThat(user.getName()).isEqualTo("김민트");
+        assertThat(user.getEmail()).isEqualTo("mint@example.com");
+    }
+
+    @Test
+    @DisplayName("비식별하면 이름·이메일이 빈 문자열, 프로필이 비식별 값이 되고 성별과 삭제 표시는 그대로다")
+    void anonymize() {
+        User user = createUser();
+        user.withdraw();
+
+        user.anonymize();
+
         assertThat(user.getName()).isEmpty();
         assertThat(user.getEmail()).isEmpty();
+        assertThat(user.getProfile().getNickname()).isEqualTo("탈퇴한 사용자");
+        assertThat(user.getProfile().getBirthDate()).isEqualTo(LocalDate.of(1900, 1, 1));
+        assertThat(user.getProfile().getProfileImageUrl()).isEqualTo(Profile.DEFAULT_PROFILE_IMAGE_URL);
+        assertThat(user.getProfile().getGender()).isEqualTo(Gender.FEMALE);
+        assertThat(user.isDeleted()).isTrue();
     }
 
     @Test

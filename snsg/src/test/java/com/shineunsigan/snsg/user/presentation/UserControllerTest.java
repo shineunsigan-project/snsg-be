@@ -38,9 +38,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.common.web.GlobalExceptionHandler;
 import com.shineunsigan.snsg.user.application.UploadProfileImageFacade;
-import com.shineunsigan.snsg.user.application.UserCommandService;
 import com.shineunsigan.snsg.user.application.UserProfileCommandService;
 import com.shineunsigan.snsg.user.application.UserQueryService;
+import com.shineunsigan.snsg.user.application.UserWithdrawalCommandService;
 import com.shineunsigan.snsg.user.application.dto.command.UpdateMyProfileCommand;
 import com.shineunsigan.snsg.user.application.dto.result.MyProfileResult;
 import com.shineunsigan.snsg.user.application.dto.result.NicknameAvailabilityResult;
@@ -71,7 +71,7 @@ class UserControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private UserCommandService userCommandService;
+    private UserWithdrawalCommandService userWithdrawalCommandService;
 
     @MockitoBean
     private UserQueryService userQueryService;

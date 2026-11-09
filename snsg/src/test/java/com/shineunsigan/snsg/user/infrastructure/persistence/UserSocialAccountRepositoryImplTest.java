@@ -3,6 +3,7 @@ package com.shineunsigan.snsg.user.infrastructure.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,5 +54,28 @@ class UserSocialAccountRepositoryImplTest {
         entityManager.flush();
 
         assertThat(userSocialAccountRepository.findByUserId(user.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("비식별로 식별자를 비운 삭제된 소셜 계정은 빈 식별자로 찾아도 나오지 않는다")
+    void anonymizedAccountIsNotFoundByEmptyProviderUserId() {
+        User user = userRepository.save(User.create("김민트", "",
+                Profile.of("t" + UUID.randomUUID().toString().substring(0, 8), Gender.FEMALE,
+                        LocalDate.of(1996, 4, 12), null),
+                LocalDate.now()));
+        UserSocialAccount account = userSocialAccountRepository
+                .save(UserSocialAccount.of(user, SocialProvider.KAKAO, "kakao-" + UUID.randomUUID()));
+        entityManager.flush();
+
+        account.delete();
+        account.clearProviderUserId();
+        entityManager.flush();
+
+        Object[] stored = (Object[]) entityManager.createNativeQuery(
+                        "SELECT provider_user_id, is_deleted FROM user_social_accounts WHERE id = ?")
+                .setParameter(1, account.getId())
+                .getSingleResult();
+        assertThat(stored).containsExactly("", true);
+        assertThat(userSocialAccountRepository.findByProviderAndProviderUserId(SocialProvider.KAKAO, "")).isEmpty();
     }
 }
