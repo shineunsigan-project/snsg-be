@@ -30,6 +30,7 @@ paths:
 - 선택 쿼리 파라미터에서 생략과 빈 값을 다르게 다뤄야 하면 `@RequestParam(required = false) String`으로 받고 `defaultValue`를 주지 않는다. 생략은 `null`, `?x=`는 `""`로 들어온다. `defaultValue`를 주면 빈 값도 기본값으로 바뀌어 구분이 사라진다. 예: `PlaceCandidateController`의 `regionCode`(생략은 활성 지역 전체, 빈 값은 400 `INVALID_REGION`).
 - 인증 주체는 `@AuthenticationPrincipal UUID userId`로 받는다. 인증 필터가 principal에 userId(UUID)를 넣는다.
   - 공개 경로(토큰 없이 호출하는 엔드포인트)에서는 principal이 `"anonymousUser"`라 null이 들어온다. 타입이 맞지 않아도 예외 없이 null이므로 공개 경로에서는 쓰지 않는다.
+  - 예외는 **선택 인증 API**다. 공개 경로지만 토큰이 있으면 응답이 달라진다. 이때만 받아서 쓰고, 유효한 토큰이면 userId, 토큰이 없거나 틀리거나 만료됐으면 null이다. null은 익명으로 다룬다. 인증 필터가 틀린 토큰도 그냥 통과시키므로 **틀린 토큰은 401이 아니라 익명**이 된다. 예: `UserController`의 닉네임 사용 가능 여부(토큰이 있으면 본인의 현재 닉네임을 사용 가능으로 본다).
   - 토큰 없이 호출하는 엔드포인트는 `SecurityConfig`에서 HTTP 메서드와 경로를 정확히 지정해 연다. `/api/v1/auth/**`처럼 prefix 전체를 열면 같은 prefix에 생긴 인증 필요 API까지 열린다. 우리 API에서는 `POST /api/v1/auth/tokens`(재발급)가 공개이고 `DELETE /api/v1/auth/tokens`(로그아웃)는 인증이 필요하다. 경로가 같고 메서드만 다르므로 경로만 지정하면 로그아웃·탈퇴가 열린다.
   - 공개 경로는 API를 만들 때 하나씩 추가한다. 아직 없는 경로를 미리 적어두지 않는다.
 - 인증 필터는 공개 경로를 포함한 **모든 요청**에서 돈다. 필터는 토큰이 있을 때만 해석해 principal을 채우고, 없거나 틀리면 그냥 통과시킨다. 인가 판단은 `authorizeHttpRequests`가, 401 응답 생성은 `AuthenticationEntryPoint`가 한다.
@@ -83,6 +84,7 @@ FE는 작업할 때마다 이 저장소를 받아가 `docs/`를 본다. FE에 AP
 - 컨트롤러에는 springdoc 애노테이션을 단다: `@Tag`, `@Operation(summary, description)`, 응답 코드별 `@ApiResponses`(code, 발생 조건, 화면에서 할 일, 에러 예시).
   - `@ApiResponse` 애노테이션은 `common.web.ApiResponse`와 이름이 겹쳐 `io.swagger.v3.oas.annotations.responses.ApiResponse`로 풀어 쓴다.
   - 토큰 없이 호출하는 엔드포인트는 메서드에 `@SecurityRequirements`를 달아 전역 bearer 요구를 지운다. 같은 컨트롤러에 인증이 필요한 엔드포인트가 섞이므로 클래스에 달지 않는다.
+    - 선택 인증 API(위 인증 주체 항목)에는 달지 않는다. 전역 요구를 지우면 swagger-ui가 토큰을 보내지 않아 토큰이 있을 때의 응답을 시험할 수 없다. 대신 description에 토큰은 선택이라는 것, 토큰이 있으면 무엇이 달라지는지, 틀린 토큰은 익명으로 처리한다는 것을 적는다. 예: `UserController`의 닉네임 사용 가능 여부.
 - Request/Response record 필드에는 `@Schema(description, example)`을 단다.
 - API를 바꾸면 같은 PR에서 `OPENAPI_UPDATE=true ./gradlew test --tests '*OpenApiSpecTest'`로 `docs/openapi.yaml`을 다시 만들어 커밋한다. 코드와 다르면 빌드가 실패한다.
   - `docs/openapi.yaml`은 API를 바꾼 코드와 **같은 커밋**에 넣는다. `docs:` 커밋으로 떼면 그 사이 커밋에서 `OpenApiSpecTest`가 실패한다. `docs/api-guide.md`는 빌드가 대조하지 않으므로 따로 커밋해도 된다.

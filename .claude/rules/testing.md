@@ -50,6 +50,8 @@ paths:
   - 슬라이스 없이 `LettuceConnectionFactory`를 컨테이너 host·port로 직접 만들어 adapter에 넣는다.
 - `@WebMvcTest`에서 Spring Security를 쓰려면 `spring-boot-starter-security-test`가 있어야 한다. 이 모듈이 `@AutoConfigureMockMvc`에 보안 자동 설정을 넣는다. 없으면 `HttpSecurity` 빈도 `@AuthenticationPrincipal` 리졸버도 없다.
 - 인가 규칙과 401 형식은 auth에서 `@Import`로 `SecurityConfig`와 인증 진입점(entry point)을 넣고, 토큰 검증 adapter를 `@MockitoBean`으로 대체해 검증한다.
+  - 예: `auth/infrastructure/security/SecurityConfigTest`. `@WebMvcTest(controllers = 대상 컨트롤러)`에 `SecurityConfig`·`JwtAuthenticationFilter`·`JwtAuthenticationEntryPoint`를 `@Import`하고 `TokenPort`와 컨트롤러가 의존하는 서비스를 `@MockitoBean`으로 둔다. 테스트 코드는 ArchUnit 검사 대상이 아니라 다른 도메인 컨트롤러를 대상으로 삼아도 된다.
+  - `SecurityConfig`는 `CorsConfigurationSource` 빈을 주입받는데, 실제 빈은 `common/config/CorsConfig`가 설정값으로 만든다. 슬라이스에는 올라오지 않으므로 빈 `UrlBasedCorsConfigurationSource`를 nested `@TestConfiguration`으로 준다. CORS 규칙은 이 테스트의 대상이 아니다.
 - 다른 도메인의 컨트롤러 테스트는 auth를 import하지 않는다. `@AutoConfigureMockMvc(addFilters = false)`로 필터를 끄고 `SecurityContextHolder`에 `UsernamePasswordAuthenticationToken(userId, null, List.of())`을 직접 넣는다.
 - `OpenApiSpecTest`는 `/v3/api-docs.yaml`로 생성한 스펙과 커밋된 `docs/openapi.yaml`을 비교한다. 줄바꿈은 정규화해 비교한다(autocrlf). build.gradle의 test task inputs에 스펙 파일과 `OPENAPI_UPDATE`를 넣어, 파일만 바뀌어도 테스트가 건너뛰어지지 않게 한다. 스펙 파일은 `inputs.files`로 선언한다. Gradle 9.7에서 `inputs.file(...).optional()`은 파일이 없으면 테스트 태스크를 시작하지 않아, 스펙을 처음 만들 수 없다.
 - 패키지 의존 규칙(`.claude/rules/package-structure.md`)은 ArchUnit 테스트 `com.shineunsigan.snsg.ArchitectureTest`가 검사한다. 규칙 하나에 테스트 메서드 하나다.
