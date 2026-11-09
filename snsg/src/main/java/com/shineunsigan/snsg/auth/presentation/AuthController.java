@@ -148,7 +148,8 @@ public class AuthController {
     @Operation(summary = "access token 재발급",
             description = """
                     refreshToken 쿠키로 새 access token을 발급한다. credentials를 포함해 호출한다.
-                    발급하면 이전 refresh token은 무효가 되므로 동시에 여러 번 호출하지 않는다.
+                    로그인한 기기마다 세션이 따로 있다. 발급하면 같은 기기의 이전 refresh token은 무효가 되므로 동시에 여러 번 호출하지 않는다.
+                    다른 기기의 세션에는 영향이 없다.
                     401 INVALID_REFRESH_TOKEN이면 로그인 화면으로 보낸다.""")
     public ResponseEntity<ApiResponse<TokenResponse>> reissue(
             @CookieValue(value = AuthCookieFactory.REFRESH_TOKEN, required = false) String refreshToken) {
@@ -162,9 +163,15 @@ public class AuthController {
 
     @DeleteMapping("/tokens")
     @Operation(summary = "로그아웃",
-            description = "서버에 보관된 refresh token을 지우고 쿠키를 만료시킨다. 이미 발급된 access token은 만료까지 유효하므로 클라이언트에서 버린다.")
-    public ResponseEntity<ApiResponse<Void>> logout(@AuthenticationPrincipal UUID userId) {
-        reissueTokenFacade.logout(userId);
+            description = """
+                    refreshToken 쿠키가 가리키는 이 기기의 세션만 끝내고 쿠키를 만료시킨다. 다른 기기의 로그인은 유지된다.
+                    쿠키를 읽으므로 credentials를 포함해 호출한다.
+                    쿠키가 없거나 이미 끝난 세션이어도 200이다. 다시 호출해도 안전하다.
+                    이미 발급된 access token은 만료까지 유효하므로 클라이언트에서 버린다.""")
+    public ResponseEntity<ApiResponse<Void>> logout(
+            @AuthenticationPrincipal UUID userId,
+            @CookieValue(value = AuthCookieFactory.REFRESH_TOKEN, required = false) String refreshToken) {
+        reissueTokenFacade.logout(userId, refreshToken);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookieFactory.expired(AuthCookieFactory.REFRESH_TOKEN).toString())

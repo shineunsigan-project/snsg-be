@@ -28,7 +28,7 @@ public class RevokeAuthFacade implements RevokeAuthUseCase {
 
     @Override
     public void revoke(UUID userId, SocialProvider provider, String providerUserId, boolean unlinkSocial) {
-        refreshTokenStorePort.delete(userId);
+        refreshTokenStorePort.deleteAll(userId);
 
         if (!unlinkSocial) {
             return;
