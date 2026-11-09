@@ -1,6 +1,8 @@
 package com.shineunsigan.snsg.user.infrastructure.persistence;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -42,6 +44,12 @@ public class UserRepositoryImpl implements UserRepository {
     @Override
     public Optional<User> findById(UUID id) {
         return userJpaRepository.findByIdAndIsDeletedFalse(id);
+    }
+
+    /** {@code JpaRepository} 기본 메서드는 삭제 조건이 없어 삭제된 행도 읽는다. */
+    @Override
+    public List<User> findAllByIdIncludingDeleted(Collection<UUID> ids) {
+        return userJpaRepository.findAllById(ids);
     }
 
     @Override
