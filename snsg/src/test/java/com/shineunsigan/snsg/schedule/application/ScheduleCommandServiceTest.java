@@ -99,7 +99,7 @@ class ScheduleCommandServiceTest {
     class Flow {
 
         private static final ScheduleProperties PROPERTIES = new ScheduleProperties(4, 24, Duration.ofHours(1), 30,
-                Duration.ofHours(12), Duration.ofHours(12));
+                Duration.ofHours(12), Duration.ofHours(12), 20, 50);
 
         @Mock
         private ScheduleRepository scheduleRepository;

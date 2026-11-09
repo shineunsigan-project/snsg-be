@@ -2,10 +2,13 @@ package com.shineunsigan.snsg.schedule.domain.repository;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
+import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
 
 public interface ScheduleRepository {
 
@@ -30,4 +33,31 @@ public interface ScheduleRepository {
      * 시작 시각이 startAt과 window 미만으로 떨어진 것이 있는지. 정확히 window만큼 떨어지면 겹치지 않는다.
      */
     boolean existsOverlapping(UUID userId, LocalDateTime startAt, Duration window);
+
+    /*
+     * 일정 목록 3종. 모두 삭제되지 않은 일정을 (start_at, id) 오름차순으로 limit건까지 준다.
+     * after가 있으면 그 (start_at, id)보다 뒤의 일정만 준다(keyset). null이면 처음부터다.
+     */
+
+    /**
+     * 모집 중 목록. 예정(SCHEDULED)이고 시작 시각이 now보다 뒤인 일정이다. 모집 마감(정원 참)도 포함한다.
+     * 필터에 빈 목록 조건이 있으면 빈 목록이다.
+     */
+    List<Schedule> findRecruiting(RecruitingScheduleFilter filter, LocalDateTime now, ScheduleCursor after,
+            int limit);
+
+    /**
+     * 내가 멤버로 확정 참여한 일정. 완료(COMPLETED)가 아니고 시작 시각이 startAfter보다 뒤인 것이다.
+     * 개설자가 취소한 일정도 포함한다. 개설한 일정(HOST 행)은 빠진다.
+     *
+     * @param startAfter 지금 − 완료 기준 시간. 시작 + 완료 기준 시간이 지금보다 뒤인 일정만 남긴다
+     */
+    List<Schedule> findParticipating(UUID userId, LocalDateTime startAfter, ScheduleCursor after, int limit);
+
+    /**
+     * 내가 개설한 일정. 완료(COMPLETED)가 아니고 시작 시각이 startAfter보다 뒤인 것이다. 취소한 일정도 포함한다.
+     *
+     * @param startAfter 지금 − 완료 기준 시간
+     */
+    List<Schedule> findHosted(UUID userId, LocalDateTime startAfter, ScheduleCursor after, int limit);
 }

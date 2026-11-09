@@ -81,7 +81,7 @@ class ListPlaceCandidatesFacadeTest {
     @DisplayName("비활성 지역이면 INVALID_REGION이고 장소를 조회하지 않는다")
     void inactiveRegion() {
         givenCategory();
-        when(regionPort.find(REGION)).thenReturn(Optional.of(new ScheduleRegionResult(REGION, false)));
+        when(regionPort.find(REGION)).thenReturn(Optional.of(new ScheduleRegionResult(REGION, "마포구", false)));
 
         assertError(REGION, ScheduleErrorCode.INVALID_REGION);
         verifyNoInteractions(placePort);
@@ -102,7 +102,7 @@ class ListPlaceCandidatesFacadeTest {
     void listsInRegion() {
         List<ExposedPlaceResult> places = List.of(place("가"), place("나"));
         givenCategory();
-        when(regionPort.find(REGION)).thenReturn(Optional.of(new ScheduleRegionResult(REGION, true)));
+        when(regionPort.find(REGION)).thenReturn(Optional.of(new ScheduleRegionResult(REGION, "마포구", true)));
         when(placePort.findExposed(ActivityPlaceType.BOARD_GAME_CAFE, List.of(REGION))).thenReturn(places);
 
         assertThat(listPlaceCandidatesFacade.list(CATEGORY_ID, REGION)).containsExactlyElementsOf(places);
@@ -112,7 +112,7 @@ class ListPlaceCandidatesFacadeTest {
     @DisplayName("결과가 없으면 빈 목록을 돌려준다")
     void emptyResult() {
         givenCategory();
-        when(regionPort.find(REGION)).thenReturn(Optional.of(new ScheduleRegionResult(REGION, true)));
+        when(regionPort.find(REGION)).thenReturn(Optional.of(new ScheduleRegionResult(REGION, "마포구", true)));
         when(placePort.findExposed(ActivityPlaceType.BOARD_GAME_CAFE, List.of(REGION))).thenReturn(List.of());
 
         assertThat(listPlaceCandidatesFacade.list(CATEGORY_ID, REGION)).isEmpty();

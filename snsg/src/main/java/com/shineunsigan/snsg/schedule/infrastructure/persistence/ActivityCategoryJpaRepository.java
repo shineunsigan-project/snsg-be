@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.schedule.infrastructure.persistence;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,4 +14,6 @@ interface ActivityCategoryJpaRepository extends JpaRepository<ActivityCategory, 
     List<ActivityCategory> findByIsActiveTrueAndIsDeletedFalseOrderByDisplayOrderAsc();
 
     Optional<ActivityCategory> findByIdAndIsActiveTrueAndIsDeletedFalse(UUID id);
+
+    List<ActivityCategory> findByIdInAndIsDeletedFalse(Collection<UUID> ids);
 }

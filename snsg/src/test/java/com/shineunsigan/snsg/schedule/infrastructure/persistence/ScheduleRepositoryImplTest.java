@@ -5,7 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
@@ -15,10 +19,14 @@ import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
 
+import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
+import com.shineunsigan.snsg.schedule.domain.model.Schedule;
+import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
+
 import jakarta.persistence.EntityManager;
 
 /**
- * 시간 겹침 쿼리, 일정 잠금 조회와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
+ * 시간 겹침 쿼리, 일정 잠금 조회, 일정 목록 3종 쿼리와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
  * 일정·참여 행은 native INSERT로 넣는다. 사용자 id는 테스트마다 무작위라 다른 데이터와 섞이지 않는다.
  * 테스트 트랜잭션은 롤백된다.
  */
@@ -29,6 +37,8 @@ class ScheduleRepositoryImplTest {
 
     private static final Duration WINDOW = Duration.ofHours(12);
     private static final LocalDateTime EXISTING_START = LocalDateTime.of(2027, 1, 10, 19, 0);
+    /** 목록 쿼리의 기준 시각. 인자로 넘겨 고정한다. */
+    private static final LocalDateTime NOW = LocalDateTime.of(2027, 3, 10, 12, 0);
 
     @Autowired
     private ScheduleRepositoryImpl scheduleRepository;
@@ -161,6 +171,232 @@ class ScheduleRepositoryImplTest {
                 .hasStackTraceContaining("ck_schedules_count");
     }
 
+    // 모집 중 목록. 다른 테스트·워크트리의 행과 섞이지 않게 무작위 활동 id로 넣고 그 활동으로 거른다.
+
+    @Test
+    @DisplayName("모집 중 목록은 시작 전 예정 일정만 준다. 모집 마감 일정은 포함하고 시작한·취소·완료·삭제 일정은 뺀다")
+    void recruitingScope() {
+        UUID category = UUID.randomUUID();
+        UUID recruiting = insertSchedule(row().categoryId(category).startAt(NOW.plusHours(1)));
+        UUID closed = insertSchedule(row().categoryId(category).startAt(NOW.plusHours(2))
+                .capacity(6).confirmedCount(6).recruitmentStatus("CLOSED"));
+        insertSchedule(row().categoryId(category).startAt(NOW.minusHours(1)));
+        insertSchedule(row().categoryId(category).startAt(NOW));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).status("CANCELED"));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).status("COMPLETED"));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).deleted(true));
+
+        assertThat(recruitingIds(filter(List.of(category), null, null, null))).containsExactly(recruiting, closed);
+    }
+
+    @Test
+    @DisplayName("모집 중 목록은 시작 시각, 같으면 id 오름차순이다")
+    void recruitingOrder() {
+        UUID category = UUID.randomUUID();
+        UUID later = insertSchedule(row().categoryId(category).startAt(NOW.plusDays(2)));
+        List<UUID> sameStart = List.of(
+                insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1))),
+                insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1))),
+                insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1))));
+
+        List<UUID> expected = new ArrayList<>(sortedLikePostgres(sameStart));
+        expected.add(later);
+        assertThat(recruitingIds(filter(List.of(category), null, null, null))).containsExactlyElementsOf(expected);
+    }
+
+    @Test
+    @DisplayName("활동 두 개를 고르면 두 활동의 일정만 온다")
+    void recruitingByCategories() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        UUID firstSchedule = insertSchedule(row().categoryId(first).startAt(NOW.plusHours(1)));
+        UUID secondSchedule = insertSchedule(row().categoryId(second).startAt(NOW.plusHours(2)));
+        insertSchedule(row().startAt(NOW.plusHours(3)));
+
+        assertThat(recruitingIds(filter(List.of(first, second), null, null, null)))
+                .containsExactly(firstSchedule, secondSchedule);
+    }
+
+    @Test
+    @DisplayName("지역 두 개를 고르면 두 지역의 일정만 온다")
+    void recruitingByRegions() {
+        UUID category = UUID.randomUUID();
+        UUID mapo = insertSchedule(row().categoryId(category).startAt(NOW.plusHours(1)).regionCode("11440"));
+        UUID seodaemun = insertSchedule(row().categoryId(category).startAt(NOW.plusHours(2)).regionCode("11410"));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).regionCode("11200"));
+
+        assertThat(recruitingIds(filter(List.of(category), List.of("11440", "11410"), null, null)))
+                .containsExactly(mapo, seodaemun);
+    }
+
+    @Test
+    @DisplayName("활동과 지역을 함께 고르면 둘 다 맞는 일정만 온다")
+    void recruitingByCategoryAndRegion() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        UUID matched = insertSchedule(row().categoryId(first).startAt(NOW.plusHours(1)).regionCode("11440"));
+        insertSchedule(row().categoryId(first).startAt(NOW.plusHours(2)).regionCode("11200"));
+        insertSchedule(row().categoryId(second).startAt(NOW.plusHours(3)).regionCode("11200"));
+
+        assertThat(recruitingIds(filter(List.of(first, second), List.of("11440"), null, null)))
+                .containsExactly(matched);
+    }
+
+    @Test
+    @DisplayName("모르는 활동 id만 보내거나 빈 값만 보내면 빈 결과다")
+    void recruitingByUnknownValues() {
+        insertSchedule(row().startAt(NOW.plusHours(1)));
+
+        assertThat(recruitingIds(filter(List.of(UUID.randomUUID()), null, null, null))).isEmpty();
+        assertThat(recruitingIds(filter(List.of(), null, null, null))).isEmpty();
+        assertThat(recruitingIds(filter(null, List.of(""), null, null))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("날짜 범위 [D, D+1]은 D 00:00 ~ D+1 23:30을 포함하고 D-1 23:30, D+2 00:00은 뺀다")
+    void recruitingByDateRange() {
+        UUID category = UUID.randomUUID();
+        LocalDate day = NOW.toLocalDate().plusDays(5);
+        insertSchedule(row().categoryId(category).startAt(day.minusDays(1).atTime(23, 30)));
+        UUID first = insertSchedule(row().categoryId(category).startAt(day.atStartOfDay()));
+        UUID last = insertSchedule(row().categoryId(category).startAt(day.plusDays(1).atTime(23, 30)));
+        insertSchedule(row().categoryId(category).startAt(day.plusDays(2).atStartOfDay()));
+
+        assertThat(recruitingIds(filter(List.of(category), null, day, day.plusDays(1)))).containsExactly(first, last);
+    }
+
+    @Test
+    @DisplayName("시작·끝 날짜가 같으면 그날 일정만 온다")
+    void recruitingByOneDay() {
+        UUID category = UUID.randomUUID();
+        LocalDate day = NOW.toLocalDate().plusDays(5);
+        insertSchedule(row().categoryId(category).startAt(day.minusDays(1).atTime(23, 30)));
+        UUID morning = insertSchedule(row().categoryId(category).startAt(day.atTime(10, 0)));
+        UUID night = insertSchedule(row().categoryId(category).startAt(day.atTime(23, 30)));
+        insertSchedule(row().categoryId(category).startAt(day.plusDays(1).atStartOfDay()));
+
+        assertThat(recruitingIds(filter(List.of(category), null, day, day))).containsExactly(morning, night);
+    }
+
+    @Test
+    @DisplayName("커서로 size 2씩 끝까지 넘기면 같은 시작 시각이 여러 건이어도 중복·누락 없이 전체 목록과 같다")
+    void recruitingCursorPagination() {
+        UUID category = UUID.randomUUID();
+        insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1)));
+        for (int i = 0; i < 3; i++) {
+            insertSchedule(row().categoryId(category).startAt(NOW.plusDays(2)));
+        }
+        insertSchedule(row().categoryId(category).startAt(NOW.plusDays(3)));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusDays(3)));
+        RecruitingScheduleFilter filter = filter(List.of(category), null, null, null);
+        List<UUID> all = recruitingIds(filter);
+
+        List<UUID> paged = new ArrayList<>();
+        ScheduleCursor cursor = null;
+        List<Schedule> page;
+        do {
+            page = scheduleRepository.findRecruiting(filter, NOW, cursor, 2);
+            page.forEach(schedule -> paged.add(schedule.getId()));
+            if (!page.isEmpty()) {
+                Schedule last = page.get(page.size() - 1);
+                cursor = ScheduleCursor.decode(new ScheduleCursor(last.getStartAt(), last.getId()).encode());
+            }
+        } while (!page.isEmpty());
+
+        assertThat(all).hasSize(6);
+        assertThat(paged).containsExactlyElementsOf(all);
+    }
+
+    // 참여한 목록. 사용자 id가 무작위라 다른 데이터와 섞이지 않는다.
+
+    @Test
+    @DisplayName("참여한 목록은 내가 멤버로 확정 참여한 완료 전 일정이다. 개설자가 취소한 일정, 시작했지만 완료 전인 일정도 온다")
+    void participatingIncluded() {
+        UUID scheduled = insertSchedule(row().startAt(NOW.plusDays(1)));
+        UUID canceled = insertSchedule(row().startAt(NOW.plusDays(2)).status("CANCELED"));
+        UUID started = insertSchedule(row().startAt(NOW.minusHours(11).minusMinutes(30)));
+        for (UUID schedule : List.of(scheduled, canceled, started)) {
+            insertParticipant(schedule, userId, "MEMBER", "CONFIRMED", false);
+        }
+
+        assertThat(participatingIds()).containsExactly(started, scheduled, canceled);
+    }
+
+    @Test
+    @DisplayName("참여한 목록에서 내가 참여 취소한·완료된·시작 + 12시간이 지난·내가 연·남만 참여한·삭제된 일정은 빠진다")
+    void participatingExcluded() {
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1))), userId, "MEMBER", "CANCELED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).status("COMPLETED")), userId, "MEMBER",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.minusHours(12))), userId, "MEMBER", "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId)), userId, "HOST",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1))), UUID.randomUUID(), "MEMBER", "CONFIRMED",
+                false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).deleted(true)), userId, "MEMBER",
+                "CONFIRMED", false);
+
+        assertThat(participatingIds()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("참여 취소 후 다시 참여한 일정은 한 번만 온다")
+    void participatingRejoinedOnce() {
+        UUID schedule = insertSchedule(row().startAt(NOW.plusDays(1)));
+        insertParticipant(schedule, userId, "MEMBER", "CANCELED", false);
+        insertParticipant(schedule, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(participatingIds()).containsExactly(schedule);
+    }
+
+    // 개설한 목록
+
+    @Test
+    @DisplayName("개설한 목록은 내가 연 완료 전 일정이다. 취소한 일정도 온다")
+    void hostedIncluded() {
+        UUID scheduled = insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId));
+        UUID canceled = insertSchedule(row().startAt(NOW.plusDays(2)).hostUserId(userId).status("CANCELED"));
+
+        assertThat(hostedIds()).containsExactly(scheduled, canceled);
+    }
+
+    @Test
+    @DisplayName("개설한 목록에서 멤버로 참여만 한·완료된·시작 + 12시간이 지난·삭제된 일정은 빠진다")
+    void hostedExcluded() {
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1))), userId, "MEMBER", "CONFIRMED", false);
+        insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId).status("COMPLETED"));
+        insertSchedule(row().startAt(NOW.minusHours(12)).hostUserId(userId));
+        insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId).deleted(true));
+
+        assertThat(hostedIds()).isEmpty();
+    }
+
+    private List<UUID> recruitingIds(RecruitingScheduleFilter filter) {
+        return ids(scheduleRepository.findRecruiting(filter, NOW, null, 100));
+    }
+
+    private List<UUID> participatingIds() {
+        return ids(scheduleRepository.findParticipating(userId, NOW.minus(WINDOW), null, 100));
+    }
+
+    private List<UUID> hostedIds() {
+        return ids(scheduleRepository.findHosted(userId, NOW.minus(WINDOW), null, 100));
+    }
+
+    private static List<UUID> ids(List<Schedule> schedules) {
+        return schedules.stream().map(Schedule::getId).toList();
+    }
+
+    private static RecruitingScheduleFilter filter(List<UUID> categoryIds, List<String> regionCodes,
+            LocalDate startDate, LocalDate endDate) {
+        return RecruitingScheduleFilter.of(categoryIds, regionCodes, startDate, endDate);
+    }
+
+    /** PostgreSQL uuid는 바이트를 부호 없이 비교한다. 소문자 16진 문자열의 사전 순과 같다. */
+    private static List<UUID> sortedLikePostgres(List<UUID> ids) {
+        return ids.stream().sorted(Comparator.comparing(UUID::toString)).toList();
+    }
+
     private boolean overlaps(LocalDateTime startAt) {
         return scheduleRepository.existsOverlapping(userId, startAt, WINDOW);
     }
@@ -178,17 +414,19 @@ class ScheduleRepositoryImplTest {
                                                place_address_detail, place_latitude, place_longitude, region_code,
                                                created_at, updated_at, created_by, updated_by, is_deleted)
                         VALUES (?, ?, 'USER', ?, '테스트일정', '테스트 일정 설명입니다.', 'NORMAL', ?, ?, ?, ?,
-                                'RECRUITING', ?, '테스트장소', '서울특별시 테스트로 1', '', 37.5, 126.9, '11440',
+                                ?, ?, '테스트장소', '서울특별시 테스트로 1', '', 37.5, 126.9, ?,
                                 NOW(), NOW(), 'SYSTEM', 'SYSTEM', ?)""")
                 .setParameter(1, id)
-                .setParameter(2, UUID.randomUUID())
-                .setParameter(3, UUID.randomUUID())
-                .setParameter(4, EXISTING_START)
+                .setParameter(2, row.hostUserId != null ? row.hostUserId : UUID.randomUUID())
+                .setParameter(3, row.categoryId != null ? row.categoryId : UUID.randomUUID())
+                .setParameter(4, row.startAt)
                 .setParameter(5, row.capacity)
                 .setParameter(6, row.confirmedCount)
                 .setParameter(7, row.status)
-                .setParameter(8, UUID.randomUUID())
-                .setParameter(9, row.deleted)
+                .setParameter(8, row.recruitmentStatus)
+                .setParameter(9, UUID.randomUUID())
+                .setParameter(10, row.regionCode)
+                .setParameter(11, row.deleted)
                 .executeUpdate();
         return id;
     }
@@ -208,13 +446,43 @@ class ScheduleRepositoryImplTest {
                 .executeUpdate();
     }
 
-    /** 기본값은 EXISTING_START에 시작하는 예정 일정(정원 6, 확정 1). */
+    /** 기본값은 EXISTING_START에 시작하는 마포구(11440)의 모집 중인 예정 일정(정원 6, 확정 1). 개설자·활동은 무작위다. */
     private static final class ScheduleRow {
 
         private String status = "SCHEDULED";
         private int capacity = 6;
         private int confirmedCount = 1;
         private boolean deleted;
+        private LocalDateTime startAt = EXISTING_START;
+        private UUID categoryId;
+        private String regionCode = "11440";
+        private UUID hostUserId;
+        private String recruitmentStatus = "RECRUITING";
+
+        ScheduleRow startAt(LocalDateTime startAt) {
+            this.startAt = startAt;
+            return this;
+        }
+
+        ScheduleRow categoryId(UUID categoryId) {
+            this.categoryId = categoryId;
+            return this;
+        }
+
+        ScheduleRow regionCode(String regionCode) {
+            this.regionCode = regionCode;
+            return this;
+        }
+
+        ScheduleRow hostUserId(UUID hostUserId) {
+            this.hostUserId = hostUserId;
+            return this;
+        }
+
+        ScheduleRow recruitmentStatus(String recruitmentStatus) {
+            this.recruitmentStatus = recruitmentStatus;
+            return this;
+        }
 
         ScheduleRow status(String status) {
             this.status = status;

@@ -86,16 +86,30 @@ class ActivityCategoryRepositoryImplTest {
         assertThatCode(() -> insert("TEST_DUP", 102, true, true)).doesNotThrowAnyException();
     }
 
-    private void insert(String code, int displayOrder, boolean active, boolean deleted) {
+    @Test
+    @DisplayName("id로 찾으면 비활성 활동도 주고 삭제된 활동은 뺀다")
+    void findAllNotDeletedByIdsIncludesInactive() {
+        UUID active = insert("TEST_ACTIVE", 101, true, false);
+        UUID inactive = insert("TEST_INACTIVE", 102, false, false);
+        UUID deleted = insert("TEST_DELETED", 103, true, true);
+
+        assertThat(activityCategoryRepository.findAllNotDeletedByIds(List.of(active, inactive, deleted)))
+                .extracting(ActivityCategory::getId)
+                .containsExactlyInAnyOrder(active, inactive);
+    }
+
+    private UUID insert(String code, int displayOrder, boolean active, boolean deleted) {
+        UUID id = UUID.randomUUID();
         entityManager.createNativeQuery("""
                         INSERT INTO activity_categories (id, code, name, place_type, display_order, is_active,
                                                          created_at, updated_at, is_deleted)
                         VALUES (?, ?, '테스트활동', 'PARK', ?, ?, NOW(), NOW(), ?)""")
-                .setParameter(1, UUID.randomUUID())
+                .setParameter(1, id)
                 .setParameter(2, code)
                 .setParameter(3, displayOrder)
                 .setParameter(4, active)
                 .setParameter(5, deleted)
                 .executeUpdate();
+        return id;
     }
 }
