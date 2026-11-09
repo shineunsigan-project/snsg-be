@@ -1,6 +1,7 @@
 package com.shineunsigan.snsg.user.infrastructure.persistence;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,5 +27,10 @@ public class UserNicknameHistoryRepositoryImpl implements UserNicknameHistoryRep
     @Override
     public Optional<LocalDateTime> findLastChangedAt(UUID userId) {
         return userNicknameHistoryJpaRepository.findLastCreatedAt(userId, NicknameHistoryReason.CHANGED);
+    }
+
+    @Override
+    public List<UserNicknameHistory> findAllByUserIdIncludingDeleted(UUID userId) {
+        return userNicknameHistoryJpaRepository.findByUserId(userId);
     }
 }

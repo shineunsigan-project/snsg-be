@@ -57,12 +57,13 @@ public class UserRepositoryImpl implements UserRepository {
         return userJpaRepository.isNicknameTaken(nickname, now);
     }
 
+    /** 삭제 조건을 두지 않는다. 보관 중인 탈퇴 회원의 경로도 사용 중이다. */
     @Override
     public boolean isProfileImageUsedByOthers(String profileImageUrl, UUID userId) {
         if (userId == null) {
-            return userJpaRepository.existsByProfileProfileImageUrlAndIsDeletedFalse(profileImageUrl);
+            return userJpaRepository.existsByProfileProfileImageUrl(profileImageUrl);
         }
-        return userJpaRepository.existsByProfileProfileImageUrlAndIsDeletedFalseAndIdNot(profileImageUrl, userId);
+        return userJpaRepository.existsByProfileProfileImageUrlAndIdNot(profileImageUrl, userId);
     }
 
     private boolean violatesNicknameIndex(DataIntegrityViolationException exception) {

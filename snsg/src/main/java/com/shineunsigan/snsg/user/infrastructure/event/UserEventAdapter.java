@@ -4,6 +4,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import com.shineunsigan.snsg.user.application.event.ProfileImageReplacedEvent;
+import com.shineunsigan.snsg.user.application.event.UserAnonymizedEvent;
 import com.shineunsigan.snsg.user.application.event.UserWithdrawnEvent;
 import com.shineunsigan.snsg.user.application.port.out.UserEventPort;
 
@@ -25,6 +26,11 @@ public class UserEventAdapter implements UserEventPort {
 
     @Override
     public void publishProfileImageReplaced(ProfileImageReplacedEvent event) {
+        eventPublisher.publishEvent(event);
+    }
+
+    @Override
+    public void publishUserAnonymized(UserAnonymizedEvent event) {
         eventPublisher.publishEvent(event);
     }
 }

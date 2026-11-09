@@ -56,6 +56,12 @@ terms:
 
 nickname:
   protect-after-change: 14d
+  protect-after-withdrawal: 90d
+
+withdrawal:
+  anonymize-page-size: 100
+  # 탈퇴 회원 비식별 배치 실행 시각. @Scheduled가 자리표시자로 읽어 WithdrawalProperties에는 두지 않는다.
+  anonymize-cron: "0 0 4 * * *"
 
 jwt:
   secret: ${JWT_SECRET}

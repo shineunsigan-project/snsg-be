@@ -1,6 +1,7 @@
 package com.shineunsigan.snsg.user.infrastructure.persistence;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,4 +19,6 @@ interface UserNicknameHistoryJpaRepository extends JpaRepository<UserNicknameHis
             WHERE h.user.id = :userId AND h.reason = :reason AND h.isDeleted = false""")
     Optional<LocalDateTime> findLastCreatedAt(@Param("userId") UUID userId,
             @Param("reason") NicknameHistoryReason reason);
+
+    List<UserNicknameHistory> findByUserId(UUID userId);
 }

@@ -10,13 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.user.application.dto.command.RegisterUserCommand;
-import com.shineunsigan.snsg.user.application.event.UserWithdrawnEvent;
 import com.shineunsigan.snsg.user.application.port.in.RegisterUserUseCase;
-import com.shineunsigan.snsg.user.application.port.in.WithdrawUserUseCase;
-import com.shineunsigan.snsg.user.application.port.out.UserEventPort;
-import com.shineunsigan.snsg.user.domain.constants.SocialProvider;
 import com.shineunsigan.snsg.user.domain.constants.TermsType;
-import com.shineunsigan.snsg.user.domain.constants.WithdrawReason;
 import com.shineunsigan.snsg.user.domain.exception.UserErrorCode;
 import com.shineunsigan.snsg.user.domain.model.Profile;
 import com.shineunsigan.snsg.user.domain.model.ProfileImage;
@@ -29,15 +24,17 @@ import com.shineunsigan.snsg.user.domain.repository.UserSocialAccountRepository;
 
 import lombok.RequiredArgsConstructor;
 
+/**
+ * 가입. 탈퇴·비식별은 {@link UserWithdrawalCommandService}, 프로필 수정은 {@link UserProfileCommandService}가 맡는다.
+ */
 @Service
 @RequiredArgsConstructor
-public class UserCommandService implements RegisterUserUseCase, WithdrawUserUseCase {
+public class UserCommandService implements RegisterUserUseCase {
 
     private final UserRepository userRepository;
     private final UserSocialAccountRepository userSocialAccountRepository;
     private final TermsAgreementRepository termsAgreementRepository;
     private final TermsProperties termsProperties;
-    private final UserEventPort userEventPort;
 
     /**
      * 사용자·소셜 계정·약관 동의를 한 트랜잭션에서 만든다.
@@ -62,7 +59,7 @@ public class UserCommandService implements RegisterUserUseCase, WithdrawUserUseC
     }
 
     /**
-     * 다른 회원이 쓰는 우리 업로드 경로는 받지 않는다. 소셜 사진 주소와 빈 값은 보지 않는다.
+     * 다른 회원(보관 중인 탈퇴 회원 포함)이 쓰는 우리 업로드 경로는 받지 않는다. 소셜 사진 주소와 빈 값은 보지 않는다.
      * 접두사만 맞고 형식이 틀린 경로는 {@link Profile#of}가 거부한다.
      */
     private void validateProfileImageNotUsed(String profileImageUrl) {
@@ -87,50 +84,5 @@ public class UserCommandService implements RegisterUserUseCase, WithdrawUserUseC
         termsAgreementRepository.saveAll(List.of(
                 TermsAgreement.of(user, TermsType.PRIVACY_POLICY, termsProperties.privacyPolicyVersion()),
                 TermsAgreement.of(user, TermsType.SERVICE_TERMS, termsProperties.serviceTermsVersion())));
-    }
-
-    /**
-     * 소셜 쪽에서 연동을 끊었다는 통지로 탈퇴시킨다.
-     * 가입하지 않은 사용자(동의 화면에서 이탈 등)에 대해서도 통지가 오므로 없으면 넘어간다.
-     */
-    @Override
-    @Transactional
-    public void withdrawBySocialAccount(SocialProvider provider, String providerUserId) {
-        userSocialAccountRepository.findByProviderAndProviderUserId(provider, providerUserId)
-                .ifPresent(account -> withdraw(account.getUser().getId(), WithdrawReason.SOCIAL_UNLINKED));
-    }
-
-    /**
-     * 사용자와 그에 딸린 소셜 계정·약관 동의를 한 트랜잭션에서 지운다. 모두 한 애그리거트라 생명주기가 같다.
-     * 지우는 것은 isDeleted 플래그이고, 프로필은 비식별 값으로 바꾼다.
-     * <p>
-     * 소셜 연동 해제와 사진 파일 삭제는 커밋 뒤에 이벤트로 처리한다. 외부 호출을 트랜잭션 안에 두지 않는다.
-     */
-    @Transactional
-    public void withdraw(UUID userId, WithdrawReason reason) {
-        User user = findUser(userId);
-        String profileImageUrl = user.getProfile().getProfileImageUrl();
-        List<UserSocialAccount> socialAccounts = deleteAggregate(userId, user);
-        publishWithdrawnEvents(userId, socialAccounts, profileImageUrl, reason);
-    }
-
-    private User findUser(UUID userId) {
-        return userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
-    }
-
-    private List<UserSocialAccount> deleteAggregate(UUID userId, User user) {
-        user.withdraw();
-
-        List<UserSocialAccount> socialAccounts = userSocialAccountRepository.findByUserId(userId);
-        socialAccounts.forEach(UserSocialAccount::delete);
-        termsAgreementRepository.findByUserId(userId).forEach(TermsAgreement::delete);
-        return socialAccounts;
-    }
-
-    private void publishWithdrawnEvents(UUID userId, List<UserSocialAccount> socialAccounts, String profileImageUrl,
-            WithdrawReason reason) {
-        socialAccounts.forEach(account -> userEventPort.publish(new UserWithdrawnEvent(
-                userId, account.getProvider(), account.getProviderUserId(), profileImageUrl, reason)));
     }
 }

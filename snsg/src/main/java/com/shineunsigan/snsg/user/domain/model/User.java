@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * 탈퇴 여부는 {@code isDeleted}로 안다. 별도 상태 컬럼을 두지 않는다.
+ * 탈퇴해도 원본 값은 보관 기간 동안 그대로 두고, 그 뒤 {@link #anonymize()}로 비식별한다.
  * 운영자 정지처럼 삭제가 아닌 상태가 생기면 그때 상태 값을 더한다.
  * <p>
  * 이름·이메일은 남에게 보이지 않는 정보라 {@link Profile}이 아니라 여기에 둔다.
@@ -106,17 +107,23 @@ public class User extends BaseAuditEntity {
     }
 
     /**
-     * 탈퇴와 비식별 처리를 한 번에 한다. 둘을 나누면 호출하는 쪽에서 하나를 빠뜨려
-     * 탈퇴했는데 개인정보가 남은 사용자가 생긴다.
+     * 탈퇴한다. 삭제 표시만 하고 이름·이메일·프로필은 그대로 둔다.
+     * 원본은 보관 기간이 지난 뒤 {@link #anonymize()}로 비식별한다.
      */
     public void withdraw() {
         if (isDeleted()) {
             throw new BusinessException(UserErrorCode.ALREADY_WITHDRAWN);
         }
+        delete();
+    }
+
+    /**
+     * 보관 기간이 지난 탈퇴 회원의 개인정보를 비식별 값으로 바꾼다. 삭제 표시는 그대로다.
+     */
+    public void anonymize() {
         this.name = WITHDRAWN_NAME;
         this.email = WITHDRAWN_EMAIL;
         this.profile = profile.anonymized();
-        delete();
     }
 
     private static String resolveEmail(String email) {

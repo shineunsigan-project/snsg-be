@@ -23,7 +23,7 @@ import lombok.NoArgsConstructor;
  * 닉네임 보호 이력. User 애그리거트의 구성요소다.
  * {@code reservedUntil}까지 이 닉네임을 다른 사람이 쓰지 못한다.
  * 닉네임을 바꾼 시각은 {@code createdAt}이고, 가장 최근 {@code CHANGED} 행의 시각으로 다음 변경을 제한한다.
- * 수정하지 않으므로 변경 주체를 남기지 않는다({@link BaseEntity}).
+ * 비식별 때 닉네임을 비우는 것 말고는 수정하지 않으므로 변경 주체를 남기지 않는다({@link BaseEntity}).
  */
 @Getter
 @Entity
@@ -35,7 +35,7 @@ public class UserNicknameHistory extends BaseEntity {
     @JoinColumn(name = "user_id", nullable = false, updatable = false)
     private User user;
 
-    @Column(nullable = false, updatable = false)
+    @Column(nullable = false)
     private String nickname;
 
     @Enumerated(EnumType.STRING)
@@ -60,6 +60,20 @@ public class UserNicknameHistory extends BaseEntity {
             Duration protectPeriod) {
         return new UserNicknameHistory(user, previousNickname, NicknameHistoryReason.CHANGED,
                 changedAt.plus(protectPeriod));
+    }
+
+    /**
+     * 탈퇴했다. 탈퇴 시점 닉네임을 {@code withdrawnAt}부터 {@code protectPeriod} 동안 보호한다.
+     */
+    public static UserNicknameHistory withdrawn(User user, String nickname, LocalDateTime withdrawnAt,
+            Duration protectPeriod) {
+        return new UserNicknameHistory(user, nickname, NicknameHistoryReason.WITHDRAWN,
+                withdrawnAt.plus(protectPeriod));
+    }
+
+    /** 비식별 때 남아 있던 닉네임을 지운다. */
+    public void clearNickname() {
+        this.nickname = "";
     }
 
     /**
