@@ -56,8 +56,8 @@
 | 401 | `INVALID_SOCIAL_CODE` | 인가코드가 만료·위조됨 | 카카오 로그인부터 다시 |
 | 409 | `DUPLICATED_NICKNAME` | 이미 쓰이는 닉네임(대소문자 무시) | 다른 닉네임 입력 안내 |
 | 400 | `UNDERAGE` | 가입일 기준 만 18세 미만 | 가입할 수 없음을 안내 |
-| 400 | `INVALID_PROFILE_IMAGE` | 5MB를 넘거나 JPG·PNG가 아님 | 다른 사진 선택 안내 |
-| 400 | `INVALID_PROFILE_IMAGE_URL` | 가입 요청의 `profileImageUrl`이 업로드 API가 준 경로가 아님 | FE 버그다. 업로드 응답의 값을 그대로 넣는다 |
+| 400 | `INVALID_PROFILE_IMAGE` | JPG·PNG가 아니거나 빈 파일. 5MB를 넘는 파일은 이 코드가 아니라 `413 INVALID_REQUEST`로 온다(업로드 크기 한도에서 먼저 걸린다) | 다른 사진 선택 안내 |
+| 400 | `INVALID_PROFILE_IMAGE_URL` | 가입·프로필 수정 요청의 `profileImageUrl`이 업로드 API가 준 경로가 아니거나, 다른 회원이 쓰고 있는 경로 | FE 버그다. 업로드 응답의 값을 그대로 넣는다 |
 | 409 | `ALREADY_WITHDRAWN` | 이미 탈퇴한 사용자 | 로그인 화면으로 |
 
 엔드포인트마다 추가로 나는 에러는 `openapi.yaml`의 응답 코드별 설명에 있다.
@@ -132,7 +132,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 - 위 형식 오류는 모두 `400 INVALID_REQUEST`와 `errors`로 온다. 필드별 안내는 `errors`로 한다.
 - `gender`에 `FEMALE`·`MALE` 밖의 값을 보내거나 `2010-02-30`처럼 없는 날짜를 보내면 JSON 변환 단계에서 실패해 `400 INVALID_REQUEST`만 오고 `errors`는 없다. 화면에서 고를 수 있는 값만 보내면 나지 않는다.
 - 형식은 맞지만 가입일 기준 **만 18세 미만**이면 `400 UNDERAGE`("만 18세 이상만 가입할 수 있어요."). 2월 29일생은 평년에는 3월 1일에 한 살을 먹는다.
-- 닉네임 중복은 **대소문자를 무시**한다. 누가 `Mint`를 쓰고 있으면 `mint`도 `409 DUPLICATED_NICKNAME`이다. 닉네임을 바꾸거나 탈퇴한 회원의 이전 닉네임도 **보호 기간**(바꾸기 전 닉네임 14일, 탈퇴 90일) 동안은 409다. 기간이 지나면 다시 쓸 수 있다. 보호 이력은 닉네임 변경·탈퇴가 남기는데 두 기능에 아직 이력 기록이 들어가지 않아, 지금은 탈퇴한 회원의 닉네임을 바로 다시 쓸 수 있다. 두 사람이 같은 닉네임으로 동시에 가입해도 한쪽은 409를 받는다.
+- 닉네임 중복은 **대소문자를 무시**한다. 누가 `Mint`를 쓰고 있으면 `mint`도 `409 DUPLICATED_NICKNAME`이다. 닉네임을 바꾸거나 탈퇴한 회원의 이전 닉네임도 **보호 기간**(바꾸기 전 닉네임 14일, 탈퇴 90일) 동안은 409다. 기간이 지나면 다시 쓸 수 있다. 보호 이력은 닉네임 변경·탈퇴가 남긴다. 닉네임 변경은 이력을 남기지만 탈퇴에는 아직 이력 기록이 들어가지 않아, 지금은 탈퇴한 회원의 닉네임을 바로 다시 쓸 수 있다. 두 사람이 같은 닉네임으로 동시에 가입해도 한쪽은 409를 받는다.
 - 입력 중에 미리 확인하려면 아래 [닉네임 사용 가능 여부](#닉네임-사용-가능-여부)를 부른다. 결과는 안내용이고, 409는 가입 요청에서도 날 수 있다.
 
 **프로필 완성 화면의 기본값**은 `GET /api/v1/auth/signup/session`으로 받는다(`signUpToken` 쿠키 필요).
@@ -148,9 +148,10 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 **프로필 사진을 바꾸려면** 먼저 `POST /api/v1/auth/signup/profile-image`로 올리고, 받은 경로를 가입 요청의 `profileImageUrl`에 넣는다.
 
 - `multipart/form-data`, 파트 이름은 `image`. `signUpToken` 쿠키가 필요하다.
-- 5MB 이하의 JPG·PNG만 받는다. **형식은 파일 내용으로 판별하므로 확장자만 바꿔 올리면 거부된다.** 거부되면 400 `INVALID_PROFILE_IMAGE`("JPG, PNG 형식의 사진만 올릴 수 있어요.")다.
+- 5MB 이하의 JPG·PNG만 받는다. **형식은 파일 내용으로 판별하므로 확장자만 바꿔 올리면 거부된다.** JPG·PNG가 아니거나 빈 파일이면 400 `INVALID_PROFILE_IMAGE`("JPG, PNG 형식의 사진만 올릴 수 있어요.")다.
+- **5MB를 넘는 파일은 `400 INVALID_PROFILE_IMAGE`가 아니라 `413 INVALID_REQUEST`로 온다.** 업로드 크기 한도에서 먼저 걸리기 때문이다. 올리기 전에 화면에서 크기를 확인해 막고, 413을 받으면 5MB 이하 사진을 고르라고 안내한다.
 - 응답은 `{ "profileImageUrl": "/images/profiles/<uuid>.png" }`. 도메인이 붙지 않은 경로이므로 화면에 쓸 때 서버 주소를 앞에 붙인다.
-- 가입 요청의 `profileImageUrl`에는 **이 API가 돌려준 경로만** 넣을 수 있다. 다른 주소를 넣으면 400 `INVALID_PROFILE_IMAGE_URL`이다.
+- 가입 요청의 `profileImageUrl`에는 **이 API가 돌려준 경로만** 넣을 수 있다. 다른 주소, 형식을 바꾼 경로, 다른 회원이 쓰고 있는 경로를 넣으면 400 `INVALID_PROFILE_IMAGE_URL`이다.
 - 비워 두면(`null` 또는 생략) 소셜에서 받은 사진을 쓴다. 그것도 없으면 기본 이미지가 된다.
 - 올리기만 하고 가입을 완료하지 않으면 그 사진은 쓰이지 않는다.
 
@@ -219,6 +220,99 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 사용자가 카카오계정 설정에서 우리 서비스 연결을 끊으면 **카카오가 서버로 알려주고, 서버가 그 사용자를 탈퇴 처리한다.** FE가 할 일은 없다.
 
 다만 그 시점에 로그인 상태였다면 **다음 재발급부터 401 `INVALID_REFRESH_TOKEN`** 이 온다. 401 처리(로그인 화면으로)를 그대로 따르면 된다. **재발급을 반복 시도하지 않는다.**
+
+## 내 정보
+
+세 API 모두 **인증이 필요하다.** 토큰이 없거나 만료·무효면 401 `UNAUTHENTICATED`다. 재발급 후 다시 부르고, 재발급도 실패하면 로그인 화면으로 간다.
+
+### 내 프로필 조회
+
+`GET /api/v1/users/me`. 로그인한 사용자의 프로필을 돌려준다.
+
+- **부르는 화면**: 내 정보 화면(MY-01)에 들어올 때, 프로필 수정 화면(MY-02)을 열 때.
+- 응답 예시:
+  ```json
+  { "isSuccess": true, "data": {
+      "id": "01a19cc6-3d80-7000-8000-000000000001", "name": "김민트", "nickname": "민트초코",
+      "gender": "FEMALE", "birthDate": "1996-04-12", "email": "mint@example.com",
+      "profileImageUrl": "/images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png",
+      "ageGroup": { "decade": 20, "phase": "LATE" },
+      "nicknameChangeableAt": "2026-11-23T14:30:00" } }
+  ```
+  - `name`, `gender`(`FEMALE`·`MALE`), `birthDate`: **바꿀 수 없다.** 프로필 수정 화면에서도 읽기 전용으로 보여준다.
+  - `email`: 등록하지 않았으면 **빈 문자열**이다. null이 아니다.
+  - `profileImageUrl`: 도메인이 붙지 않은 경로이거나 소셜 사진 주소다. 사진을 올린 적이 없으면 소셜 사진 주소나 기본 이미지(`/images/default-profile.png`)다. 경로로 시작하면 서버 주소를 앞에 붙여 쓴다.
+  - `ageGroup`: 오늘(한국 시간) 기준 만 나이로 계산한 연령대다. `decade`는 십의 자리 × 10이다. 만 18·19세는 `10`(10대 후반)이다.
+
+    | `phase` | 뜻 | 만 나이의 일의 자리 |
+    | --- | --- | --- |
+    | `EARLY` | 초반 | 0~3 |
+    | `MID` | 중반 | 4~6 |
+    | `LATE` | 후반 | 7~9 |
+
+  - `nicknameChangeableAt`: 닉네임을 다시 바꿀 수 있는 시각(한국 시간). **null이면 지금 바꿀 수 있다**(바꾼 적이 없을 때 포함). 값이 있으면 프로필 수정 화면에서 닉네임 칸을 막고 그 날짜를 안내한다.
+  - `nicknameChangeableAt` 외의 필드는 null이 아니다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 404 | `USER_NOT_FOUND` | 토큰의 사용자가 없거나 탈퇴했다(남은 access token으로 호출) | 로그인 화면으로 |
+
+- 조회만 하므로 **같은 요청을 몇 번 다시 보내도 된다.**
+
+### 프로필 수정
+
+`PATCH /api/v1/users/me`. 닉네임·이메일·프로필 사진을 바꾼다.
+
+- **부르는 화면**: 프로필 수정 화면(MY-02)의 [저장].
+- **바꿀 필드만 보낸다.** 생략하거나 `null`인 필드는 그대로 둔다. 세 필드 모두 선택이다.
+
+  | 필드 | 규칙 | 틀렸을 때 `errors[].message` |
+  | --- | --- | --- |
+  | `nickname` | 2~10자의 한글·영문·숫자·`.`·`_`. 14일 변경 제한(아래) | 닉네임은 2~10자의 한글·영문·숫자·.·_만 쓸 수 있어요. |
+  | `email` | `local@domain.tld` 형식, 최대 100자. **`""`이면 이메일을 지운다.** 앞뒤 공백은 다듬지 않고 거부한다 | 이메일 형식이 올바르지 않아요. |
+  | `profileImageUrl` | 아래 [프로필 사진 업로드](#프로필-사진-업로드)가 돌려준 경로만. 바꾸면 이전에 올렸던 사진 파일은 지워진다 | (`errors` 없이 400 `INVALID_PROFILE_IMAGE_URL`) |
+
+- **이름·성별·생년월일은 바꿀 수 없다.** 요청에 넣어도 오류 없이 무시된다.
+- **현재 값과 정확히 같은 값은 바꾸지 않은 것으로 본다.** 변경 제한에도 세지 않는다. 닉네임은 **대소문자만 달라도 변경**이다(`Mint` → `mint`).
+- **사진을 지우는(기본 이미지로 되돌리는) 기능은 없다.** `profileImageUrl`에 `""`를 보내면 400 `INVALID_PROFILE_IMAGE_URL`이다.
+- **닉네임은 14일에 한 번만 바꿀 수 있다.** 마지막 변경 후 14일 안에 다른 닉네임을 보내면 409 `NICKNAME_CHANGE_RESTRICTED`다. 가입 후 첫 변경은 제한이 없다. 다시 바꿀 수 있는 시각은 응답과 내 프로필 조회의 `nicknameChangeableAt`으로 안다.
+  - 닉네임 사용 가능 여부 API는 이 제한을 보지 않는다. 그 API가 `true`여도 제한 기간이면 409 `NICKNAME_CHANGE_RESTRICTED`다.
+  - 바꾸기 전 닉네임은 14일 동안 다른 사람이 쓰지 못한다.
+- **검사 순서는 형식 → 닉네임 변경 제한 → 닉네임 중복이다.** 하나라도 실패하면 **아무것도 저장하지 않는다.** 닉네임은 맞고 이메일만 틀려도 닉네임은 바뀌지 않는다.
+- 성공하면 200이고, `data`는 바뀐 뒤의 내 프로필이다(내 프로필 조회와 같은 형태). 닉네임을 바꿨으면 `nicknameChangeableAt`에 약 14일 뒤 시각이 담긴다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 400 | `INVALID_REQUEST` | 닉네임·이메일 형식 위반(`errors`에 필드별 문구), 잘못된 JSON | 해당 입력칸 아래에 `message`를 보여준다 |
+  | 400 | `INVALID_PROFILE_IMAGE_URL` | 업로드 API가 준 경로가 아니다. 빈 문자열, 다른 주소, 형식을 바꾼 경로, 다른 회원이 쓰고 있는 경로 | FE 버그다. 업로드 응답의 값을 그대로 넣는다. 사진을 다시 올리게 한다 |
+  | 400 | `INVALID_NICKNAME`·`INVALID_EMAIL` | 서버의 안전망. 요청 검증을 통과한 값이면 나지 않는다 | `message`를 보여준다 |
+  | 409 | `NICKNAME_CHANGE_RESTRICTED` | 마지막 닉네임 변경 후 14일이 지나지 않았다 | `nicknameChangeableAt`으로 바꿀 수 있는 날짜를 안내한다 |
+  | 409 | `DUPLICATED_NICKNAME` | 다른 회원이 쓰고 있거나 보호 기간이 남은 닉네임(대소문자 무시) | 다른 닉네임을 입력받는다 |
+  | 404 | `USER_NOT_FOUND` | 토큰의 사용자가 없거나 탈퇴했다 | 로그인 화면으로 |
+
+  ```json
+  { "isSuccess": false, "code": "NICKNAME_CHANGE_RESTRICTED", "message": "닉네임은 14일에 한 번만 바꿀 수 있어요." }
+  ```
+- **같은 요청을 다시 보내도 된다.** 두 번째 요청은 바뀐 것이 없어 그대로 성공한다(닉네임 변경 제한에 걸리지 않는다).
+
+### 프로필 사진 업로드
+
+`POST /api/v1/users/me/profile-image`. 사진 파일을 저장하고 경로를 돌려준다.
+
+- **부르는 화면**: 프로필 수정 화면(MY-02)에서 사진을 고를 때.
+- **저장만 하고 프로필에는 반영하지 않는다.** 받은 경로를 [저장] 때 `PATCH /api/v1/users/me`의 `profileImageUrl`에 넣어야 반영된다. 저장하지 않고 나가면 그 사진은 쓰이지 않는다.
+- `multipart/form-data`, 파트 이름은 `image`. 파일 규칙(5MB 이하 JPG·PNG, 내용으로 판별)과 5MB 초과가 `413 INVALID_REQUEST`로 오는 점은 가입의 사진 업로드와 같다.
+- 응답은 `{ "profileImageUrl": "/images/profiles/<uuid>.png" }`. 도메인이 붙지 않은 경로다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 400 | `INVALID_PROFILE_IMAGE` | JPG·PNG가 아니거나 빈 파일 | 다른 사진을 고르게 한다 |
+  | 500 | `PROFILE_IMAGE_STORE_FAILED` | 서버가 사진을 저장하지 못했다 | 잠시 후 다시 시도하게 한다 |
+
+- 다시 보내면 새 파일로 저장되고 다른 경로가 온다. **마지막에 받은 경로만** 프로필 수정에 넣는다.
 
 ## 지역
 
@@ -471,7 +565,11 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 프로필 완성 (닉네임 칸을 벗어날 때) | `GET /api/v1/users/nickname-availability` (토큰 없이) | `available`이 false면 `reason`에 따라 형식 안내(`INVALID_FORMAT`) 또는 다른 닉네임 안내(`DUPLICATED`). 가입 요청도 같은 검사를 다시 하므로 409 처리는 그대로 둔다 |
 | 프로필 완성 (사진 변경) | `POST /api/v1/auth/signup/profile-image` | 받은 경로를 가입 요청에 넣는다 |
 | 프로필 완성 (제출) | `POST /api/v1/auth/signup` | 200이면 access token 저장 후 메인. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 400 `UNDERAGE`면 가입 불가 안내. 409면 닉네임 변경 안내 |
-| 프로필 수정 (닉네임 칸을 벗어날 때) | `GET /api/v1/users/nickname-availability` (access token 포함) | 위와 같다. 본인의 현재 닉네임은 `true`로 온다. 프로필 수정 API는 아직 없다 |
+| 내 정보 (진입) | `GET /api/v1/users/me` | 프로필·연령대를 그린다. 404 `USER_NOT_FOUND`면 로그인 화면 |
+| 프로필 수정 (진입) | `GET /api/v1/users/me` | 입력칸 기본값을 채운다. 이름·성별·생년월일은 읽기 전용. `nicknameChangeableAt`이 있으면 닉네임 칸을 막고 그 날짜를 안내 |
+| 프로필 수정 (닉네임 칸을 벗어날 때) | `GET /api/v1/users/nickname-availability` (access token 포함) | 위와 같다. 본인의 현재 닉네임은 `true`로 온다. 변경 제한(14일)은 이 API가 보지 않는다 |
+| 프로필 수정 (사진 변경) | `POST /api/v1/users/me/profile-image` | 받은 경로를 미리보기에 쓰고 저장 요청의 `profileImageUrl`에 넣는다. 이 호출만으로는 프로필이 바뀌지 않는다 |
+| 프로필 수정 (저장) | `PATCH /api/v1/users/me` | 200이면 응답으로 화면을 갱신. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 409 `DUPLICATED_NICKNAME`이면 다른 닉네임 안내, `NICKNAME_CHANGE_RESTRICTED`면 바꿀 수 있는 날짜 안내 |
 | 설정 · 로그아웃 | `DELETE /api/v1/auth/tokens` | 응답과 무관하게 메모리의 토큰을 버리고 로그인 화면 |
 | 설정 · 탈퇴 | `DELETE /api/v1/users/me` → `DELETE /api/v1/auth/tokens` | 되돌릴 수 없음을 한 번 확인받고 호출. 끝나면 로그인 화면 |
 | 일정 목록 (지역 필터) | `GET /api/v1/regions` | 받은 순서대로 필터를 그린다 |

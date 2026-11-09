@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -48,7 +50,7 @@ import com.shineunsigan.snsg.user.domain.repository.UserSocialAccountRepository;
 class UserCommandServiceTest {
 
     private static final String PROVIDER_USER_ID = "kakao-1";
-    private static final String UPLOADED_IMAGE = "/images/profiles/a.png";
+    private static final String UPLOADED_IMAGE = "/images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png";
 
     @Mock
     private UserRepository userRepository;
@@ -116,6 +118,47 @@ class UserCommandServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", UserErrorCode.DUPLICATED_NICKNAME);
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("가입에서 다른 회원이 쓰는 업로드 경로면 저장하지 않고 INVALID_PROFILE_IMAGE_URL")
+    void registerRejectsProfileImageUsedByOthers() {
+        when(userRepository.isNicknameTaken(eq("민트초코"), any(LocalDateTime.class))).thenReturn(false);
+        when(userRepository.isProfileImageUsedByOthers(UPLOADED_IMAGE, null)).thenReturn(true);
+
+        assertThatThrownBy(() -> userCommandService.register(registerCommand("민트초코", "")))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", UserErrorCode.INVALID_PROFILE_IMAGE_URL);
+        verify(userRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/images/profiles/..", "/images/profiles/", "/images/profiles/a.png"})
+    @DisplayName("가입에서 접두사는 맞지만 업로드 경로 형식이 아니면 저장하지 않고 INVALID_PROFILE_IMAGE_URL")
+    void registerRejectsMalformedUploadedPath(String profileImageUrl) {
+        when(userRepository.isNicknameTaken(eq("민트초코"), any(LocalDateTime.class))).thenReturn(false);
+
+        assertThatThrownBy(() -> userCommandService.register(registerCommandWithImage(profileImageUrl)))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", UserErrorCode.INVALID_PROFILE_IMAGE_URL);
+        verify(userRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"https://k.kakaocdn.net/dn/abc/img_640x640.jpg"})
+    @DisplayName("가입에서 소셜 사진 주소와 null은 기존대로 받고 사용 여부를 보지 않는다")
+    void registerAcceptsSocialImageAndNull(String profileImageUrl) {
+        User saved = registerAndCaptureSavedUser(registerCommandWithImage(profileImageUrl));
+
+        assertThat(saved.getProfile().getProfileImageUrl())
+                .isEqualTo(profileImageUrl == null ? Profile.DEFAULT_PROFILE_IMAGE_URL : profileImageUrl);
+        verify(userRepository, never()).isProfileImageUsedByOthers(any(), any());
+    }
+
+    private RegisterUserCommand registerCommandWithImage(String profileImageUrl) {
+        return new RegisterUserCommand(SocialProvider.KAKAO, PROVIDER_USER_ID, "김민트", "", "민트초코",
+                Gender.FEMALE, LocalDate.of(1996, 4, 12), profileImageUrl);
     }
 
     @Test

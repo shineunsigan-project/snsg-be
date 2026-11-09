@@ -200,6 +200,57 @@ class UserRepositoryImplTest {
         assertThat(user.getCreatedAt()).isNotNull();
     }
 
+    @Test
+    @DisplayName("탈퇴하지 않은 다른 회원이 쓰는 사진 경로면 사용 중이다")
+    void profileImageUsedByOthers() {
+        String path = uploadedPath();
+        userRepository.save(createUser("민트초코", path));
+        User me = userRepository.save(createUser("레몬티"));
+
+        assertThat(userRepository.isProfileImageUsedByOthers(path, me.getId())).isTrue();
+    }
+
+    @Test
+    @DisplayName("그 사진 경로를 쓰는 회원이 본인뿐이면 사용 중이 아니다")
+    void profileImageUsedOnlyByMe() {
+        String path = uploadedPath();
+        User me = userRepository.save(createUser("민트초코", path));
+
+        assertThat(userRepository.isProfileImageUsedByOthers(path, me.getId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("그 사진 경로를 쓰던 회원이 탈퇴(삭제)했으면 사용 중이 아니다")
+    void profileImageOfDeletedUserIsNotUsed() {
+        String path = uploadedPath();
+        User other = userRepository.save(createUser("민트초코", path));
+        other.delete();
+        entityManager.flush();
+        User me = userRepository.save(createUser("레몬티"));
+
+        assertThat(userRepository.isProfileImageUsedByOthers(path, me.getId())).isFalse();
+        assertThat(userRepository.isProfileImageUsedByOthers(path, null)).isFalse();
+    }
+
+    @Test
+    @DisplayName("가입(본인 없음)에서는 누군가 쓰면 사용 중, 아무도 안 쓰면 사용 중이 아니다")
+    void profileImageUsedOnSignUp() {
+        String used = uploadedPath();
+        userRepository.save(createUser("민트초코", used));
+
+        assertThat(userRepository.isProfileImageUsedByOthers(used, null)).isTrue();
+        assertThat(userRepository.isProfileImageUsedByOthers(uploadedPath(), null)).isFalse();
+    }
+
+    private String uploadedPath() {
+        return "/images/profiles/" + UUID.randomUUID() + ".png";
+    }
+
+    private User createUser(String nickname, String profileImageUrl) {
+        return User.create("김민트", "",
+                Profile.of(nickname, Gender.FEMALE, LocalDate.of(1996, 4, 12), profileImageUrl), LocalDate.now());
+    }
+
     /** 이력 엔티티가 아직 없어(T-03에서 만든다) native INSERT로 넣는다. */
     private void insertHistory(User user, String nickname, String reason, LocalDateTime reservedUntil,
             boolean deleted) {

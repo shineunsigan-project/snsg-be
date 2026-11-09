@@ -71,8 +71,38 @@ public class User extends BaseAuditEntity {
         return new User(name, resolvedEmail, profile);
     }
 
-    public void updateProfile(Profile profile) {
-        this.profile = profile;
+    /**
+     * 프로필 수정에서 바꿀 수 있는 값(닉네임·이메일·사진)만 바꾼다. 이름·성별·생년월일은 바꾸지 않는다.
+     * {@code null}인 값은 그대로 둔다. 이메일 {@code ''}는 삭제다.
+     * 모든 값을 먼저 검사하고 나서 바꾼다. 하나라도 틀리면 아무 값도 바뀌지 않는다.
+     */
+    public void changeProfile(String nickname, String email, String profileImageUrl) {
+        validateProfileChange(nickname, email, profileImageUrl);
+        if (email != null) {
+            this.email = email;
+        }
+        this.profile = Profile.of(
+                nickname == null ? profile.getNickname() : nickname,
+                profile.getGender(),
+                profile.getBirthDate(),
+                profileImageUrl == null ? profile.getProfileImageUrl() : profileImageUrl);
+    }
+
+    /**
+     * 프로필 수정 값의 형식을 본다. {@code null}은 바꾸지 않는 값이라 보지 않는다.
+     * 서비스가 변경 제한·중복 판정보다 먼저 부를 수 있도록 따로 둔다. {@link #changeProfile}도 다시 부른다.
+     * 사진은 업로드 API가 준 경로만 받는다. 빈 문자열과 다른 주소는 거부한다.
+     */
+    public static void validateProfileChange(String nickname, String email, String profileImageUrl) {
+        if (nickname != null && !Profile.isValidNickname(nickname)) {
+            throw new BusinessException(UserErrorCode.INVALID_NICKNAME);
+        }
+        if (email != null) {
+            validateEmail(email);
+        }
+        if (profileImageUrl != null && !ProfileImage.isUploadedPath(profileImageUrl)) {
+            throw new BusinessException(UserErrorCode.INVALID_PROFILE_IMAGE_URL);
+        }
     }
 
     /**

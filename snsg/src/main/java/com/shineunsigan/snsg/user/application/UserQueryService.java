@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.user.application;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
@@ -7,12 +8,18 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.shineunsigan.snsg.common.exception.BusinessException;
+import com.shineunsigan.snsg.user.application.dto.result.MyProfileResult;
 import com.shineunsigan.snsg.user.application.dto.result.NicknameAvailabilityResult;
 import com.shineunsigan.snsg.user.application.port.in.FindUserUseCase;
 import com.shineunsigan.snsg.user.domain.constants.NicknameUnavailableReason;
 import com.shineunsigan.snsg.user.domain.constants.SocialProvider;
+import com.shineunsigan.snsg.user.domain.exception.UserErrorCode;
 import com.shineunsigan.snsg.user.domain.model.Profile;
+import com.shineunsigan.snsg.user.domain.model.User;
+import com.shineunsigan.snsg.user.domain.model.UserNicknameHistory;
 import com.shineunsigan.snsg.user.domain.model.UserSocialAccount;
+import com.shineunsigan.snsg.user.domain.repository.UserNicknameHistoryRepository;
 import com.shineunsigan.snsg.user.domain.repository.UserRepository;
 import com.shineunsigan.snsg.user.domain.repository.UserSocialAccountRepository;
 
@@ -25,6 +32,8 @@ public class UserQueryService implements FindUserUseCase {
 
     private final UserRepository userRepository;
     private final UserSocialAccountRepository userSocialAccountRepository;
+    private final UserNicknameHistoryRepository userNicknameHistoryRepository;
+    private final NicknameProperties nicknameProperties;
 
     @Override
     public Optional<UUID> findIdBySocialAccount(SocialProvider provider, String providerUserId) {
@@ -36,6 +45,20 @@ public class UserQueryService implements FindUserUseCase {
     @Override
     public boolean exists(UUID userId) {
         return userRepository.findById(userId).isPresent();
+    }
+
+    /**
+     * 내 프로필. 연령대는 오늘 기준 만 나이로 계산한다.
+     * 닉네임을 다시 바꿀 수 있는 시각은 지금 바꿀 수 있으면(바꾼 적이 없을 때 포함) {@code null}이다.
+     */
+    public MyProfileResult getMyProfile(UUID userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+        LocalDateTime changeableAt = UserNicknameHistory.nicknameChangeableAt(
+                        userNicknameHistoryRepository.findLastChangedAt(userId),
+                        nicknameProperties.protectAfterChange(), LocalDateTime.now())
+                .orElse(null);
+        return MyProfileResult.of(user, changeableAt, LocalDate.now());
     }
 
     /**

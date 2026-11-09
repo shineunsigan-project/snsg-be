@@ -14,9 +14,13 @@ interface UserJpaRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByIdAndIsDeletedFalse(UUID id);
 
+    boolean existsByProfileProfileImageUrlAndIsDeletedFalse(String profileImageUrl);
+
+    boolean existsByProfileProfileImageUrlAndIsDeletedFalseAndIdNot(String profileImageUrl, UUID id);
+
     /**
      * 유니크 인덱스({@code LOWER(nickname)})와 같은 기준으로 비교한다.
-     * 닉네임 이력은 엔티티로 매핑하지 않았으므로 native 쿼리로 함께 본다.
+     * 사용자와 닉네임 이력 두 테이블을 {@code LOWER} 기준으로 한 번에 보는 쿼리라 native 쿼리로 둔다.
      */
     @Query(value = """
             SELECT EXISTS (SELECT 1 FROM users

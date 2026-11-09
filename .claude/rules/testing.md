@@ -51,12 +51,14 @@ paths:
 - 테스트는 기본 프로파일(`local`)로 돌고, 설정값은 `snsg/.env`에서 읽는다(`application-local.yaml`의 `spring.config.import`). 새 환경변수를 추가하면 `.env`에도 넣어야 컨텍스트가 뜬다.
 - 결과가 경고 로그로만 드러나는 분기는 `OutputCaptureExtension`(`org.springframework.boot.test.system`)으로 로그를 받아 단정한다. Mockito와 함께 쓸 때는 `@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})`. 예: `PlaceCommandServiceTest`.
 - 외부 API adapter는 슬라이스 없이 `MockRestServiceServer.bindTo(RestClient.Builder)`로 테스트한다.
+- 파일 저장소 adapter는 Spring 없이 JUnit `@TempDir` 아래 디렉터리를 설정 record로 넘겨 실제 파일로 테스트한다. 예: `LocalFileStorageAdapterTest`(형식 밖 경로로 디렉터리 안팎의 파일이 지워지지 않는지).
 - Redis adapter는 `@SpringBootTest`로 `.env`가 가리키는 로컬 Redis(Docker 컨테이너 `snsg-redis`)에 붙어 실제로 테스트한다. Testcontainers 의존성은 저장소에 없다. 예: `RedisRefreshTokenStoreAdapterTest`, `RedisSignUpSessionAdapterTest`.
   - Redis가 꺼져 있으면 건너뛰지 않고 실패한다. 실패하면 코드보다 컨테이너가 떠 있는지 먼저 본다.
   - 모든 워크트리가 Redis를 공유한다(`.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의"). 테스트는 고정된 키(고정 UUID 사용자·세션)를 쓰고, 만든 키를 `@AfterEach`에서 이름으로 지운다. 패턴으로 찾아 지우지 않는다. 다른 작업의 키까지 지운다.
 - `@WebMvcTest`에서 Spring Security를 쓰려면 `spring-boot-starter-security-test`가 있어야 한다. 이 모듈이 `@AutoConfigureMockMvc`에 보안 자동 설정을 넣는다. 없으면 `HttpSecurity` 빈도 `@AuthenticationPrincipal` 리졸버도 없다.
 - 인가 규칙과 401 형식은 auth에서 `@Import`로 `SecurityConfig`와 인증 진입점(entry point)을 넣고, 토큰 검증 adapter를 `@MockitoBean`으로 대체해 검증한다.
-  - 예: `auth/infrastructure/security/SecurityConfigTest`. `@WebMvcTest(controllers = 대상 컨트롤러)`에 `SecurityConfig`·`JwtAuthenticationFilter`·`JwtAuthenticationEntryPoint`를 `@Import`하고 `TokenPort`와 컨트롤러가 의존하는 서비스를 `@MockitoBean`으로 둔다. 테스트 코드는 ArchUnit 검사 대상이 아니라 다른 도메인 컨트롤러를 대상으로 삼아도 된다.
+  - 예: `auth/infrastructure/security/SecurityConfigTest`. `@WebMvcTest(controllers = 대상 컨트롤러)`에 `SecurityConfig`·`JwtAuthenticationFilter`·`JwtAuthenticationEntryPoint`를 `@Import`하고 `TokenPort`와 컨트롤러가 의존하는 서비스를 `@MockitoBean`으로 둔다. 테스트 코드는 ArchUnit 검사 대상이 아니라 다른 도메인 컨트롤러를 대상으로 삼아도 된다. 지금은 `UserController`를 대상으로 공개 경로(닉네임 사용 가능 여부)와 인증 필요 경로(`/api/v1/users/me`의 조회·수정·사진 업로드)를 함께 본다.
+  - 대상 컨트롤러에 의존이 늘면 이 테스트와 그 컨트롤러의 `@WebMvcTest`에 `@MockitoBean`을 함께 더해야 컨텍스트가 뜬다.
   - `SecurityConfig`는 `CorsConfigurationSource` 빈을 주입받는데, 실제 빈은 `common/config/CorsConfig`가 설정값으로 만든다. 슬라이스에는 올라오지 않으므로 빈 `UrlBasedCorsConfigurationSource`를 nested `@TestConfiguration`으로 준다. CORS 규칙은 이 테스트의 대상이 아니다.
 - 다른 도메인의 컨트롤러 테스트는 auth를 import하지 않는다. `@AutoConfigureMockMvc(addFilters = false)`로 필터를 끄고 `SecurityContextHolder`에 `UsernamePasswordAuthenticationToken(userId, null, List.of())`을 직접 넣는다.
 - `OpenApiSpecTest`는 `/v3/api-docs.yaml`로 생성한 스펙과 커밋된 `docs/openapi.yaml`을 비교한다. 줄바꿈은 정규화해 비교한다(autocrlf). build.gradle의 test task inputs에 스펙 파일과 `OPENAPI_UPDATE`를 넣어, 파일만 바뀌어도 테스트가 건너뛰어지지 않게 한다. 스펙 파일은 `inputs.files`로 선언한다. Gradle 9.7에서 `inputs.file(...).optional()`은 파일이 없으면 테스트 태스크를 시작하지 않아, 스펙을 처음 만들 수 없다.

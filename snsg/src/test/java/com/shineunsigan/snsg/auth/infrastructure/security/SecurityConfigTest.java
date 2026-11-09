@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -17,6 +19,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -25,7 +29,9 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import com.shineunsigan.snsg.auth.application.port.out.TokenPort;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
+import com.shineunsigan.snsg.user.application.UploadProfileImageFacade;
 import com.shineunsigan.snsg.user.application.UserCommandService;
+import com.shineunsigan.snsg.user.application.UserProfileCommandService;
 import com.shineunsigan.snsg.user.application.UserQueryService;
 import com.shineunsigan.snsg.user.application.dto.result.NicknameAvailabilityResult;
 import com.shineunsigan.snsg.user.presentation.UserController;
@@ -40,6 +46,7 @@ import com.shineunsigan.snsg.user.presentation.UserController;
 class SecurityConfigTest {
 
     private static final String NICKNAME_AVAILABILITY = "/api/v1/users/nickname-availability";
+    private static final String ME = "/api/v1/users/me";
 
     /** CORS 규칙은 이 테스트의 대상이 아니다. 설정값(CorsProperties) 없이 SecurityConfig를 올리기 위해 빈 설정을 준다. */
     @TestConfiguration
@@ -62,6 +69,12 @@ class SecurityConfigTest {
 
     @MockitoBean
     private UserQueryService userQueryService;
+
+    @MockitoBean
+    private UserProfileCommandService userProfileCommandService;
+
+    @MockitoBean
+    private UploadProfileImageFacade uploadProfileImageFacade;
 
     @Test
     @DisplayName("닉네임 사용 가능 여부는 토큰 없이 부를 수 있다")
@@ -91,6 +104,31 @@ class SecurityConfigTest {
     @DisplayName("같은 경로라도 GET이 아니면 토큰 없이 부를 때 401")
     void otherMethodOnNicknameAvailabilityRequiresToken() throws Exception {
         mockMvc.perform(post(NICKNAME_AVAILABILITY).param("nickname", "민트초코"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    @DisplayName("내 프로필 조회는 토큰 없이 부르면 401")
+    void getMyProfileRequiresToken() throws Exception {
+        mockMvc.perform(get(ME))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    @DisplayName("내 프로필 수정은 토큰 없이 부르면 401")
+    void updateMyProfileRequiresToken() throws Exception {
+        mockMvc.perform(patch(ME).contentType(MediaType.APPLICATION_JSON).content("{\"nickname\": \"민트라떼\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    @DisplayName("프로필 사진 업로드는 토큰 없이 부르면 401")
+    void uploadProfileImageRequiresToken() throws Exception {
+        mockMvc.perform(multipart(ME + "/profile-image")
+                        .file(new MockMultipartFile("image", "me.png", MediaType.IMAGE_PNG_VALUE, new byte[] {1})))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }

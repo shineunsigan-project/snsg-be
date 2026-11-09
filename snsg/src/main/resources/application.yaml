@@ -54,6 +54,9 @@ terms:
   privacy-policy-version: 2026-10-01
   service-terms-version: 2026-10-01
 
+nickname:
+  protect-after-change: 14d
+
 jwt:
   secret: ${JWT_SECRET}
 

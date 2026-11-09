@@ -1,6 +1,8 @@
 package com.shineunsigan.snsg.user.domain.model;
 
 import java.util.Arrays;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.user.domain.exception.UserErrorCode;
@@ -16,6 +18,17 @@ public enum ProfileImage {
 
     /** 5MB. 프로필 사진에 그 이상은 필요 없다. */
     public static final int MAX_BYTES = 5 * 1024 * 1024;
+
+    /** 업로드한 사진 경로의 앞부분. 이 값으로 시작하면 우리가 저장한 사진으로 본다. */
+    public static final String UPLOADED_PATH_PREFIX = "/images/profiles/";
+
+    /**
+     * 업로드 API가 돌려주는 경로의 형태. 접두사 + 소문자 UUID + 허용 확장자뿐이다.
+     * 하위 경로·{@code ..}·빈 파일명이 들어갈 틈을 두지 않는다. 삭제할 때 이 경로로 파일을 찾기 때문이다.
+     */
+    private static final Pattern UPLOADED_PATH = Pattern.compile(Pattern.quote(UPLOADED_PATH_PREFIX)
+            + "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.("
+            + Arrays.stream(values()).map(ProfileImage::extension).collect(Collectors.joining("|")) + ")");
 
     private final String extension;
     private final byte[] signature;
@@ -37,6 +50,16 @@ public enum ProfileImage {
                 .filter(image -> image.matches(content))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(UserErrorCode.INVALID_PROFILE_IMAGE));
+    }
+
+    /** 우리 접두사로 시작하는가. 형식이 맞는지는 {@link #isUploadedPath}가 본다. */
+    public static boolean hasUploadedPathPrefix(String path) {
+        return path != null && path.startsWith(UPLOADED_PATH_PREFIX);
+    }
+
+    /** 업로드 API가 만든 형태 그대로인가. 프로필 수정·가입·파일 삭제가 이 규칙 하나로 판정한다. */
+    public static boolean isUploadedPath(String path) {
+        return path != null && UPLOADED_PATH.matcher(path).matches();
     }
 
     private boolean matches(byte[] content) {

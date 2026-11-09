@@ -49,6 +49,14 @@ public class UserRepositoryImpl implements UserRepository {
         return userJpaRepository.isNicknameTaken(nickname, now);
     }
 
+    @Override
+    public boolean isProfileImageUsedByOthers(String profileImageUrl, UUID userId) {
+        if (userId == null) {
+            return userJpaRepository.existsByProfileProfileImageUrlAndIsDeletedFalse(profileImageUrl);
+        }
+        return userJpaRepository.existsByProfileProfileImageUrlAndIsDeletedFalseAndIdNot(profileImageUrl, userId);
+    }
+
     private boolean violatesNicknameIndex(DataIntegrityViolationException exception) {
         return exception.getCause() instanceof ConstraintViolationException violation
                 && NICKNAME_INDEX.equals(violation.getConstraintName());

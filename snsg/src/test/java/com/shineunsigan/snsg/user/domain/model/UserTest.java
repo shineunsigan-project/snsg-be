@@ -141,14 +141,75 @@ class UserTest {
     }
 
     @Test
-    @DisplayName("프로필을 수정하면 새 값으로 바뀐다")
-    void updateProfile() {
+    @DisplayName("프로필을 수정하면 닉네임·이메일·사진만 바뀌고 이름·성별·생년월일은 그대로다")
+    void changeProfile() {
         User user = createUser();
 
-        user.updateProfile(Profile.of("민트라떼", Gender.MALE, LocalDate.of(1990, 1, 1), null));
+        user.changeProfile("민트라떼", "latte@example.com", "/images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png");
 
         assertThat(user.getProfile().getNickname()).isEqualTo("민트라떼");
-        assertThat(user.getProfile().getGender()).isEqualTo(Gender.MALE);
+        assertThat(user.getEmail()).isEqualTo("latte@example.com");
+        assertThat(user.getProfile().getProfileImageUrl()).isEqualTo("/images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png");
+        assertThat(user.getName()).isEqualTo("김민트");
+        assertThat(user.getProfile().getGender()).isEqualTo(Gender.FEMALE);
+        assertThat(user.getProfile().getBirthDate()).isEqualTo(BIRTH_DATE);
+    }
+
+    @Test
+    @DisplayName("프로필 수정에서 null인 값은 바꾸지 않는다")
+    void changeProfileKeepsNullFields() {
+        User user = createUser();
+
+        user.changeProfile(null, null, null);
+
+        assertThat(user.getProfile().getNickname()).isEqualTo("민트초코");
+        assertThat(user.getEmail()).isEqualTo("mint@example.com");
+        assertThat(user.getProfile().getProfileImageUrl()).isEqualTo("https://kakao.test/me.png");
+    }
+
+    @Test
+    @DisplayName("프로필 수정에서 이메일을 빈 문자열로 보내면 지운다")
+    void changeProfileClearsEmail() {
+        User user = createUser();
+
+        user.changeProfile(null, "", null);
+
+        assertThat(user.getEmail()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("유효한 닉네임과 틀린 이메일을 함께 보내면 INVALID_EMAIL이고 닉네임도 바뀌지 않는다")
+    void changeProfileIsAtomic() {
+        User user = createUser();
+
+        assertErrorCode(() -> user.changeProfile("민트라떼", "mint@", null), UserErrorCode.INVALID_EMAIL);
+
+        assertThat(user.getProfile().getNickname()).isEqualTo("민트초코");
+        assertThat(user.getEmail()).isEqualTo("mint@example.com");
+    }
+
+    @Test
+    @DisplayName("프로필 수정 닉네임이 형식에 맞지 않으면 INVALID_NICKNAME")
+    void changeProfileInvalidNickname() {
+        User user = createUser();
+
+        assertErrorCode(() -> user.changeProfile("민트 초코", null, null), UserErrorCode.INVALID_NICKNAME);
+
+        assertThat(user.getProfile().getNickname()).isEqualTo("민트초코");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "https://evil.test/me.png", "/images/default-profile.png", "images/profiles/a.png",
+            "/images/profiles/..", "/images/profiles/a.png"})
+    @DisplayName("프로필 사진이 업로드 경로가 아니면 INVALID_PROFILE_IMAGE_URL이고 아무것도 바뀌지 않는다")
+    void changeProfileInvalidImageUrl(String profileImageUrl) {
+        User user = createUser();
+
+        assertErrorCode(() -> user.changeProfile("민트라떼", null, profileImageUrl),
+                UserErrorCode.INVALID_PROFILE_IMAGE_URL);
+
+        assertThat(user.getProfile().getNickname()).isEqualTo("민트초코");
+        assertThat(user.getProfile().getProfileImageUrl()).isEqualTo("https://kakao.test/me.png");
     }
 
     private User createUser() {
