@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.user.application.port.out.FileStoragePort;
 import com.shineunsigan.snsg.user.domain.exception.UserErrorCode;
+import com.shineunsigan.snsg.user.domain.model.ProfileImage;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -44,20 +45,22 @@ public class LocalFileStorageAdapter implements FileStoragePort {
     }
 
     /**
-     * 탈퇴한 사용자의 사진을 지운다. 얼굴 사진은 개인정보라 참조만 끊고 남겨두지 않는다.
+     * 탈퇴한 사용자의 사진과 다른 사진으로 바꾼 이전 사진을 지운다. 얼굴 사진은 개인정보라 참조만 끊고 남겨두지 않는다.
      * <p>
-     * 파일명만 떼어내 우리 디렉터리에서 찾는다. 경로를 그대로 쓰면 ../ 같은 값으로 다른 파일을 지울 수 있다.
+     * 업로드 API가 만든 형태({@link ProfileImage#isUploadedPath})가 아니면 아무것도 지우지 않는다.
+     * {@code ..}·빈 파일명·하위 경로로 다른 파일을 지울 수 없게 하기 위해서다.
+     * 그 위에 파일명만 떼어내 우리 디렉터리에서 찾는다.
      */
     @Override
     public void delete(String path) {
-        if (path == null || !path.startsWith(URL_PREFIX)) {
+        if (!ProfileImage.isUploadedPath(path)) {
             return;
         }
         String fileName = Path.of(path).getFileName().toString();
         try {
             Files.deleteIfExists(directory.resolve(fileName));
         } catch (IOException exception) {
-            // 지우지 못해도 탈퇴는 이미 끝났다. 남은 파일은 DB에서 참조되지 않는다.
+            // 지우지 못해도 탈퇴·사진 교체는 이미 끝났다. 남은 파일은 DB에서 참조되지 않는다.
             log.warn("프로필 사진을 지우지 못했다. path={}", path, exception);
         }
     }

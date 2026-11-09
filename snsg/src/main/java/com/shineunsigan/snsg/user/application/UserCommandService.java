@@ -19,6 +19,7 @@ import com.shineunsigan.snsg.user.domain.constants.TermsType;
 import com.shineunsigan.snsg.user.domain.constants.WithdrawReason;
 import com.shineunsigan.snsg.user.domain.exception.UserErrorCode;
 import com.shineunsigan.snsg.user.domain.model.Profile;
+import com.shineunsigan.snsg.user.domain.model.ProfileImage;
 import com.shineunsigan.snsg.user.domain.model.TermsAgreement;
 import com.shineunsigan.snsg.user.domain.model.User;
 import com.shineunsigan.snsg.user.domain.model.UserSocialAccount;
@@ -47,6 +48,7 @@ public class UserCommandService implements RegisterUserUseCase, WithdrawUserUseC
     @Transactional
     public UUID register(RegisterUserCommand command) {
         validateNicknameNotTaken(command.nickname());
+        validateProfileImageNotUsed(command.profileImageUrl());
         User user = saveUser(command);
         saveSocialAccount(user, command);
         agreeToTerms(user);
@@ -56,6 +58,17 @@ public class UserCommandService implements RegisterUserUseCase, WithdrawUserUseC
     private void validateNicknameNotTaken(String nickname) {
         if (userRepository.isNicknameTaken(nickname, LocalDateTime.now())) {
             throw new BusinessException(UserErrorCode.DUPLICATED_NICKNAME);
+        }
+    }
+
+    /**
+     * 다른 회원이 쓰는 우리 업로드 경로는 받지 않는다. 소셜 사진 주소와 빈 값은 보지 않는다.
+     * 접두사만 맞고 형식이 틀린 경로는 {@link Profile#of}가 거부한다.
+     */
+    private void validateProfileImageNotUsed(String profileImageUrl) {
+        if (ProfileImage.isUploadedPath(profileImageUrl)
+                && userRepository.isProfileImageUsedByOthers(profileImageUrl, null)) {
+            throw new BusinessException(UserErrorCode.INVALID_PROFILE_IMAGE_URL);
         }
     }
 

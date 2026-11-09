@@ -25,4 +25,12 @@ public interface UserRepository {
      * {@code now}보다 뒤인 행이 있으면 참이다. 탈퇴한 회원의 현재 닉네임은 보지 않는다.
      */
     boolean isNicknameTaken(String nickname, LocalDateTime now);
+
+    /**
+     * 탈퇴하지 않은 다른 회원이 이 사진 경로를 쓰고 있는가. 우리 업로드 경로는 한 회원만 참조해야 한다.
+     * 남의 경로를 자기 사진으로 넣으면, 사진을 바꾸거나 탈퇴할 때 남의 파일이 지워지기 때문이다.
+     *
+     * @param userId 본인. 본인이 쓰는 것은 세지 않는다. 가입처럼 본인이 아직 없으면 {@code null}
+     */
+    boolean isProfileImageUsedByOthers(String profileImageUrl, UUID userId);
 }

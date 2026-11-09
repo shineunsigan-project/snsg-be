@@ -55,11 +55,19 @@ public class Profile {
 
     /**
      * 소셜에서 받은 사진이 없으면 기본 이미지로 채운다. 컬럼을 NOT NULL로 유지하기 위해서다.
+     * 소셜 사진 주소는 그대로 받는다. 우리 업로드 접두사로 시작하는 값은 업로드 API가 만든 형태여야 한다.
      */
     public static Profile of(String nickname, Gender gender, LocalDate birthDate, String profileImageUrl) {
         validateNickname(nickname);
         validateBirthDate(birthDate);
+        validateUploadedImageUrl(profileImageUrl);
         return new Profile(nickname, gender, birthDate, resolveProfileImageUrl(profileImageUrl));
+    }
+
+    private static void validateUploadedImageUrl(String profileImageUrl) {
+        if (ProfileImage.hasUploadedPathPrefix(profileImageUrl) && !ProfileImage.isUploadedPath(profileImageUrl)) {
+            throw new BusinessException(UserErrorCode.INVALID_PROFILE_IMAGE_URL);
+        }
     }
 
     /**
