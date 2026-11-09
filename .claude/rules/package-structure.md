@@ -68,6 +68,7 @@
 
 - inbound `port/in/XxxUseCase`: 타 도메인이 이 도메인을 호출하는 입구만 둔다 (코드 참조, 타 도메인 이벤트 수신). `port/in` 목록이 곧 도메인 간 계약이다.
 - **UseCase는 행위별로 만들고, 타 도메인이 호출해야 할 때만 만든다.** 자기 도메인 안에서만 쓰는 흐름에는 만들지 않는다. 여러 서비스 조합은 facade가 맡는다.
+  - 기능 명세가 도메인 간 계약으로 정해 둔 UseCase는 호출하는 쪽 작업보다 먼저 만들어도 된다. 예: place `FindRegionUseCase`·`FindPlaceUseCase`, user `FindUserProfilesUseCase`.
 - **`UseCase` 접미사는 `port/in` 인터페이스에만 쓴다.** 다른 도메인(코드 참조·이벤트 수신)이 부르지 않는 행위별 클래스는 `XxxFacade`다. 이름만 보고 도메인 간 계약인지 알 수 있게 한다.
 - **구현은 `XxxCommandService`·`XxxQueryService`가 UseCase를 구현한다.** 흐름이 facade 기준에 해당하면 facade가 구현한다(`UploadProfileImageFacade`, `RevokeAuthFacade`).
 - 사용자 요청은 UseCase가 아니다. Controller는 같은 도메인의 Service나 facade를 직접 호출한다(`.claude/rules/api.md` Controller 절).
@@ -165,6 +166,7 @@
 
 - **hard delete 하지 않는다.** 삭제는 `BaseEntity.delete()`로 `isDeleted`만 바꾼다.
 - 조회는 삭제되지 않은 행만 본다. 전역 필터로 숨기지 않고 repository 쿼리에 조건을 명시한다. 관리자·통계 조회에서 빠져나오기 쉽고, 조인된 연관에서 조용히 누락되지 않는다.
+  - 삭제된 행까지 읽어야 하는 메서드는 이름에 드러내고(`IncludingDeleted`), javadoc에 쓸 곳을 적어 묶는다. 활성 여부 판정에는 쓰지 않는다. 삭제된 행이 통과한다. 예: `UserRepository.findAllByIdIncludingDeleted`(탈퇴자를 가려 보여주는 `FindUserProfilesUseCase` 전용).
 - 개수 계산(정원 등)도 같은 조건으로 센다.
 - 유니크 제약은 삭제되지 않은 행에만 건다. PostgreSQL 부분 유니크 인덱스를 쓴다.
   ```sql
