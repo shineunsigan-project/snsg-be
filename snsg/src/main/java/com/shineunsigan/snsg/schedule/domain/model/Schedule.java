@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.shineunsigan.snsg.common.entity.BaseAuditEntity;
@@ -148,8 +149,75 @@ public class Schedule extends BaseAuditEntity {
         return DisplayStatus.RECRUITING;
     }
 
+    /**
+     * 참여할 수 있는지 본다. 개설자 → 이미 참여 → 모집 중 아님 순서다.
+     * 이미 참여한 사용자는 그 참여로 정원이 차 마감됐어도 {@code ALREADY_JOINED}를 받는다(두 번 눌렸을 때).
+     * 모집 중은 화면의 [참여하기]와 같은 판정이다. 저장된 모집 상태가 RECRUITING이어도 시작 시각이 되면 마감이다.
+     */
+    public void validateJoinable(UUID userId, LocalDateTime now, Duration completionAfter) {
+        if (hostUserId.equals(userId)) {
+            throw new BusinessException(ScheduleErrorCode.HOST_CANNOT_JOIN);
+        }
+        if (findConfirmedParticipant(userId).isPresent()) {
+            throw new BusinessException(ScheduleErrorCode.ALREADY_JOINED);
+        }
+        if (displayStatus(now, completionAfter) != DisplayStatus.RECRUITING) {
+            throw new BusinessException(ScheduleErrorCode.RECRUIT_CLOSED);
+        }
+    }
+
+    /**
+     * 멤버로 참여한다. 새 확정 행을 더하고, 확정 인원이 정원에 닿으면 모집을 마감한다.
+     * 취소 후 다시 참여해도 이전 행을 되살리지 않고 새 행을 만든다.
+     */
+    public void join(UUID userId, LocalDateTime now, Duration completionAfter) {
+        validateJoinable(userId, now, completionAfter);
+        participants.add(ScheduleParticipant.member(this, userId));
+        confirmedCount++;
+        if (confirmedCount == capacity) {
+            recruitmentStatus = RecruitmentStatus.CLOSED;
+        }
+    }
+
+    /**
+     * 참여를 취소한다. 개설자 → 확정 참여 아님 → 취소할 수 없는 일정 순서로 거부한다.
+     * 완료 전(시작 후 포함)까지 취소할 수 있다. 자리가 나도 모집을 다시 여는 것은 시작 전뿐이다.
+     */
+    public void leave(UUID userId, LocalDateTime now, Duration completionAfter) {
+        if (hostUserId.equals(userId)) {
+            throw new BusinessException(ScheduleErrorCode.HOST_CANNOT_LEAVE);
+        }
+        ScheduleParticipant participant = findConfirmedParticipant(userId)
+                .orElseThrow(() -> new BusinessException(ScheduleErrorCode.NOT_PARTICIPANT));
+        validateCancelable(now, completionAfter);
+        participant.cancel();
+        confirmedCount--;
+        reopenIfBeforeStart(now);
+    }
+
     public List<ScheduleParticipant> getParticipants() {
         return Collections.unmodifiableList(participants);
+    }
+
+    private Optional<ScheduleParticipant> findConfirmedParticipant(UUID userId) {
+        return participants.stream()
+                .filter(participant -> participant.isConfirmedBy(userId))
+                .findFirst();
+    }
+
+    /** 화면의 [참여 취소]와 같은 판정이다. 취소·완료(시각 포함)된 일정은 취소할 수 없다. */
+    private void validateCancelable(LocalDateTime now, Duration completionAfter) {
+        DisplayStatus displayStatus = displayStatus(now, completionAfter);
+        if (displayStatus != DisplayStatus.RECRUITING && displayStatus != DisplayStatus.RECRUITMENT_CLOSED) {
+            throw new BusinessException(ScheduleErrorCode.PARTICIPATION_NOT_CANCELABLE);
+        }
+    }
+
+    /** 시작 후의 마감은 시각 때문이라 되돌리지 않는다. 저장된 모집 상태는 그대로 둔다. */
+    private void reopenIfBeforeStart(LocalDateTime now) {
+        if (now.isBefore(startAt) && recruitmentStatus == RecruitmentStatus.CLOSED) {
+            recruitmentStatus = RecruitmentStatus.RECRUITING;
+        }
     }
 
     private static String validateTitle(String title) {
