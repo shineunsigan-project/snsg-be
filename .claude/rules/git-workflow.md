@@ -6,9 +6,9 @@
 
 **파일을 한 줄이라도 고치기 전에 이슈와 워크트리를 먼저 만든다.** 고치고 나서 브랜치를 만들어 옮기지 않는다. 옮기는 과정에서 변경이 섞이거나 빠지고, 그 사이 다른 작업을 시작할 수 없다.
 
-1. 작업 시작 전 Linear 이슈를 만든다. 프로젝트·라벨은 `docs/linear-convention.md`를 따른다.
+1. 작업 시작 전 Linear 이슈를 만든다. 프로젝트·라벨·본문 템플릿(개요·범위·범위 밖)은 `docs/linear-convention.md`를 따른다. 본문은 세션 스크래치패드에 파일로 써서 넘긴다(`.claude/rules/temp-files.md`).
    ```bash
-   linear issue create --team SHI --project "<프로젝트>" -l BE -l <대상> -t "<제목>" -d "<본문>"
+   linear issue create --team SHI --project "<프로젝트>" -l BE -l <대상> -t "<제목>" --description-file <본문.md>
    ```
 2. develop을 최신화하고 **워크트리와 브랜치를 함께 만든다**: `<prefix>/SHI-<번호>-<작업-이름>` (예: `feat/SHI-12-matching-create`). 만든 직후 이슈를 In Progress로 바꾼다. Linear의 PR 자동 전환은 PR이 열린 뒤에만 움직인다.
    ```bash
