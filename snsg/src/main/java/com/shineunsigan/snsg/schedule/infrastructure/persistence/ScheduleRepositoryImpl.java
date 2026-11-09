@@ -46,6 +46,11 @@ public class ScheduleRepositoryImpl implements ScheduleRepository {
     }
 
     @Override
+    public Optional<Schedule> findById(UUID scheduleId) {
+        return scheduleJpaRepository.findNotDeletedById(scheduleId);
+    }
+
+    @Override
     public boolean existsOverlapping(UUID userId, LocalDateTime startAt, Duration window) {
         return scheduleJpaRepository.existsConfirmedScheduledBetween(userId, startAt.minus(window),
                 startAt.plus(window));

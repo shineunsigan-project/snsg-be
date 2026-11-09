@@ -27,6 +27,10 @@ interface ScheduleJpaRepository extends JpaRepository<Schedule, UUID> {
     @Query("select s from Schedule s where s.id = :id and s.isDeleted = false")
     Optional<Schedule> findByIdForUpdate(@Param("id") UUID id);
 
+    /** 잠금 없이 읽는다. JpaRepository의 findById는 삭제된 행도 주므로 이름을 달리한다. */
+    @Query("select s from Schedule s where s.id = :id and s.isDeleted = false")
+    Optional<Schedule> findNotDeletedById(@Param("id") UUID id);
+
     /** 내 확정 참여 행(user_id, status 인덱스)에서 출발해 일정과 조인한다. 양 끝은 겹치지 않는다. */
     @Query("""
             select case when count(p) > 0 then true else false end

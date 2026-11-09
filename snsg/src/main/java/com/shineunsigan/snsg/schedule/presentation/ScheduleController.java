@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.shineunsigan.snsg.common.web.ApiResponse;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
@@ -26,6 +27,7 @@ import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSche
 import com.shineunsigan.snsg.schedule.presentation.dto.request.CreateScheduleRequest;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.CreateScheduleResponse;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.ScheduleCardPageResponse;
+import com.shineunsigan.snsg.schedule.presentation.dto.response.ScheduleDetailResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -46,6 +48,7 @@ public class ScheduleController {
     private final JoinScheduleFacade joinScheduleFacade;
     private final ScheduleCommandService scheduleCommandService;
     private final ListSchedulesFacade listSchedulesFacade;
+    private final GetScheduleDetailFacade getScheduleDetailFacade;
 
     @PostMapping
     @Operation(summary = "일정 개설",
@@ -86,7 +89,7 @@ public class ScheduleController {
     @Operation(summary = "참여",
             description = """
                     일정에 멤버로 참여한다. 일정 상세 화면의 [참여하기]에서 부른다. 로그인이 필요하다. 요청 본문은 없다.
-                    성공하면 200이고 data는 없다. 성공이든 실패든 일정 상세를 다시 불러 화면을 그린다(상세 API는 아직 없다).
+                    성공하면 200이고 data는 없다. 성공이든 실패든 일정 상세(GET /api/v1/schedules/{scheduleId})를 다시 불러 화면을 그린다.
                     마지막 자리가 차면 일정은 모집 마감이 된다. 마지막 자리에 동시에 둘이 들어오면 한 명만 성공하고 다른 한 명은 409 RECRUIT_CLOSED다.
                     참여를 취소한 뒤 다시 참여할 수 있다.
                     두 번 눌려 같은 요청이 두 번 와도 참여는 한 번이다. 두 번째 요청은 409 ALREADY_JOINED이고, 상태는 한 번 참여한 것과 같다.
@@ -121,7 +124,7 @@ public class ScheduleController {
     @Operation(summary = "참여 취소",
             description = """
                     내 참여를 취소한다. 참여 취소 확인 팝업의 [확인]에서 부른다. 로그인이 필요하다. 요청 본문은 없다.
-                    성공하면 200이고 data는 없다. 성공이든 실패든 일정 상세를 다시 불러 화면을 그린다(상세 API는 아직 없다).
+                    성공하면 200이고 data는 없다. 성공이든 실패든 일정 상세(GET /api/v1/schedules/{scheduleId})를 다시 불러 화면을 그린다.
                     시작 후에도 완료(시작 + 12시간) 전까지 취소할 수 있다. 시작 전에 취소해 자리가 나면 마감된 모집이 다시 열리고,
                     시작 후 취소로 자리가 나도 모집은 다시 열리지 않는다. 취소한 뒤 다시 참여할 수 있다.
                     두 번 눌려 같은 요청이 두 번 와도 취소는 한 번이다. 두 번째 요청은 409 NOT_PARTICIPANT이고, 재시도해도 안전하다.
@@ -257,5 +260,32 @@ public class ScheduleController {
             @RequestParam(required = false) Integer size) {
         return ResponseEntity.ok(ApiResponse.success(
                 ScheduleCardPageResponse.from(listSchedulesFacade.listHosted(userId, cursor, size))));
+    }
+
+    /** 선택 인증 API다. 토큰이 없거나 틀리면 userId는 null이고 GUEST로 본다. 그래서 @SecurityRequirements를 달지 않는다. */
+    @GetMapping("/{scheduleId}")
+    @Operation(summary = "일정 상세",
+            description = """
+                    일정 하나의 내용과 보는 사람이 누를 수 있는 버튼을 준다. 일정 상세 화면(DTL)에 들어올 때,
+                    그리고 참여·참여 취소·일정 취소를 부른 뒤(성공이든 실패든) 다시 불러 화면을 그린다.
+                    토큰은 선택이다. 토큰 없이 부르면 viewerRole = GUEST이고, 토큰이 있으면 그 사용자의 역할(HOST·PARTICIPANT·NON_PARTICIPANT)과
+                    그에 맞는 availableActions가 온다. 틀리거나 만료된 토큰은 401이 아니라 토큰이 없는 것(GUEST)으로 처리한다.
+                    버튼은 availableActions에 든 동작만 활성으로 그린다. 비활성 버튼의 문구(모집 마감·완료·취소됨 등)는 displayStatus를 보고 FE가 정한다.
+                    시작 시각이 지났는데 아직 모집 중으로 저장된 일정(상태 전환 전)도 displayStatus = RECRUITMENT_CLOSED로 온다.
+                    장소는 개설 시점의 값이다. 일정 취소 사유는 아직 응답에 없다(일정 전체 취소 API와 함께 생긴다).
+                    조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.""")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+                    description = "일정 상세. availableActions의 버튼만 활성으로 그린다"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
+                    description = "INVALID_REQUEST: scheduleId가 UUID 형식이 아니다. 정상 화면 흐름에서는 나지 않는다"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
+                    description = """
+                            SCHEDULE_NOT_FOUND: 없거나 삭제된 일정. "찾을 수 없는 일정이에요." 토스트를 보여주고 목록 화면으로 간다.
+                            없는 경로의 404(INVALID_REQUEST)와는 code로 구분한다""")})
+    public ResponseEntity<ApiResponse<ScheduleDetailResponse>> getDetail(@AuthenticationPrincipal UUID userId,
+            @PathVariable UUID scheduleId) {
+        return ResponseEntity.ok(ApiResponse.success(
+                ScheduleDetailResponse.from(getScheduleDetailFacade.get(scheduleId, userId))));
     }
 }

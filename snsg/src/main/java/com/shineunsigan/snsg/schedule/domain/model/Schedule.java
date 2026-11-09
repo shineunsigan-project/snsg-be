@@ -14,7 +14,9 @@ import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
 import com.shineunsigan.snsg.schedule.domain.constants.HostType;
 import com.shineunsigan.snsg.schedule.domain.constants.RecruitmentStatus;
+import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus;
+import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
 import jakarta.persistence.CascadeType;
@@ -195,6 +197,50 @@ public class Schedule extends BaseAuditEntity {
         reopenIfBeforeStart(now);
     }
 
+    /**
+     * 상세를 보는 사람의 역할. 개설자 → 확정 참여 → 그 밖 순서다. 참여를 취소한 사람은 NON_PARTICIPANT다.
+     *
+     * @param viewerId 로그인하지 않았으면 {@code null}
+     */
+    public ViewerRole viewerRole(UUID viewerId) {
+        if (viewerId == null) {
+            return ViewerRole.GUEST;
+        }
+        if (hostUserId.equals(viewerId)) {
+            return ViewerRole.HOST;
+        }
+        if (findConfirmedParticipant(viewerId).isPresent()) {
+            return ViewerRole.PARTICIPANT;
+        }
+        return ViewerRole.NON_PARTICIPANT;
+    }
+
+    /**
+     * 그 역할이 지금 누를 수 있는 동작. 참여·참여 취소는 {@link #join}·{@link #leave}와 같은 표시 상태 기준이다.
+     * 개설자의 일정 취소는 예정(SCHEDULED)이고 시작 전일 때만이다. 정원이 차 마감됐어도 시작 전이면 취소할 수 있다.
+     */
+    public List<ScheduleAction> availableActions(ViewerRole role, LocalDateTime now, Duration completionAfter) {
+        DisplayStatus displayStatus = displayStatus(now, completionAfter);
+        return switch (role) {
+            case GUEST -> displayStatus == DisplayStatus.RECRUITING
+                    ? List.of(ScheduleAction.LOGIN_TO_JOIN) : List.of();
+            case NON_PARTICIPANT -> displayStatus == DisplayStatus.RECRUITING
+                    ? List.of(ScheduleAction.JOIN) : List.of();
+            case PARTICIPANT -> isParticipationCancelable(displayStatus)
+                    ? List.of(ScheduleAction.CANCEL_PARTICIPATION) : List.of();
+            case HOST -> status == ScheduleStatus.SCHEDULED && startAt.isAfter(now)
+                    ? List.of(ScheduleAction.CANCEL_SCHEDULE) : List.of();
+        };
+    }
+
+    /** 확정 참여자(개설자 포함)의 사용자 id. 참여를 취소한 행과 삭제된 행은 빠진다. */
+    public List<UUID> confirmedUserIds() {
+        return participants.stream()
+                .filter(ScheduleParticipant::isConfirmed)
+                .map(ScheduleParticipant::getUserId)
+                .toList();
+    }
+
     public List<ScheduleParticipant> getParticipants() {
         return Collections.unmodifiableList(participants);
     }
@@ -207,10 +253,13 @@ public class Schedule extends BaseAuditEntity {
 
     /** 화면의 [참여 취소]와 같은 판정이다. 취소·완료(시각 포함)된 일정은 취소할 수 없다. */
     private void validateCancelable(LocalDateTime now, Duration completionAfter) {
-        DisplayStatus displayStatus = displayStatus(now, completionAfter);
-        if (displayStatus != DisplayStatus.RECRUITING && displayStatus != DisplayStatus.RECRUITMENT_CLOSED) {
+        if (!isParticipationCancelable(displayStatus(now, completionAfter))) {
             throw new BusinessException(ScheduleErrorCode.PARTICIPATION_NOT_CANCELABLE);
         }
+    }
+
+    private static boolean isParticipationCancelable(DisplayStatus displayStatus) {
+        return displayStatus == DisplayStatus.RECRUITING || displayStatus == DisplayStatus.RECRUITMENT_CLOSED;
     }
 
     /** 시작 후의 마감은 시각 때문이라 되돌리지 않는다. 저장된 모집 상태는 그대로 둔다. */

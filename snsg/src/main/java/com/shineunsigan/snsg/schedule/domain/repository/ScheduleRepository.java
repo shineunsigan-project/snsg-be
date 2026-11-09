@@ -28,6 +28,9 @@ public interface ScheduleRepository {
      */
     Optional<Schedule> findByIdForUpdate(UUID scheduleId);
 
+    /** 삭제되지 않은 일정을 잠금 없이 읽는다. 일정 상세처럼 바꾸지 않고 보기만 할 때 쓴다. */
+    Optional<Schedule> findById(UUID scheduleId);
+
     /**
      * 그 사용자가 확정 참여(개설자 포함)한, 삭제되지 않은 예정(SCHEDULED) 일정 중
      * 시작 시각이 startAt과 window 미만으로 떨어진 것이 있는지. 정확히 window만큼 떨어지면 겹치지 않는다.

@@ -61,7 +61,12 @@ public class ScheduleParticipant extends BaseEntity {
     }
 
     boolean isConfirmedBy(UUID userId) {
-        return this.userId.equals(userId) && status == ParticipationStatus.CONFIRMED && !isDeleted();
+        return this.userId.equals(userId) && isConfirmed();
+    }
+
+    /** 확정 상태이고 삭제되지 않은 행. */
+    boolean isConfirmed() {
+        return status == ParticipationStatus.CONFIRMED && !isDeleted();
     }
 
     /** 참여 취소. 행은 남기고 상태만 바꾼다. */
