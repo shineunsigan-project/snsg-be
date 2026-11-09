@@ -71,7 +71,7 @@ class UserProfileCommandServiceTest {
     @BeforeEach
     void setUp() {
         service = new UserProfileCommandService(userRepository, userNicknameHistoryRepository, userEventPort,
-                new NicknameProperties(PROTECT_PERIOD));
+                new NicknameProperties(PROTECT_PERIOD, Duration.ofDays(90)));
         user = User.create("김민트", "mint@example.com",
                 Profile.of("Mint", Gender.FEMALE, LocalDate.of(1996, 4, 12), OLD_IMAGE), LocalDate.now());
     }

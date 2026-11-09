@@ -39,8 +39,10 @@ paths:
 - **DB 연결 수는 "캐시된 테스트 컨텍스트 수 × Hikari 풀 크기"다.** Spring은 컨텍스트를 구성(`@Import` 조합 등)별로 캐시해 JVM이 끝날 때까지 닫지 않고, 컨텍스트마다 풀을 하나씩 잡는다. 기본 풀(10)로는 DB 슬라이스 구성이 열 개쯤 되면 PostgreSQL `max_connections`(100)를 넘어 `FATAL: sorry, too many clients already`로 컨텍스트가 뜨지 않는다. 그래서 `snsg/build.gradle`의 test 태스크가 `spring.datasource.hikari.maximum-pool-size`를 3으로 둔다(SHI-156에서 DB 테스트 컨텍스트가 늘며 간헐 실패가 났다).
   - 한 테스트에서 동시에 쓰는 연결이 셋을 넘어야 하면 이 값을 함께 본다. 지금 가장 많이 쓰는 곳은 `ScheduleCommandServiceTest`의 동시 개설·동시 참여(각 둘)다.
   - 실패가 간헐적이라 한 번 통과한 결과로 안심하지 않는다. DB 슬라이스 구성을 더한 작업은 `./gradlew cleanTest build`로 전체를 다시 돌려 확인한다.
-- 한 대상 클래스에 Mockito 흐름 테스트와 실제 PostgreSQL 테스트가 함께 필요하면, 테스트 클래스 이름 규칙(대상 이름 + `Test`)을 지키며 `@Nested` 클래스로 나눠 각자 애너테이션을 단다. 예: `ScheduleCommandServiceTest`의 `Flow`(Mockito), `Concurrency`·`SavedSchedule`(`@DataJpaTest`).
+- 한 대상 클래스에 Mockito 흐름 테스트와 실제 PostgreSQL 테스트가 함께 필요하면, 테스트 클래스 이름 규칙(대상 이름 + `Test`)을 지키며 `@Nested` 클래스로 나눠 각자 애너테이션을 단다. 예: `ScheduleCommandServiceTest`의 `Flow`(Mockito), `Concurrency`·`SavedSchedule`(`@DataJpaTest`), `UserWithdrawalCommandServiceTest`의 `Flow`·`Stored`.
+  - `@ConfigurationProperties` record(`NicknameProperties` 등)는 `@DataJpaTest`에 올라오지 않는다. 테스트 클래스에 static `@TestConfiguration`을 두고 record를 `@Bean`으로 직접 만들어 `@Import`에 넣는다. Mockito 쪽과 같은 값을 쓰도록 record 상수를 한 곳에 둔다. 예: `UserWithdrawalCommandServiceTest.PropertiesConfig`.
 - **DB를 모든 워크트리가 공유하므로, 사용자로 범위가 좁혀지지 않는 쿼리(모집 중 일정 목록 등) 테스트에는 다른 테스트·워크트리의 행이 섞인다.** 테스트마다 무작위 키(무작위 `categoryId` 등)로 행을 넣고 그 키를 필터로 걸어 넣은 행만 골라 단정한다. 다른 필터(지역·날짜·커서)를 볼 때도 그 키를 함께 건다. 시각 경계는 `now`를 인자로 받는 repository 메서드에 고정 시각을 넘겨 본다. 예: `ScheduleRepositoryImplTest`의 모집 중 목록 테스트.
+  - 필터로 걸 무작위 키가 없는 쿼리(시각 조건만 있는 배치 대상 조회)는 기준 시각을 과거 고정 값(예: `2020-01-01T12:00`)으로 넘기고 넣은 행의 시각을 그 근처에 둔다. 실제 데이터는 시각이 미래라 걸리지 않는다. 그래도 결과 전체가 아니라 넣은 행의 id가 있는지와 넣은 행끼리의 순서로만 단정한다. 예: `UserWithdrawalRepositoryImplTest`(비식별 대상 keyset 페이지).
 - 잠금(`.claude/rules/package-structure.md` "동시 요청과 잠금")은 실제 PostgreSQL에서 **커밋까지 거치는** 동시성 테스트로 확인한다. 테스트 트랜잭션 하나 안에서는 잠금이 경쟁하지 않는다. 예: `ScheduleCommandServiceTest.Concurrency`(동시 개설, 마지막 자리 동시 참여).
   - 클래스에 `@Transactional(propagation = Propagation.NOT_SUPPORTED)`를 달아 테스트 트랜잭션을 끄고, 서비스 호출이 각자 커밋하게 한다.
   - 두 스레드를 `CountDownLatch` 둘(준비·출발)로 맞춰 동시에 부르고, 성공 수·실패의 ErrorCode·DB에 커밋된 행을 단정한다.
@@ -49,6 +51,8 @@ paths:
   - 간헐 실패를 sleep·재시도로 덮지 않는다. 잠금이 트랜잭션 안에 있는지, 판정보다 먼저인지, 그 행을 처음 읽는 조회에 걸렸는지부터 본다. 통과는 `cleanTest`로 여러 번 돌려 확인한다(SHI-171은 3회).
 - `@EnableJpaAuditing`은 `SnsgApplication`이 아니라 `common/config/JpaAuditingConfig`에 둔다. 메인 클래스에 붙이면 `@WebMvcTest`가 `jpaAuditingHandler`를 만들려다 "JPA metamodel must not be empty"로 실패한다.
 - 감사 필드를 검증하는 JPA 슬라이스 테스트는 `@Import`에 `JpaAuditingConfig`를 함께 넣는다.
+  - 특정 주체(`Auditor.SYSTEM_SCHEDULER` 등)가 남는지 보려면 코드가 넣는 것과 같은 방식으로 `SecurityContextHolder`에 `UsernamePasswordAuthenticationToken(주체, null, List.of())`을 넣고 서비스를 부른 뒤 flush하고, native SELECT로 `updated_by`·`created_by`를 읽는다. `@AfterEach`에서 `SecurityContextHolder.clearContext()`를 부른다. 예: `UserWithdrawalCommandServiceTest.Stored`.
+- SecurityContext를 바꾸는 코드(엔티티를 바꾸는 스케줄러)는 Mockito로 서비스를 대신하고, `doAnswer` 안에서 `SecurityContextHolder.getContext().getAuthentication().getPrincipal()`을 호출 시점에 캡처해 단정한다. 끝난 뒤 인증이 `null`인지도, 예외가 난 경우를 포함해 본다. `@AfterEach`에서 `clearContext()`를 부른다. 예: `UserAnonymizationSchedulerTest`.
 - `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`에 있고 스타터는 `spring-boot-starter-webmvc-test`. Service는 `@MockitoBean`으로 대체한다.
 - 테스트는 기본 프로파일(`local`)로 돌고, 설정값은 `snsg/.env`에서 읽는다(`application-local.yaml`의 `spring.config.import`). 새 환경변수를 추가하면 `.env`에도 넣어야 컨텍스트가 뜬다.
 - **테스트에서는 스케줄링이 꺼져 있다.** `snsg/src/test/resources/config/application.yaml`의 `scheduling.enabled: false`가 끈다. `@SpringBootTest` 컨텍스트가 스케줄러를 띄우면 공유 로컬 DB의 실제 데이터에 상태 전환을 커밋한다(`@WebMvcTest`·`@DataJpaTest`는 스케줄러 빈을 올리지 않는다). `SnsgApplicationTests.schedulingIsDisabledInTests`가 꺼진 것과 main 설정이 함께 읽히는 것을 단정한다.

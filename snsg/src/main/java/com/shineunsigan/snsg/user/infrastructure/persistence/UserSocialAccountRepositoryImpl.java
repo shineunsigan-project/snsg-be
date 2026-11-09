@@ -34,4 +34,9 @@ public class UserSocialAccountRepositoryImpl implements UserSocialAccountReposit
     public List<UserSocialAccount> findByUserId(UUID userId) {
         return userSocialAccountJpaRepository.findByUserIdAndIsDeletedFalse(userId);
     }
+
+    @Override
+    public List<UserSocialAccount> findAllByUserIdIncludingDeleted(UUID userId) {
+        return userSocialAccountJpaRepository.findByUserId(userId);
+    }
 }

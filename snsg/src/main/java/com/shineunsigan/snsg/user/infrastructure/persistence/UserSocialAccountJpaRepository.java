@@ -15,4 +15,6 @@ interface UserSocialAccountJpaRepository extends JpaRepository<UserSocialAccount
             SocialProvider provider, String providerUserId);
 
     List<UserSocialAccount> findByUserIdAndIsDeletedFalse(UUID userId);
+
+    List<UserSocialAccount> findByUserId(UUID userId);
 }

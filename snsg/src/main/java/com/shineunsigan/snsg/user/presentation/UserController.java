@@ -19,9 +19,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.shineunsigan.snsg.common.web.ApiResponse;
 import com.shineunsigan.snsg.user.application.UploadProfileImageFacade;
-import com.shineunsigan.snsg.user.application.UserCommandService;
 import com.shineunsigan.snsg.user.application.UserProfileCommandService;
 import com.shineunsigan.snsg.user.application.UserQueryService;
+import com.shineunsigan.snsg.user.application.UserWithdrawalCommandService;
 import com.shineunsigan.snsg.user.domain.constants.WithdrawReason;
 import com.shineunsigan.snsg.user.presentation.dto.request.UpdateMyProfileRequest;
 import com.shineunsigan.snsg.user.presentation.dto.response.MyProfileResponse;
@@ -42,7 +42,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class UserController {
 
-    private final UserCommandService userCommandService;
+    private final UserWithdrawalCommandService userWithdrawalCommandService;
     private final UserQueryService userQueryService;
     private final UserProfileCommandService userProfileCommandService;
     private final UploadProfileImageFacade uploadProfileImageFacade;
@@ -128,7 +128,8 @@ public class UserController {
     @DeleteMapping("/me")
     @Operation(summary = "탈퇴",
             description = """
-                    사용자를 탈퇴시킨다. 이름·이메일·닉네임·생년월일·프로필 사진은 비식별 값으로 바뀌고 올렸던 사진 파일은 지워진다.
+                    사용자를 탈퇴시킨다. 계정은 삭제 표시되고, 이름·이메일·닉네임·생년월일·프로필 사진 원본은 90일 보관한 뒤 비식별한다.
+                    탈퇴한 닉네임은 90일 동안 다른 사람이 쓸 수 없다.
                     카카오 연결도 끊어지므로 다시 로그인하면 동의 화면부터 시작한다.
                     되돌릴 수 없고, 다시 가입하면 이전 활동과 이어지지 않는 새 계정이 된다.
                     refresh token은 즉시 무효가 되지만 쿠키는 남는다. 탈퇴 직후 로그아웃 API를 한 번 호출해 쿠키를 비운다.""")
@@ -137,7 +138,7 @@ public class UserController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
                     description = "토큰이 없거나 유효하지 않다")})
     public ResponseEntity<ApiResponse<Void>> withdraw(@AuthenticationPrincipal UUID userId) {
-        userCommandService.withdraw(userId, WithdrawReason.USER_REQUESTED);
+        userWithdrawalCommandService.withdraw(userId, WithdrawReason.USER_REQUESTED);
 
         return ResponseEntity.ok(ApiResponse.success());
     }

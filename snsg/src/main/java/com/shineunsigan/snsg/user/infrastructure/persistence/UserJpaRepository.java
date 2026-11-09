@@ -14,9 +14,9 @@ interface UserJpaRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByIdAndIsDeletedFalse(UUID id);
 
-    boolean existsByProfileProfileImageUrlAndIsDeletedFalse(String profileImageUrl);
+    boolean existsByProfileProfileImageUrl(String profileImageUrl);
 
-    boolean existsByProfileProfileImageUrlAndIsDeletedFalseAndIdNot(String profileImageUrl, UUID id);
+    boolean existsByProfileProfileImageUrlAndIdNot(String profileImageUrl, UUID id);
 
     /**
      * 유니크 인덱스({@code LOWER(nickname)})와 같은 기준으로 비교한다.

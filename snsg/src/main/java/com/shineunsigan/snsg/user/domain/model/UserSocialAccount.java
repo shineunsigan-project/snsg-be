@@ -19,6 +19,7 @@ import lombok.NoArgsConstructor;
  * 사용자와 소셜 계정의 연결. User 애그리거트의 구성요소다.
  * 삭제되지 않은 행에만 (provider, providerUserId) 유니크가 걸려 있어,
  * 탈퇴 후 같은 소셜 계정으로 다시 가입하면 새 사용자가 된다.
+ * 비식별할 때 {@code providerUserId}를 비워 어느 소셜 계정이었는지 이어지지 않게 한다.
  */
 @Getter
 @Entity
@@ -34,7 +35,7 @@ public class UserSocialAccount extends BaseAuditEntity {
     @Column(nullable = false, updatable = false)
     private SocialProvider provider;
 
-    @Column(nullable = false, updatable = false)
+    @Column(nullable = false)
     private String providerUserId;
 
     private UserSocialAccount(User user, SocialProvider provider, String providerUserId) {
@@ -45,5 +46,10 @@ public class UserSocialAccount extends BaseAuditEntity {
 
     public static UserSocialAccount of(User user, SocialProvider provider, String providerUserId) {
         return new UserSocialAccount(user, provider, providerUserId);
+    }
+
+    /** 비식별 때 소셜 계정 식별자를 지운다. 유니크 인덱스는 삭제되지 않은 행에만 걸려 빈 값이 여럿이어도 된다. */
+    public void clearProviderUserId() {
+        this.providerUserId = "";
     }
 }

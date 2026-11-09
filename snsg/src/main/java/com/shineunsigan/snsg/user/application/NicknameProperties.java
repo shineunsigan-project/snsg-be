@@ -12,7 +12,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @param protectAfterChange 바꾸기 전 닉네임을 보호하는 기간이자, 닉네임을 다시 바꿀 수 없는 기간.
  *                           두 규칙이 같은 값을 쓰므로 한 설정에서 읽는다
+ * @param protectAfterWithdrawal 탈퇴한 회원의 닉네임을 보호하는 기간이자, 탈퇴 회원의 원본을 보관한 뒤 비식별하는 시점.
+ *                               두 규칙이 같은 값을 쓰므로 한 설정에서 읽는다
  */
 @ConfigurationProperties(prefix = "nickname")
-public record NicknameProperties(Duration protectAfterChange) {
+public record NicknameProperties(Duration protectAfterChange, Duration protectAfterWithdrawal) {
 }

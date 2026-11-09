@@ -50,6 +50,7 @@
   - `port/out`을 서비스에 넣고 싶어지면, 그 흐름을 facade로 옮긴다. 이벤트 발행 포트만 예외다.
   - **설정(`@ConfigurationProperties` record)은 의존으로 세지 않는다.** I/O도 호출할 메서드도 없는 값 묶음이라, 규칙이 막으려는 외부 시스템·타 도메인과 성격이 다르다. 설정값은 `@Value` 대신 record로 묶어 주입한다.
   - 의존이 4개를 넘으면 애그리거트 경계가 잘못 그어진 건 아닌지 다시 본다. 한 애그리거트의 구성요소 수가 상한이다.
+    - 예: `UserWithdrawalCommandService`는 User 애그리거트 구성요소 다섯(users, 소셜 계정, 약관, 닉네임 이력, 탈퇴 기록)의 repository와 이벤트 발행 포트를 쓴다. 탈퇴·비식별이 애그리거트 전체를 다루므로 상한 안이다.
 - **facade(`XxxFacade`)는 아래 두 경우에만 만든다.** application 패키지에 두고, 행위마다 하나씩 만든다(`SocialLoginFacade`, `CompleteSignUpFacade`). 트랜잭션을 걸지 않는다.
   - **이벤트 발행 포트가 아닌 `port/out`을 호출하는 흐름.** 외부 API, Redis, 파일 저장소, 다른 도메인이 여기 든다. 다른 도메인은 지금은 코드 참조 adapter, 서비스 분리 후에는 Feign → 상대의 `/internal` 컨트롤러다. 이유: 외부 호출을 트랜잭션 밖에 둔다.
     - 조회도 같다. 읽은 결과에 다른 도메인 값(이름 등)을 붙여야 하면 QueryService는 자기 데이터만 읽고 facade가 포트를 불러 붙인다. 포트는 건마다 부르지 않고 요청당 한 번 불러 맵으로 붙인다. 예: `ListSchedulesFacade`(`ScheduleQueryService`로 일정 카드를 읽고 `RegionPort.findAll`을 한 번 불러 지역 이름을 붙인다).
@@ -62,7 +63,7 @@
 - 복잡도는 facade를 만드는 기준이 아니다. 흐름이 길어도 위 두 경우가 아니면 서비스에 둔다.
 - 가진 데이터가 없는 도메인은 Command 서비스 없이 facade만 가질 수 있다. auth가 그렇다. 자기 테이블이 생기면 그때 만든다.
 - 서비스가 커져 한눈에 안 들어오면(대략 150줄) 책임별로 나눈다. 행위별로 나누지 않는다.
-  - 예: user의 `UserCommandService`(가입·탈퇴, 계정 생애주기)와 `UserProfileCommandService`(가입한 사용자의 프로필 수정). 한 서비스에 두면 150줄과 의존 4개를 넘는다. 나눈 서비스도 이름이 `CommandService`로 끝나야 ArchUnit 규칙이 적용된다.
+  - 예: user의 `UserCommandService`(가입), `UserWithdrawalCommandService`(탈퇴와 보관 뒤 비식별), `UserProfileCommandService`(가입한 사용자의 프로필 수정). 한 서비스에 두면 150줄과 의존 4개를 넘는다. 나눈 서비스도 이름이 `CommandService`로 끝나야 ArchUnit 규칙이 적용된다.
 
 ## Port
 
@@ -121,8 +122,8 @@
   - 리스너가 호출하는 UseCase 구현: `@Transactional(propagation = Propagation.REQUIRES_NEW)`. 없으면 AFTER_COMMIT 시점이라 수신 측 DB 변경이 저장되지 않는다. 구현이 facade면 facade에는 걸지 않고 DB를 바꾸는 서비스 메서드에 건다.
   - **트랜잭션 밖에서 발행한 이벤트는 AFTER_COMMIT 리스너에 도착하지 않는다.** 커밋할 트랜잭션이 없기 때문이다. 트랜잭션을 걸지 않는 facade(예: auth의 facade)에서 발행하지 않는다.
 - **커밋된 뒤에만 해야 하는 되돌릴 수 없는 외부 정리(파일 삭제 등)는 같은 도메인 이벤트로 넘긴다.** Command 서비스가 트랜잭션 안에서 이벤트 발행 포트로 발행하고, 같은 도메인 `infrastructure/event`의 리스너가 AFTER_COMMIT으로 받아 `port/out`을 부른다. facade 없이 외부 호출이 트랜잭션 밖에 남고, 롤백되면 지우지 않는다. 리스너가 DB를 바꾸지 않으므로 `REQUIRES_NEW`는 필요 없다.
-  - 예: `UserWithdrawnEvent`(탈퇴)·`ProfileImageReplacedEvent`(사진 교체) → `ProfileImageCleanupListener` → `FileStoragePort.delete`.
-  - **지울 대상이 사용자가 보낸 값(경로·키)에서 왔으면 저장할 때 막는다.** 우리가 만든 형식과 정확히 일치하는지, 다른 소유자가 이미 참조하고 있지 않은지 본다. 남의 경로를 자기 값으로 넣고 교체·탈퇴하면 남의 파일이 지워진다. 삭제 adapter도 형식 밖의 값이면 아무것도 지우지 않는다. 예: `ProfileImage.isUploadedPath`(수정·가입·삭제가 함께 쓰는 형식 규칙), `UserRepository.isProfileImageUsedByOthers`, `LocalFileStorageAdapter.delete`.
+  - 예: `UserAnonymizedEvent`(보관 기간이 지난 탈퇴 회원의 비식별)·`ProfileImageReplacedEvent`(사진 교체) → `ProfileImageCleanupListener` → `FileStoragePort.delete`. 비식별 이벤트는 비식별 전 경로가 우리 업로드 경로일 때만 낸다(기본 이미지·소셜 사진은 지울 파일이 없다). 탈퇴(`UserWithdrawnEvent`)는 원본을 보관하므로 사진을 지우지 않는다.
+  - **지울 대상이 사용자가 보낸 값(경로·키)에서 왔으면 저장할 때 막는다.** 우리가 만든 형식과 정확히 일치하는지, 다른 소유자가 이미 참조하고 있지 않은지 본다. 남의 경로를 자기 값으로 넣고 교체하거나 비식별되면 남의 파일이 지워진다. 삭제 표시됐어도 나중에 그 값으로 지울 행(보관 중인 탈퇴 회원)은 소유자로 센다. 삭제 adapter도 형식 밖의 값이면 아무것도 지우지 않는다. 예: `ProfileImage.isUploadedPath`(수정·가입·삭제가 함께 쓰는 형식 규칙), `UserRepository.isProfileImageUsedByOthers`, `LocalFileStorageAdapter.delete`.
 - 같은 트랜잭션(`@EventListener`)은 두 도메인 변경이 반드시 원자적이어야 할 때만 쓰고, 그 이유와 "서비스 분리 시 saga 필요"를 주석으로 남긴다.
 - AFTER_COMMIT 방식은 수신 실패 시 이벤트가 유실된다. 유실되면 안 되는 이벤트가 생기면 Spring Modulith(Event Publication Registry) 도입을 제안한다.
 - **유실이 보안·정합성 문제로 번지는 이벤트는 수신 측에 안전망을 함께 둔다.** 이벤트는 즉시 정리용이고, 안전망이 최종 보장이다.
@@ -151,7 +152,7 @@
 
 - 모든 엔티티는 `common/entity`의 `BaseEntity`를 상속한다. id(UUID v7), `createdAt`, `updatedAt`, `isDeleted`가 딸려온다.
 - 변경 주체를 남겨야 하는 엔티티는 `BaseAuditEntity`를 상속한다. `createdBy`, `updatedBy`가 더해진다.
-  - 판단 기준: 도메인 컬럼으로는 알 수 없는 "누가 바꿨나"가 운영에서 궁금해지면 Audit. 예로 일정을 누가 취소했는지(개설자인지 운영자인지).
+  - 판단 기준: 도메인 컬럼으로는 알 수 없는 "누가 바꿨나"가 운영에서 궁금해지면 Audit. 예로 일정을 누가 취소했는지(개설자인지 운영자인지), 탈퇴 기록(`user_withdrawals`)을 누가 만들고(본인 요청이면 사용자 id, 웹훅이면 `SYSTEM`) 누가 비식별했는지(`SYSTEM_SCHEDULER`).
   - 값은 사용자 id 문자열이거나 `Auditor.SYSTEM`, `Auditor.SYSTEM_SCHEDULER`다. 인증이 없는 요청은 `SYSTEM`이 들어간다.
 - id는 UUID v7(`@UuidGenerator(style = VERSION_7)`)이다. 시간순으로 증가해 인덱스가 조각나지 않고, URL로 남의 데이터를 추측할 수 없다. 다른 키 전략이 꼭 필요한 테이블만 `BaseEntity`를 상속하지 않는다.
   - 예: `regions`. 행정구역 코드(`CHAR(5)`)가 PK인 기준 데이터다. 지우지 않으므로 `is_deleted`가 없고, 숨김은 `is_active`가 맡는다. `created_at`·`updated_at`은 엔티티에서 직접 매핑한다.
@@ -166,7 +167,7 @@
 
 - **hard delete 하지 않는다.** 삭제는 `BaseEntity.delete()`로 `isDeleted`만 바꾼다.
 - 조회는 삭제되지 않은 행만 본다. 전역 필터로 숨기지 않고 repository 쿼리에 조건을 명시한다. 관리자·통계 조회에서 빠져나오기 쉽고, 조인된 연관에서 조용히 누락되지 않는다.
-  - 삭제된 행까지 읽어야 하는 메서드는 이름에 드러내고(`IncludingDeleted`), javadoc에 쓸 곳을 적어 묶는다. 활성 여부 판정에는 쓰지 않는다. 삭제된 행이 통과한다. 예: `UserRepository.findAllByIdIncludingDeleted`(탈퇴자를 가려 보여주는 `FindUserProfilesUseCase` 전용).
+  - 삭제된 행까지 읽어야 하는 메서드는 이름에 드러내고(`IncludingDeleted`), javadoc에 쓸 곳을 적어 묶는다. 활성 여부 판정에는 쓰지 않는다. 삭제된 행이 통과한다. 예: `UserRepository.findAllByIdIncludingDeleted`(탈퇴자를 가려 보여주는 `FindUserProfilesUseCase` 전용), `UserSocialAccountRepository`·`UserNicknameHistoryRepository`의 `findAllByUserIdIncludingDeleted`(탈퇴 회원 비식별 전용).
 - 개수 계산(정원 등)도 같은 조건으로 센다.
 - 유니크 제약은 삭제되지 않은 행에만 건다. PostgreSQL 부분 유니크 인덱스를 쓴다.
   ```sql
@@ -242,7 +243,17 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
   - 서로 독립인 작업은 서비스 메서드를 나눠 각자의 트랜잭션에서 돌린다. 한 작업이 실패해도 다른 작업은 돈다.
   - `@Component` 클래스라 단순 클래스명이 다른 도메인과 겹치지 않게 짓는다(Port 절의 빈 이름 충돌).
 - 주기는 `@Scheduled(fixedDelayString = "${...}")`로 설정에서 읽는다. `fixedDelay`는 앞 실행이 끝난 뒤 간격을 재서 같은 서버에서 실행이 겹치지 않는다. 키는 그 도메인 설정 아래 둔다(`schedule.status-transition-interval: 1m`, 설정 절의 예외).
+  - 정해진 시각에 도는 작업은 `@Scheduled(cron = "${...}")`로 읽는다. 예: `withdrawal.anonymize-cron: "0 0 4 * * *"`(탈퇴 회원 비식별, 매일 04:00). user 도메인이지만 prefix가 `user`가 아닌 이유는 설정 절.
 - 조건부 일괄 UPDATE처럼 여러 서버에서 동시에 돌아도 결과가 같은 작업에는 분산 락(ShedLock 등)을 두지 않는다. READ COMMITTED에서 뒤 UPDATE는 앞 커밋을 기다린 뒤 WHERE를 다시 평가해 이미 바뀐 행을 건너뛴다.
+  - 탈퇴 회원 비식별도 두지 않는다. 두 서버가 같은 회원을 처리해도 같은 값을 쓰고, 파일 삭제는 없으면 넘어간다.
+- **엔티티를 읽어 바꾸는(dirty checking) 스케줄러는 실행 동안 SecurityContext의 인증 주체를 `Auditor.SYSTEM_SCHEDULER`로 두고, `finally`에서 `SecurityContextHolder.clearContext()`로 비운다.** JPA Auditing이 SecurityContext에서 `updatedBy`를 읽기 때문이다. 넣지 않으면 `SYSTEM`이 남는다. 일괄 UPDATE는 Auditing을 거치지 않아 쿼리에 직접 넣는다(일괄 UPDATE 절).
+  - 넣는 값: `new UsernamePasswordAuthenticationToken(Auditor.SYSTEM_SCHEDULER, null, List.of())`. 3인자 생성자라 인증된 상태가 되어 `SecurityAuditorAware`가 principal을 그대로 쓴다.
+  - 예: `user/infrastructure/scheduler/UserAnonymizationScheduler`.
+- **대상마다 따로 처리하고 한 건의 실패가 나머지를 막지 않아야 하면, 스케줄러가 대상 하나마다 서비스 메서드(`@Transactional`)를 따로 부른다.** 서비스 프록시를 거치므로 대상마다 트랜잭션이 나뉜다. 예외는 잡아 로그로 남기고 다음 대상으로 넘어간다. 예: `UserAnonymizationScheduler` → `UserWithdrawalCommandService.anonymize(userId)`.
+  - 대상은 keyset 페이지로 대상이 없어질 때까지 읽는다(목록 쿼리 절). 기준 시각은 실행 시작 때 한 번 정해 모든 페이지에 같은 값을 쓴다. 페이지 크기는 설정값이다(`withdrawal.anonymize-page-size: 100`).
+  - 한 번에 정해진 수만 처리하지 않는다. 대상이 그보다 많아지면 경고 없이 처리가 밀린다.
+  - 커서 없이 "남은 대상이 없을 때까지" 반복하지 않는다. 계속 실패하는 한 건 때문에 끝나지 않는다. 커서가 실패한 대상을 지나가므로 그 대상은 다음 실행에서 다시 처리된다.
+  - 이미 처리된 대상으로 다시 불려도 아무것도 바꾸지 않게 서비스 메서드를 쓴다(멱등).
 - 켜고 끄는 스위치는 `common/config/SchedulingConfig` 하나다(`@EnableScheduling` + `@ConditionalOnProperty(scheduling.enabled=true)`). `application.yaml`에서 켜고(모든 프로파일), 테스트에서는 끈다(`.claude/rules/testing.md`). 도메인 스케줄러를 더할 때 따로 켜지 않는다. common에 둔 이유는 common 절.
 
 ### Redis
@@ -257,9 +268,9 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 
 ### 설정 (`@ConfigurationProperties`)
 
-- **prefix를 흔한 OS 환경변수 이름(`user`, `home`, `path`, `lang` 등)과 같게 두지 않는다.** Spring은 OS 환경변수도 속성으로 읽어 `USER`를 `user` 속성으로 잡는다. prefix와 정확히 같은 이름의 값이 있으면 Binder가 그 문자열을 record에 바인딩하려 해 기동이 실패할 수 있다. 리눅스 운영 서버에는 `USER`·`HOME`·`PATH`가 항상 있다. 예: 닉네임 정책은 `user.*`가 아니라 `nickname.*`(`user/application/NicknameProperties`)다.
-- 두 규칙이 같은 기간을 쓰면 설정 하나에서 읽는다. 예: `nickname.protect-after-change`는 바꾸기 전 닉네임 보호 기간이자 닉네임 재변경 제한 기간이다.
-- 예외: 애노테이션 속성이 읽는 값은 record를 주입할 자리가 없어 자리표시자(`"${...}"`)로 읽는다. 예: `@Scheduled(fixedDelayString = "${schedule.status-transition-interval}")`. 그 키는 record에 넣지 않고, 넣지 않은 이유를 yaml 주석으로 남긴다(`@ConfigurationProperties`는 모르는 키를 무시한다).
+- **prefix를 흔한 OS 환경변수 이름(`user`, `home`, `path`, `lang` 등)과 같게 두지 않는다.** Spring은 OS 환경변수도 속성으로 읽어 `USER`를 `user` 속성으로 잡는다. prefix와 정확히 같은 이름의 값이 있으면 Binder가 그 문자열을 record에 바인딩하려 해 기동이 실패할 수 있다. 리눅스 운영 서버에는 `USER`·`HOME`·`PATH`가 항상 있다. 예: 닉네임 정책은 `user.*`가 아니라 `nickname.*`(`user/application/NicknameProperties`)다. 탈퇴 회원 비식별 배치는 `withdrawal.*`(`user/application/WithdrawalProperties`)다. 페이지 크기·실행 시각은 닉네임 정책이 아니라 `nickname.*`에 두지 않았다.
+- 두 규칙이 같은 기간을 쓰면 설정 하나에서 읽는다. 예: `nickname.protect-after-change`는 바꾸기 전 닉네임 보호 기간이자 닉네임 재변경 제한 기간이다. `nickname.protect-after-withdrawal`은 탈퇴 닉네임 보호 기간이자 탈퇴 원본 보관 기간(`user_withdrawals.anonymize_due_at`)이다.
+- 예외: 애노테이션 속성이 읽는 값은 record를 주입할 자리가 없어 자리표시자(`"${...}"`)로 읽는다. 예: `@Scheduled(fixedDelayString = "${schedule.status-transition-interval}")`, `@Scheduled(cron = "${withdrawal.anonymize-cron}")`. 그 키는 record에 넣지 않고, 넣지 않은 이유를 yaml 주석으로 남긴다(`@ConfigurationProperties`는 모르는 키를 무시한다).
 
 ## 코드 작성
 
@@ -289,4 +300,4 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 
 판단 기록:
 
-- `common/config/SchedulingConfig`(SHI-173): 스케줄링 스위치(`scheduling.enabled`)다. 지금은 schedule 스케줄러만 쓰지만 기능 명세의 user(탈퇴 비식별)·place(장소 적재) 스케줄러도 같은 스위치를 쓴다. 한 도메인에 두면 다른 도메인이 그 도메인 설정에 기댄다. 비즈니스 로직이 없고 도메인을 import하지 않는다. 메인 클래스에 `@EnableScheduling`을 두지 않는 것은 `JpaAuditingConfig`와 같이 설정으로 끌 수 있어야 해서다. 대가: common/config가 하나 늘어난다. 주기·작업 내용은 각 도메인에 둔다.
+- `common/config/SchedulingConfig`(SHI-173): 스케줄링 스위치(`scheduling.enabled`)다. schedule(상태 전환)·user(탈퇴 비식별, SHI-175) 스케줄러가 쓰고, 기능 명세의 place(장소 적재) 스케줄러도 같은 스위치를 쓴다. 한 도메인에 두면 다른 도메인이 그 도메인 설정에 기댄다. 비즈니스 로직이 없고 도메인을 import하지 않는다. 메인 클래스에 `@EnableScheduling`을 두지 않는 것은 `JpaAuditingConfig`와 같이 설정으로 끌 수 있어야 해서다. 대가: common/config가 하나 늘어난다. 주기·작업 내용은 각 도메인에 둔다.

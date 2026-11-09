@@ -21,7 +21,7 @@ import com.shineunsigan.snsg.user.domain.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 가입한 사용자의 프로필 관리. 계정 생애주기(가입·탈퇴)는 {@link UserCommandService}가 맡는다.
+ * 가입한 사용자의 프로필 관리. 가입은 {@link UserCommandService}, 탈퇴·비식별은 {@link UserWithdrawalCommandService}가 맡는다.
  */
 @Service
 @RequiredArgsConstructor
@@ -99,7 +99,7 @@ public class UserProfileCommandService {
     }
 
     /**
-     * 다른 회원이 쓰는 사진 경로는 받지 않는다. 받으면 사진을 바꾸거나 탈퇴할 때 그 회원의 파일이 지워진다.
+     * 다른 회원(보관 중인 탈퇴 회원 포함)이 쓰는 사진 경로는 받지 않는다. 받으면 사진을 바꾸거나 비식별할 때 그 회원의 파일이 지워진다.
      * 본인의 현재 사진과 같은 값은 바뀐 것이 아니라 보지 않는다.
      */
     private void validateProfileImageNotUsed(UpdateMyProfileCommand command, User user) {

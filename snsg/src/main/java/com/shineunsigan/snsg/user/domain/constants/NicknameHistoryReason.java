@@ -6,5 +6,8 @@ package com.shineunsigan.snsg.user.domain.constants;
 public enum NicknameHistoryReason {
 
     /** 닉네임을 바꿨다. 이전 닉네임을 보호하고, 가장 최근 행의 시각으로 다음 변경을 제한한다. */
-    CHANGED
+    CHANGED,
+
+    /** 탈퇴했다. 탈퇴 시점 닉네임을 보호한다. */
+    WITHDRAWN
 }

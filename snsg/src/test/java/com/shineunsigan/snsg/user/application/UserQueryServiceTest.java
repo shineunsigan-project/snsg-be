@@ -68,7 +68,7 @@ class UserQueryServiceTest {
     private UserNicknameHistoryRepository userNicknameHistoryRepository;
 
     @Spy
-    private NicknameProperties nicknameProperties = new NicknameProperties(Duration.ofDays(14));
+    private NicknameProperties nicknameProperties = new NicknameProperties(Duration.ofDays(14), Duration.ofDays(90));
 
     @InjectMocks
     private UserQueryService userQueryService;
