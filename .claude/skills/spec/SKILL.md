@@ -61,7 +61,7 @@ description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md�
 ## 환경
 - 워크트리: `C:\Users\ks\nss\dev\snsg-be\wt-SHI-31` (브랜치 `chore/SHI-31-delegation-rule`, 베이스 `808e21b`)
 - 메인 작업 디렉터리 `snsg-be`는 읽기만 한다
-- `UserRedisAdapterTest`는 Docker가 꺼져 있으면 skip된다. 이번 작업과 무관하다
+- Redis·DB 테스트는 로컬 Docker 컨테이너에 붙는다. 컨테이너가 꺼져 있으면 실패한다(skip이 아니다). 그때는 코드를 고치지 말고 멈춰서 보고한다
 - 셸은 PowerShell이 기본이고 Bash도 쓸 수 있다. `&&`는 PowerShell에서 동작하지 않는다
 ```
 

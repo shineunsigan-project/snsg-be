@@ -120,7 +120,7 @@
 - 같은 트랜잭션(`@EventListener`)은 두 도메인 변경이 반드시 원자적이어야 할 때만 쓰고, 그 이유와 "서비스 분리 시 saga 필요"를 주석으로 남긴다.
 - AFTER_COMMIT 방식은 수신 실패 시 이벤트가 유실된다. 유실되면 안 되는 이벤트가 생기면 Spring Modulith(Event Publication Registry) 도입을 제안한다.
 - **유실이 보안·정합성 문제로 번지는 이벤트는 수신 측에 안전망을 함께 둔다.** 이벤트는 즉시 정리용이고, 안전망이 최종 보장이다.
-  - 예: 탈퇴 이벤트로 refresh token을 지우되, 재발급 시점에 사용자가 유효한지 다시 확인한다. 이벤트가 유실돼도 탈퇴한 사용자는 재발급받지 못한다.
+  - 예: 탈퇴 이벤트로 그 사용자의 refresh 세션을 모두 지우되, 재발급 시점에 사용자가 유효한지 다시 확인한다. 이벤트가 유실돼도 탈퇴한 사용자는 재발급받지 못한다.
   - 안전망을 만들 수 없으면 이벤트가 아니라 같은 트랜잭션에서 처리할 방법을 찾는다.
 
 ## DTO
@@ -201,8 +201,11 @@
 
 ### Redis
 
-- 키는 `용도:식별자` 형태로 쓴다. 예: `refresh:{userId}`, `signup:{token}`.
+- 키는 `용도:식별자` 형태로 쓴다. 식별자가 여럿이면 `:`로 잇는다. 예: `refresh:{userId}:{sessionId}`, `sessions:{userId}`, `signup:{token}`.
 - **TTL을 반드시 건다.** 만료를 Redis가 지우므로 정리 작업을 따로 만들지 않는다. 같은 값이 토큰 만료 등 다른 곳에도 쓰이면 **한 설정값에서 가져와** 두 곳이 어긋나지 않게 한다.
+  - SET처럼 여러 번 덧붙이는 키는 덧붙일 때마다 TTL을 다시 건다. 예: `sessions:{userId}`는 세션을 저장할 때마다 refresh 만료와 같은 TTL로 늘린다.
+  - **여러 키를 함께 만들며 TTL을 걸어야 하면 MULTI/EXEC(`SessionCallback`)로 묶는다.** 명령을 따로 보내면 중간에 실패할 때 TTL 없는 키가 남는다(SADD 뒤 EXPIRE 전). 예: `RedisRefreshTokenStoreAdapter.save`(SET + SADD + EXPIRE).
+  - 지우는 쪽은 중간에 실패해 남는 것이 TTL이 걸린 무해한 값이면 묶지 않는다. 예: 로그아웃의 DEL + SREM(SET에 세션 id만 남아도 지울 대상이 없을 뿐이다), 탈퇴의 SMEMBERS 후 DEL 한 번(그 사이 생긴 세션은 재발급 때 사용자 확인에 막힌다).
 - 토큰처럼 탈취되면 피해가 큰 값은 **원문이 아니라 해시**를 저장한다. 덤프·백업이 유출돼도 복원할 수 없다.
 - 운영 Redis는 `maxmemory-policy`를 `noeviction`(또는 `volatile-ttl`)로 둔다. `allkeys-*`면 TTL이 남아 있어도 임의로 지워져, 가입 세션처럼 진행 중인 데이터가 끊긴다.
 

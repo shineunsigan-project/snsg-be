@@ -34,7 +34,7 @@ paths:
 - Spring Boot 4는 슬라이스 테스트에 기술별 test 스타터가 필요하다 (예: `spring-boot-starter-webmvc-test`). 없으면 build.gradle에 추가한다.
 - Boot 4에서 슬라이스 테스트 애너테이션의 패키지도 바뀌었다. `@DataJpaTest`는 `org.springframework.boot.data.jpa.test.autoconfigure`에 있다(`...boot.test.autoconfigure.orm.jpa` 아님). 스타터는 `spring-boot-starter-data-jpa-test`.
 - `@DataJpaTest`는 `@Entity`와 Spring Data repository만 등록한다. `@Repository` 구현체를 쓰려면 `@Import`로 직접 넣는다.
-- `@DataJpaTest`는 기본적으로 DataSource를 임베디드 DB로 바꿔치기한다. **우리 스키마는 PostgreSQL 전용 문법(부분 유니크 인덱스)에 의존하므로 반드시 실제 PostgreSQL로 돌린다.** Testcontainers를 쓰거나 `@AutoConfigureTestDatabase(replace = NONE)`로 로컬 컨테이너에 붙인다. 임베디드로 돌리면 제약이 아예 만들어지지 않아, 테스트는 통과하는데 운영에서 중복 데이터가 들어간다.
+- `@DataJpaTest`는 기본적으로 DataSource를 임베디드 DB로 바꿔치기한다. **우리 스키마는 PostgreSQL 전용 문법(부분 유니크 인덱스)에 의존하므로 반드시 실제 PostgreSQL로 돌린다.** `@AutoConfigureTestDatabase(replace = NONE)`로 `.env`가 가리키는 로컬 PostgreSQL 컨테이너(`snsg-postgres`)에 붙인다. Testcontainers는 쓰지 않는다(의존성 없음). 임베디드로 돌리면 제약이 아예 만들어지지 않아, 테스트는 통과하는데 운영에서 중복 데이터가 들어간다.
 - **DB 연결 수는 "캐시된 테스트 컨텍스트 수 × Hikari 풀 크기"다.** Spring은 컨텍스트를 구성(`@Import` 조합 등)별로 캐시해 JVM이 끝날 때까지 닫지 않고, 컨텍스트마다 풀을 하나씩 잡는다. 기본 풀(10)로는 DB 슬라이스 구성이 열 개쯤 되면 PostgreSQL `max_connections`(100)를 넘어 `FATAL: sorry, too many clients already`로 컨텍스트가 뜨지 않는다. 그래서 `snsg/build.gradle`의 test 태스크가 `spring.datasource.hikari.maximum-pool-size`를 3으로 둔다(SHI-156에서 DB 테스트 컨텍스트가 늘며 간헐 실패가 났다).
   - 한 테스트에서 동시에 쓰는 연결이 셋을 넘어야 하면 이 값을 함께 본다. 지금 가장 많이 쓰는 곳은 `ScheduleCommandServiceTest`의 동시 개설(둘)이다.
   - 실패가 간헐적이라 한 번 통과한 결과로 안심하지 않는다. DB 슬라이스 구성을 더한 작업은 `./gradlew cleanTest build`로 전체를 다시 돌려 확인한다.
@@ -45,9 +45,9 @@ paths:
 - 테스트는 기본 프로파일(`local`)로 돌고, 설정값은 `snsg/.env`에서 읽는다(`application-local.yaml`의 `spring.config.import`). 새 환경변수를 추가하면 `.env`에도 넣어야 컨텍스트가 뜬다.
 - 결과가 경고 로그로만 드러나는 분기는 `OutputCaptureExtension`(`org.springframework.boot.test.system`)으로 로그를 받아 단정한다. Mockito와 함께 쓸 때는 `@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})`. 예: `PlaceCommandServiceTest`.
 - 외부 API adapter는 슬라이스 없이 `MockRestServiceServer.bindTo(RestClient.Builder)`로 테스트한다.
-- Redis 같은 외부 저장소 adapter는 Testcontainers로 실제 컨테이너에서 테스트한다. 의존성은 `org.testcontainers:testcontainers-junit-jupiter`(Boot 4.0.8 관리 버전 2.0.5, 2.x에서 artifact 이름이 바뀌었다).
-  - `@Testcontainers(disabledWithoutDocker = true)`로 Docker가 없으면 실패가 아니라 건너뛰게 한다. 대신 build가 통과해도 실제로 돌았는지는 테스트 결과의 `skipped` 수로 확인한다.
-  - 슬라이스 없이 `LettuceConnectionFactory`를 컨테이너 host·port로 직접 만들어 adapter에 넣는다.
+- Redis adapter는 `@SpringBootTest`로 `.env`가 가리키는 로컬 Redis(Docker 컨테이너 `snsg-redis`)에 붙어 실제로 테스트한다. Testcontainers 의존성은 저장소에 없다. 예: `RedisRefreshTokenStoreAdapterTest`, `RedisSignUpSessionAdapterTest`.
+  - Redis가 꺼져 있으면 건너뛰지 않고 실패한다. 실패하면 코드보다 컨테이너가 떠 있는지 먼저 본다.
+  - 모든 워크트리가 Redis를 공유한다(`.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의"). 테스트는 고정된 키(고정 UUID 사용자·세션)를 쓰고, 만든 키를 `@AfterEach`에서 이름으로 지운다. 패턴으로 찾아 지우지 않는다. 다른 작업의 키까지 지운다.
 - `@WebMvcTest`에서 Spring Security를 쓰려면 `spring-boot-starter-security-test`가 있어야 한다. 이 모듈이 `@AutoConfigureMockMvc`에 보안 자동 설정을 넣는다. 없으면 `HttpSecurity` 빈도 `@AuthenticationPrincipal` 리졸버도 없다.
 - 인가 규칙과 401 형식은 auth에서 `@Import`로 `SecurityConfig`와 인증 진입점(entry point)을 넣고, 토큰 검증 adapter를 `@MockitoBean`으로 대체해 검증한다.
   - 예: `auth/infrastructure/security/SecurityConfigTest`. `@WebMvcTest(controllers = 대상 컨트롤러)`에 `SecurityConfig`·`JwtAuthenticationFilter`·`JwtAuthenticationEntryPoint`를 `@Import`하고 `TokenPort`와 컨트롤러가 의존하는 서비스를 `@MockitoBean`으로 둔다. 테스트 코드는 ArchUnit 검사 대상이 아니라 다른 도메인 컨트롤러를 대상으로 삼아도 된다.
