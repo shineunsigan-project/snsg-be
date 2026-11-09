@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -19,6 +20,7 @@ import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
 
+import com.shineunsigan.snsg.common.entity.Auditor;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
 import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
@@ -26,7 +28,7 @@ import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
 import jakarta.persistence.EntityManager;
 
 /**
- * 시간 겹침 쿼리, 일정 잠금 조회, 일정 목록 3종 쿼리와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
+ * 시간 겹침 쿼리, 일정 잠금 조회, 일정 목록 3종 쿼리, 상태 전환 일괄 UPDATE와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
  * 일정·참여 행은 native INSERT로 넣는다. 사용자 id는 테스트마다 무작위라 다른 데이터와 섞이지 않는다.
  * 테스트 트랜잭션은 롤백된다.
  */
@@ -36,9 +38,18 @@ import jakarta.persistence.EntityManager;
 class ScheduleRepositoryImplTest {
 
     private static final Duration WINDOW = Duration.ofHours(12);
+    /** 완료 기준 시간(schedule.completion-after). */
+    private static final Duration COMPLETION_AFTER = Duration.ofHours(12);
     private static final LocalDateTime EXISTING_START = LocalDateTime.of(2027, 1, 10, 19, 0);
     /** 목록 쿼리의 기준 시각. 인자로 넘겨 고정한다. */
     private static final LocalDateTime NOW = LocalDateTime.of(2027, 3, 10, 12, 0);
+    /**
+     * 상태 전환의 기준 시각. 일괄 UPDATE는 테이블 전체가 대상이라 과거로 고정해 공유 DB의 실제 일정(미래 시작)이
+     * 조건에 걸리지 않게 한다. 단정은 넣은 행의 id로만 한다.
+     */
+    private static final LocalDateTime TRANSITION_NOW = LocalDateTime.of(2020, 1, 1, 12, 0);
+    /** 넣은 행의 created_at·updated_at. 전환되지 않은 행은 이 값이 그대로 남는다. */
+    private static final LocalDateTime INSERTED_AT = LocalDateTime.of(2019, 12, 1, 9, 0);
 
     @Autowired
     private ScheduleRepositoryImpl scheduleRepository;
@@ -371,6 +382,153 @@ class ScheduleRepositoryImplTest {
         assertThat(hostedIds()).isEmpty();
     }
 
+    // 모집 마감 전환. 기준 시각을 과거로 고정하고 넣은 행의 id로 다시 읽어 단정한다(바뀐 건수는 공유 DB의 다른 행을 포함한다).
+
+    @Test
+    @DisplayName("시작 시각이 기준 시각과 같은 모집 중 일정은 모집 마감되고, 감사 값은 스케줄러와 기준 시각이 된다")
+    void closeRecruitmentAtStart() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW));
+
+        scheduleRepository.closeRecruitmentStarted(TRANSITION_NOW);
+
+        assertThat(state(schedule)).isEqualTo(transitioned("SCHEDULED", "CLOSED", TRANSITION_NOW));
+    }
+
+    @Test
+    @DisplayName("시작 1분 전인 일정은 모집 마감되지 않는다")
+    void closeRecruitmentBeforeStart() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW.plusMinutes(1)));
+
+        scheduleRepository.closeRecruitmentStarted(TRANSITION_NOW);
+
+        assertThat(state(schedule)).isEqualTo(untouched("SCHEDULED", "RECRUITING"));
+    }
+
+    @Test
+    @DisplayName("취소된 일정은 시작이 지나도 모집 마감되지 않는다")
+    void closeRecruitmentSkipsCanceled() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW.minusHours(1)).status("CANCELED"));
+
+        scheduleRepository.closeRecruitmentStarted(TRANSITION_NOW);
+
+        assertThat(state(schedule)).isEqualTo(untouched("CANCELED", "RECRUITING"));
+    }
+
+    @Test
+    @DisplayName("삭제된 일정은 시작이 지나도 모집 마감되지 않는다")
+    void closeRecruitmentSkipsDeleted() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW.minusHours(1)).deleted(true));
+
+        scheduleRepository.closeRecruitmentStarted(TRANSITION_NOW);
+
+        assertThat(state(schedule)).isEqualTo(untouched("SCHEDULED", "RECRUITING"));
+    }
+
+    @Test
+    @DisplayName("정원이 차 이미 모집 마감된 일정은 시작이 지나도 감사 값이 바뀌지 않는다")
+    void closeRecruitmentSkipsAlreadyClosed() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW.minusHours(1))
+                .capacity(6).confirmedCount(6).recruitmentStatus("CLOSED"));
+
+        scheduleRepository.closeRecruitmentStarted(TRANSITION_NOW);
+
+        assertThat(state(schedule)).isEqualTo(untouched("SCHEDULED", "CLOSED"));
+    }
+
+    @Test
+    @DisplayName("모집 마감 전환을 1분 뒤에 다시 돌려도 이미 마감한 일정은 다시 갱신되지 않는다")
+    void closeRecruitmentTwice() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW.minusHours(1)));
+
+        scheduleRepository.closeRecruitmentStarted(TRANSITION_NOW);
+        scheduleRepository.closeRecruitmentStarted(TRANSITION_NOW.plusMinutes(1));
+
+        assertThat(state(schedule)).isEqualTo(transitioned("SCHEDULED", "CLOSED", TRANSITION_NOW));
+    }
+
+    // 완료 전환
+
+    @Test
+    @DisplayName("시작 + 12시간이 기준 시각과 같은 예정 일정은 완료되고, 모집 상태는 넣은 값 그대로, 감사 값은 스케줄러와 기준 시각이 된다")
+    void completeAtCompletionTime() {
+        UUID recruiting = insertSchedule(row().startAt(TRANSITION_NOW.minus(COMPLETION_AFTER)));
+        UUID closed = insertSchedule(row().startAt(TRANSITION_NOW.minus(COMPLETION_AFTER))
+                .capacity(6).confirmedCount(6).recruitmentStatus("CLOSED"));
+
+        scheduleRepository.completeFinished(TRANSITION_NOW, COMPLETION_AFTER);
+
+        assertThat(state(recruiting)).isEqualTo(transitioned("COMPLETED", "RECRUITING", TRANSITION_NOW));
+        assertThat(state(closed)).isEqualTo(transitioned("COMPLETED", "CLOSED", TRANSITION_NOW));
+    }
+
+    @Test
+    @DisplayName("시작 + 12시간이 기준 시각 1분 뒤인 일정은 완료되지 않는다")
+    void completeBeforeCompletionTime() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW.minus(COMPLETION_AFTER).plusMinutes(1)));
+
+        scheduleRepository.completeFinished(TRANSITION_NOW, COMPLETION_AFTER);
+
+        assertThat(state(schedule)).isEqualTo(untouched("SCHEDULED", "RECRUITING"));
+    }
+
+    @Test
+    @DisplayName("취소된 일정은 시작 + 12시간이 지나도 완료되지 않는다")
+    void completeSkipsCanceled() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW.minusDays(1)).status("CANCELED"));
+
+        scheduleRepository.completeFinished(TRANSITION_NOW, COMPLETION_AFTER);
+
+        assertThat(state(schedule)).isEqualTo(untouched("CANCELED", "RECRUITING"));
+    }
+
+    @Test
+    @DisplayName("삭제된 일정은 시작 + 12시간이 지나도 완료되지 않는다")
+    void completeSkipsDeleted() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW.minusDays(1)).deleted(true));
+
+        scheduleRepository.completeFinished(TRANSITION_NOW, COMPLETION_AFTER);
+
+        assertThat(state(schedule)).isEqualTo(untouched("SCHEDULED", "RECRUITING"));
+    }
+
+    @Test
+    @DisplayName("완료 전환을 1분 뒤에 다시 돌려도 이미 완료한 일정은 다시 갱신되지 않는다")
+    void completeTwice() {
+        UUID schedule = insertSchedule(row().startAt(TRANSITION_NOW.minusDays(1)));
+
+        scheduleRepository.completeFinished(TRANSITION_NOW, COMPLETION_AFTER);
+        scheduleRepository.completeFinished(TRANSITION_NOW.plusMinutes(1), COMPLETION_AFTER);
+
+        assertThat(state(schedule)).isEqualTo(transitioned("COMPLETED", "RECRUITING", TRANSITION_NOW));
+    }
+
+    /** 일괄 UPDATE는 영속성 컨텍스트를 거치지 않으므로 native로 다시 읽는다. */
+    private ScheduleState state(UUID scheduleId) {
+        Object[] row = (Object[]) entityManager.createNativeQuery("""
+                        SELECT status, recruitment_status, updated_by, updated_at, created_by, created_at
+                        FROM schedules WHERE id = ?""")
+                .setParameter(1, scheduleId)
+                .getSingleResult();
+        return new ScheduleState((String) row[0], (String) row[1], (String) row[2], toLocalDateTime(row[3]),
+                (String) row[4], toLocalDateTime(row[5]));
+    }
+
+    private static LocalDateTime toLocalDateTime(Object value) {
+        return value instanceof Timestamp timestamp ? timestamp.toLocalDateTime() : (LocalDateTime) value;
+    }
+
+    private static ScheduleState untouched(String status, String recruitmentStatus) {
+        return new ScheduleState(status, recruitmentStatus, "SYSTEM", INSERTED_AT, "SYSTEM", INSERTED_AT);
+    }
+
+    private static ScheduleState transitioned(String status, String recruitmentStatus, LocalDateTime now) {
+        return new ScheduleState(status, recruitmentStatus, Auditor.SYSTEM_SCHEDULER, now, "SYSTEM", INSERTED_AT);
+    }
+
+    private record ScheduleState(String status, String recruitmentStatus, String updatedBy, LocalDateTime updatedAt,
+            String createdBy, LocalDateTime createdAt) {
+    }
+
     private List<UUID> recruitingIds(RecruitingScheduleFilter filter) {
         return ids(scheduleRepository.findRecruiting(filter, NOW, null, 100));
     }
@@ -415,7 +573,7 @@ class ScheduleRepositoryImplTest {
                                                created_at, updated_at, created_by, updated_by, is_deleted)
                         VALUES (?, ?, 'USER', ?, '테스트일정', '테스트 일정 설명입니다.', 'NORMAL', ?, ?, ?, ?,
                                 ?, ?, '테스트장소', '서울특별시 테스트로 1', '', 37.5, 126.9, ?,
-                                NOW(), NOW(), 'SYSTEM', 'SYSTEM', ?)""")
+                                ?, ?, 'SYSTEM', 'SYSTEM', ?)""")
                 .setParameter(1, id)
                 .setParameter(2, row.hostUserId != null ? row.hostUserId : UUID.randomUUID())
                 .setParameter(3, row.categoryId != null ? row.categoryId : UUID.randomUUID())
@@ -426,7 +584,9 @@ class ScheduleRepositoryImplTest {
                 .setParameter(8, row.recruitmentStatus)
                 .setParameter(9, UUID.randomUUID())
                 .setParameter(10, row.regionCode)
-                .setParameter(11, row.deleted)
+                .setParameter(11, INSERTED_AT)
+                .setParameter(12, INSERTED_AT)
+                .setParameter(13, row.deleted)
                 .executeUpdate();
         return id;
     }

@@ -1,0 +1,4 @@
+# 테스트 클래스패스에만 있는 설정. classpath:/config/application.yaml은 classpath:/application.yaml과 합쳐 읽히고 우선한다.
+# Gradle이든 IDE 러너든 @SpringBootTest 컨텍스트가 스케줄러를 띄워 공유 DB에 실제 상태 전환을 커밋하지 않게 끈다.
+scheduling:
+  enabled: false
