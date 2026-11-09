@@ -61,6 +61,7 @@
 - 복잡도는 facade를 만드는 기준이 아니다. 흐름이 길어도 위 두 경우가 아니면 서비스에 둔다.
 - 가진 데이터가 없는 도메인은 Command 서비스 없이 facade만 가질 수 있다. auth가 그렇다. 자기 테이블이 생기면 그때 만든다.
 - 서비스가 커져 한눈에 안 들어오면(대략 150줄) 책임별로 나눈다. 행위별로 나누지 않는다.
+  - 예: user의 `UserCommandService`(가입·탈퇴, 계정 생애주기)와 `UserProfileCommandService`(가입한 사용자의 프로필 수정). 한 서비스에 두면 150줄과 의존 4개를 넘는다. 나눈 서비스도 이름이 `CommandService`로 끝나야 ArchUnit 규칙이 적용된다.
 
 ## Port
 
@@ -117,6 +118,9 @@
   - 리스너: `@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)`
   - 리스너가 호출하는 UseCase 구현: `@Transactional(propagation = Propagation.REQUIRES_NEW)`. 없으면 AFTER_COMMIT 시점이라 수신 측 DB 변경이 저장되지 않는다. 구현이 facade면 facade에는 걸지 않고 DB를 바꾸는 서비스 메서드에 건다.
   - **트랜잭션 밖에서 발행한 이벤트는 AFTER_COMMIT 리스너에 도착하지 않는다.** 커밋할 트랜잭션이 없기 때문이다. 트랜잭션을 걸지 않는 facade(예: auth의 facade)에서 발행하지 않는다.
+- **커밋된 뒤에만 해야 하는 되돌릴 수 없는 외부 정리(파일 삭제 등)는 같은 도메인 이벤트로 넘긴다.** Command 서비스가 트랜잭션 안에서 이벤트 발행 포트로 발행하고, 같은 도메인 `infrastructure/event`의 리스너가 AFTER_COMMIT으로 받아 `port/out`을 부른다. facade 없이 외부 호출이 트랜잭션 밖에 남고, 롤백되면 지우지 않는다. 리스너가 DB를 바꾸지 않으므로 `REQUIRES_NEW`는 필요 없다.
+  - 예: `UserWithdrawnEvent`(탈퇴)·`ProfileImageReplacedEvent`(사진 교체) → `ProfileImageCleanupListener` → `FileStoragePort.delete`.
+  - **지울 대상이 사용자가 보낸 값(경로·키)에서 왔으면 저장할 때 막는다.** 우리가 만든 형식과 정확히 일치하는지, 다른 소유자가 이미 참조하고 있지 않은지 본다. 남의 경로를 자기 값으로 넣고 교체·탈퇴하면 남의 파일이 지워진다. 삭제 adapter도 형식 밖의 값이면 아무것도 지우지 않는다. 예: `ProfileImage.isUploadedPath`(수정·가입·삭제가 함께 쓰는 형식 규칙), `UserRepository.isProfileImageUsedByOthers`, `LocalFileStorageAdapter.delete`.
 - 같은 트랜잭션(`@EventListener`)은 두 도메인 변경이 반드시 원자적이어야 할 때만 쓰고, 그 이유와 "서비스 분리 시 saga 필요"를 주석으로 남긴다.
 - AFTER_COMMIT 방식은 수신 실패 시 이벤트가 유실된다. 유실되면 안 되는 이벤트가 생기면 Spring Modulith(Event Publication Registry) 도입을 제안한다.
 - **유실이 보안·정합성 문제로 번지는 이벤트는 수신 측에 안전망을 함께 둔다.** 이벤트는 즉시 정리용이고, 안전망이 최종 보장이다.
@@ -218,6 +222,11 @@
   - 지우는 쪽은 중간에 실패해 남는 것이 TTL이 걸린 무해한 값이면 묶지 않는다. 예: 로그아웃의 DEL + SREM(SET에 세션 id만 남아도 지울 대상이 없을 뿐이다), 탈퇴의 SMEMBERS 후 DEL 한 번(그 사이 생긴 세션은 재발급 때 사용자 확인에 막힌다).
 - 토큰처럼 탈취되면 피해가 큰 값은 **원문이 아니라 해시**를 저장한다. 덤프·백업이 유출돼도 복원할 수 없다.
 - 운영 Redis는 `maxmemory-policy`를 `noeviction`(또는 `volatile-ttl`)로 둔다. `allkeys-*`면 TTL이 남아 있어도 임의로 지워져, 가입 세션처럼 진행 중인 데이터가 끊긴다.
+
+### 설정 (`@ConfigurationProperties`)
+
+- **prefix를 흔한 OS 환경변수 이름(`user`, `home`, `path`, `lang` 등)과 같게 두지 않는다.** Spring은 OS 환경변수도 속성으로 읽어 `USER`를 `user` 속성으로 잡는다. prefix와 정확히 같은 이름의 값이 있으면 Binder가 그 문자열을 record에 바인딩하려 해 기동이 실패할 수 있다. 리눅스 운영 서버에는 `USER`·`HOME`·`PATH`가 항상 있다. 예: 닉네임 정책은 `user.*`가 아니라 `nickname.*`(`user/application/NicknameProperties`)다.
+- 두 규칙이 같은 기간을 쓰면 설정 하나에서 읽는다. 예: `nickname.protect-after-change`는 바꾸기 전 닉네임 보호 기간이자 닉네임 재변경 제한 기간이다.
 
 ## 코드 작성
 
