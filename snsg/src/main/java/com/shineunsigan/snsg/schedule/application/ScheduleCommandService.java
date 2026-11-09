@@ -67,6 +67,18 @@ public class ScheduleCommandService {
         schedule.leave(userId, LocalDateTime.now(), scheduleProperties.completionAfter());
     }
 
+    /** 시작 시각이 지난 모집 중 일정을 모집 마감으로 바꾼다(스케줄러). */
+    @Transactional
+    public void closeStartedRecruitments() {
+        scheduleRepository.closeRecruitmentStarted(LocalDateTime.now());
+    }
+
+    /** 시작 + 완료 기준 시간이 지난 예정 일정을 완료로 바꾼다(스케줄러). */
+    @Transactional
+    public void completeFinishedSchedules() {
+        scheduleRepository.completeFinished(LocalDateTime.now(), scheduleProperties.completionAfter());
+    }
+
     private Schedule findScheduleForUpdate(UUID scheduleId) {
         return scheduleRepository.findByIdForUpdate(scheduleId)
                 .orElseThrow(() -> new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND));

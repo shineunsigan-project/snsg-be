@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Repository;
 
+import com.shineunsigan.snsg.common.entity.Auditor;
 import com.shineunsigan.snsg.schedule.domain.constants.ParticipantRole;
 import com.shineunsigan.snsg.schedule.domain.constants.ParticipationStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus;
@@ -116,6 +117,16 @@ public class ScheduleRepositoryImpl implements ScheduleRepository {
         parameters.put("completed", ScheduleStatus.COMPLETED);
         parameters.put("startAfter", startAfter);
         return findPage(jpql, parameters, after, limit);
+    }
+
+    @Override
+    public void closeRecruitmentStarted(LocalDateTime now) {
+        scheduleJpaRepository.closeRecruitmentStarted(now, Auditor.SYSTEM_SCHEDULER);
+    }
+
+    @Override
+    public void completeFinished(LocalDateTime now, Duration completionAfter) {
+        scheduleJpaRepository.completeStartedBy(now.minus(completionAfter), now, Auditor.SYSTEM_SCHEDULER);
     }
 
     /**

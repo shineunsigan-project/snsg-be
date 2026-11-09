@@ -60,4 +60,16 @@ public interface ScheduleRepository {
      * @param startAfter 지금 − 완료 기준 시간
      */
     List<Schedule> findHosted(UUID userId, LocalDateTime startAfter, ScheduleCursor after, int limit);
+
+    /*
+     * 상태 전환(스케줄러). 조건부 일괄 UPDATE라 여러 번, 여러 서버에서 돌아도 결과가 같다.
+     * 삭제된 일정은 바꾸지 않는다(삭제한 주체의 updated_by를 덮어쓰지 않는다).
+     * JPA Auditing을 거치지 않으므로 updated_at은 now, updated_by는 스케줄러로 직접 넣는다.
+     */
+
+    /** 예정(SCHEDULED)·모집 중이고 시작 시각이 now 이하인 일정을 모집 마감(CLOSED)으로 바꾼다. */
+    void closeRecruitmentStarted(LocalDateTime now);
+
+    /** 예정(SCHEDULED)이고 시작 + completionAfter가 now 이하인 일정을 완료(COMPLETED)로 바꾼다. 모집 상태는 그대로다. */
+    void completeFinished(LocalDateTime now, Duration completionAfter);
 }
