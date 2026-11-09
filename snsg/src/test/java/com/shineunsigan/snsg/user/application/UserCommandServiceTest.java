@@ -3,11 +3,13 @@ package com.shineunsigan.snsg.user.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -77,7 +79,7 @@ class UserCommandServiceTest {
     }
 
     private User registerAndCaptureSavedUser(RegisterUserCommand command) {
-        when(userRepository.existsByNickname(command.nickname())).thenReturn(false);
+        when(userRepository.isNicknameTaken(eq(command.nickname()), any(LocalDateTime.class))).thenReturn(false);
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         userCommandService.register(command);
@@ -106,9 +108,9 @@ class UserCommandServiceTest {
     }
 
     @Test
-    @DisplayName("이미 쓰이는 닉네임이면 저장하지 않고 DUPLICATED_NICKNAME")
+    @DisplayName("이미 쓰이거나 보호 중인 닉네임이면 저장하지 않고 DUPLICATED_NICKNAME")
     void registerRejectsDuplicatedNickname() {
-        when(userRepository.existsByNickname("mint")).thenReturn(true);
+        when(userRepository.isNicknameTaken(eq("mint"), any(LocalDateTime.class))).thenReturn(true);
 
         assertThatThrownBy(() -> userCommandService.register(registerCommand("mint", "")))
                 .isInstanceOf(BusinessException.class)

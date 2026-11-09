@@ -77,8 +77,15 @@ public class Profile {
         return profileImageUrl;
     }
 
+    /**
+     * 2~10자의 한글·영문·숫자·.·_인지 본다. 닉네임 사용 가능 여부 조회가 저장 전에 같은 규칙으로 판정한다.
+     */
+    public static boolean isValidNickname(String nickname) {
+        return nickname != null && NICKNAME.matcher(nickname).matches();
+    }
+
     private static void validateNickname(String nickname) {
-        if (nickname == null || !NICKNAME.matcher(nickname).matches()) {
+        if (!isValidNickname(nickname)) {
             throw new BusinessException(UserErrorCode.INVALID_NICKNAME);
         }
     }

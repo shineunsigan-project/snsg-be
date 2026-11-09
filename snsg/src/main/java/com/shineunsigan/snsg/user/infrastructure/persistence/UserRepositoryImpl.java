@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.user.infrastructure.persistence;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,8 +45,8 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
-    public boolean existsByNickname(String nickname) {
-        return userJpaRepository.existsByNicknameIgnoreCase(nickname);
+    public boolean isNicknameTaken(String nickname, LocalDateTime now) {
+        return userJpaRepository.isNicknameTaken(nickname, now);
     }
 
     private boolean violatesNicknameIndex(DataIntegrityViolationException exception) {

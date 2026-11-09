@@ -1,6 +1,7 @@
 package com.shineunsigan.snsg.user.application;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -53,7 +54,7 @@ public class UserCommandService implements RegisterUserUseCase, WithdrawUserUseC
     }
 
     private void validateNicknameNotTaken(String nickname) {
-        if (userRepository.existsByNickname(nickname)) {
+        if (userRepository.isNicknameTaken(nickname, LocalDateTime.now())) {
             throw new BusinessException(UserErrorCode.DUPLICATED_NICKNAME);
         }
     }

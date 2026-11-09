@@ -132,7 +132,8 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 - 위 형식 오류는 모두 `400 INVALID_REQUEST`와 `errors`로 온다. 필드별 안내는 `errors`로 한다.
 - `gender`에 `FEMALE`·`MALE` 밖의 값을 보내거나 `2010-02-30`처럼 없는 날짜를 보내면 JSON 변환 단계에서 실패해 `400 INVALID_REQUEST`만 오고 `errors`는 없다. 화면에서 고를 수 있는 값만 보내면 나지 않는다.
 - 형식은 맞지만 가입일 기준 **만 18세 미만**이면 `400 UNDERAGE`("만 18세 이상만 가입할 수 있어요."). 2월 29일생은 평년에는 3월 1일에 한 살을 먹는다.
-- 닉네임 중복은 **대소문자를 무시**한다. 누가 `Mint`를 쓰고 있으면 `mint`도 `409 DUPLICATED_NICKNAME`이다. 탈퇴한 회원의 닉네임은 다시 쓸 수 있다. 두 사람이 같은 닉네임으로 동시에 가입해도 한쪽은 409를 받는다.
+- 닉네임 중복은 **대소문자를 무시**한다. 누가 `Mint`를 쓰고 있으면 `mint`도 `409 DUPLICATED_NICKNAME`이다. 닉네임을 바꾸거나 탈퇴한 회원의 이전 닉네임도 **보호 기간**(바꾸기 전 닉네임 14일, 탈퇴 90일) 동안은 409다. 기간이 지나면 다시 쓸 수 있다. 보호 이력은 닉네임 변경·탈퇴가 남기는데 두 기능에 아직 이력 기록이 들어가지 않아, 지금은 탈퇴한 회원의 닉네임을 바로 다시 쓸 수 있다. 두 사람이 같은 닉네임으로 동시에 가입해도 한쪽은 409를 받는다.
+- 입력 중에 미리 확인하려면 아래 [닉네임 사용 가능 여부](#닉네임-사용-가능-여부)를 부른다. 결과는 안내용이고, 409는 가입 요청에서도 날 수 있다.
 
 **프로필 완성 화면의 기본값**은 `GET /api/v1/auth/signup/session`으로 받는다(`signUpToken` 쿠키 필요).
 
@@ -152,6 +153,48 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 - 가입 요청의 `profileImageUrl`에는 **이 API가 돌려준 경로만** 넣을 수 있다. 다른 주소를 넣으면 400 `INVALID_PROFILE_IMAGE_URL`이다.
 - 비워 두면(`null` 또는 생략) 소셜에서 받은 사진을 쓴다. 그것도 없으면 기본 이미지가 된다.
 - 올리기만 하고 가입을 완료하지 않으면 그 사진은 쓰이지 않는다.
+
+### 닉네임 사용 가능 여부
+
+`GET /api/v1/users/nickname-availability?nickname=<값>`. 입력한 닉네임을 쓸 수 있는지 알려준다.
+
+- **부르는 화면**: 가입 닉네임 입력(프로필 완성 화면), 프로필 수정 화면. 사용자가 **닉네임 칸을 벗어날 때** 부른다.
+- **결과는 안내용이다.** 가입·프로필 수정 API가 저장할 때 같은 검사를 다시 한다. 여기서 `true`였어도 그 사이 다른 사람이 먼저 쓰면 가입·수정이 `409 DUPLICATED_NICKNAME`으로 실패할 수 있다. 그때는 다른 닉네임을 입력받는다.
+- **토큰은 선택이다.**
+  - 가입 중에는 access token이 없으므로 토큰 없이 부른다.
+  - 프로필 수정 화면에서는 access token을 붙여 부른다. 토큰이 있으면 **본인의 현재 닉네임은 사용 가능(`true`)** 으로 나온다(대소문자 무시). 붙이지 않으면 본인 닉네임도 `DUPLICATED`로 나온다.
+  - 토큰이 틀리거나 만료돼도 **401이 오지 않는다.** 토큰 없이 부른 것과 같게 처리된다. 이 API 때문에 재발급을 시도할 필요는 없다.
+- 요청(쿼리 파라미터):
+
+  | 파라미터 | 필수 | 의미·형식 |
+  | --- | --- | --- |
+  | `nickname` | 필수 | 확인할 닉네임. 입력칸의 값을 그대로 보낸다. 형식 검사도 서버가 한다 |
+
+- 응답 예시:
+  ```json
+  { "isSuccess": true, "data": { "available": true, "reason": null } }
+  ```
+  ```json
+  { "isSuccess": true, "data": { "available": false, "reason": "DUPLICATED" } }
+  ```
+  - `available`: 쓸 수 있으면 `true`. null이 아니다.
+  - `reason`: 쓸 수 없는 이유. **`available`이 `true`면 `null`이다.**
+
+  | `reason` | 뜻 | 화면에서 할 일 |
+  | --- | --- | --- |
+  | `INVALID_FORMAT` | 2~10자의 한글·영문·숫자·`.`·`_`가 아니다. 빈 값도 여기다 | 형식 안내 문구("닉네임은 2~10자의 한글·영문·숫자·.·_만 쓸 수 있어요.")를 보여준다 |
+  | `DUPLICATED` | 다른 회원이 쓰고 있거나, 바꾸거나 탈퇴한 회원의 이전 닉네임이라 보호 기간(바꾸기 전 닉네임 14일, 탈퇴 90일)이 남았다. 대소문자는 무시한다 | 이미 쓰이는 닉네임이라고 안내하고 다른 닉네임을 입력하게 한다 |
+
+  - `DUPLICATED`는 사용 중과 보호 중을 **구분하지 않는다.** 보호 중이라고 알리면 다른 회원이 탈퇴했거나 닉네임을 바꿨다는 사실이 드러나기 때문이다. 화면 문구도 나누지 않는다.
+  - 판정 순서는 형식 → 본인의 현재 닉네임 → 사용 중·보호 중이다. 형식이 틀리면 중복 여부와 상관없이 `INVALID_FORMAT`이다.
+- **형식 오류·중복도 200이다.** 결과는 `data.available`과 `data.reason`으로 본다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 400 | `INVALID_REQUEST` | `nickname` 파라미터가 아예 없다. `?nickname=`처럼 빈 값으로 보내면 400이 아니라 200 `INVALID_FORMAT`이다 | 정상 화면 흐름에서는 나지 않는다. 파라미터를 빠뜨리지 않는다 |
+
+- 조회만 하므로 **같은 요청을 몇 번 다시 보내도 된다.** 실패하면 그대로 재시도한다.
 
 ### 로그아웃
 
@@ -327,8 +370,10 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 앱 시작 | `POST /api/v1/auth/tokens` (credentials 포함) | 200이면 access token을 받아 메인. 401이면 비로그인 상태로 둔다 |
 | 로그인 | `GET /api/v1/auth/kakao/authorize`로 이동 | 돌아오면 `?signUp` 여부로 분기 |
 | 프로필 완성 (진입) | `GET /api/v1/auth/signup/session` | 닉네임·사진 기본값 표시. 401이면 카카오 로그인부터 다시 |
+| 프로필 완성 (닉네임 칸을 벗어날 때) | `GET /api/v1/users/nickname-availability` (토큰 없이) | `available`이 false면 `reason`에 따라 형식 안내(`INVALID_FORMAT`) 또는 다른 닉네임 안내(`DUPLICATED`). 가입 요청도 같은 검사를 다시 하므로 409 처리는 그대로 둔다 |
 | 프로필 완성 (사진 변경) | `POST /api/v1/auth/signup/profile-image` | 받은 경로를 가입 요청에 넣는다 |
 | 프로필 완성 (제출) | `POST /api/v1/auth/signup` | 200이면 access token 저장 후 메인. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 400 `UNDERAGE`면 가입 불가 안내. 409면 닉네임 변경 안내 |
+| 프로필 수정 (닉네임 칸을 벗어날 때) | `GET /api/v1/users/nickname-availability` (access token 포함) | 위와 같다. 본인의 현재 닉네임은 `true`로 온다. 프로필 수정 API는 아직 없다 |
 | 설정 · 로그아웃 | `DELETE /api/v1/auth/tokens` | 응답과 무관하게 메모리의 토큰을 버리고 로그인 화면 |
 | 설정 · 탈퇴 | `DELETE /api/v1/users/me` → `DELETE /api/v1/auth/tokens` | 되돌릴 수 없음을 한 번 확인받고 호출. 끝나면 로그인 화면 |
 | 일정 목록 (지역 필터) | `GET /api/v1/regions` | 받은 순서대로 필터를 그린다 |

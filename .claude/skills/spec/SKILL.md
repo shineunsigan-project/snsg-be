@@ -75,7 +75,7 @@ description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md�
 1. 닉네임이 2자 미만이면 `BusinessException(UserErrorCode.INVALID_NICKNAME)`이 난다.
    - 검증: `cd snsg && ./gradlew test --tests '*UserCommandServiceTest'` → 85개 통과
 2. 닉네임 중복 확인 API가 이미 쓰는 닉네임에 false를 돌려준다.
-   - 검증: `curl -s localhost:8080/api/v1/users/nickname-availability?nickname=tester` → 200, `{"isAvailable":false}`
+   - 검증: `curl -s localhost:8080/api/v1/users/nickname-availability?nickname=tester` → 200, `"data":{"available":false,"reason":"DUPLICATED"}`
 ```
 
 | 나쁜 예 | 왜 안 되는가 | 좋은 예 |

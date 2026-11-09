@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,9 @@ import jakarta.persistence.EntityManager;
 @Import({UserRepositoryImpl.class, UserSocialAccountRepositoryImpl.class, JpaAuditingConfig.class})
 class UserRepositoryImplTest {
 
+    /** 이력의 보호 기간을 이 시각 앞뒤로 넣어 시계에 흔들리지 않게 한다. */
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 11, 9, 12, 0);
+
     @Autowired
     private UserRepositoryImpl userRepository;
 
@@ -47,7 +52,7 @@ class UserRepositoryImplTest {
         userRepository.save(createUser("민트초코"));
         entityManager.flush();
 
-        assertThat(userRepository.existsByNickname("민트초코")).isTrue();
+        assertThat(userRepository.isNicknameTaken("민트초코", NOW)).isTrue();
     }
 
     @Test
@@ -57,7 +62,7 @@ class UserRepositoryImplTest {
         user.withdraw();
         entityManager.flush();
 
-        assertThat(userRepository.existsByNickname("민트초코")).isFalse();
+        assertThat(userRepository.isNicknameTaken("민트초코", NOW)).isFalse();
         userRepository.save(createUser("민트초코"));
         entityManager.flush();
     }
@@ -67,9 +72,9 @@ class UserRepositoryImplTest {
     void duplicatedNicknameIgnoresCase() {
         userRepository.save(createUser("Mint"));
 
-        assertThat(userRepository.existsByNickname("mint")).isTrue();
-        assertThat(userRepository.existsByNickname("MINT")).isTrue();
-        assertThat(userRepository.existsByNickname("mint2")).isFalse();
+        assertThat(userRepository.isNicknameTaken("mint", NOW)).isTrue();
+        assertThat(userRepository.isNicknameTaken("MINT", NOW)).isTrue();
+        assertThat(userRepository.isNicknameTaken("mint2", NOW)).isFalse();
     }
 
     @Test
@@ -79,7 +84,46 @@ class UserRepositoryImplTest {
         user.withdraw();
         entityManager.flush();
 
-        assertThat(userRepository.existsByNickname("mint")).isFalse();
+        assertThat(userRepository.isNicknameTaken("mint", NOW)).isFalse();
+    }
+
+    @Test
+    @DisplayName("보호 기간이 남은 변경 이력의 닉네임은 대소문자가 달라도 중복으로 본다")
+    void nicknameProtectedAfterChange() {
+        User user = userRepository.save(createUser("Lemon"));
+        insertHistory(user, "Mint", "CHANGED", NOW.plusDays(1), false);
+
+        assertThat(userRepository.isNicknameTaken("Mint", NOW)).isTrue();
+        assertThat(userRepository.isNicknameTaken("mint", NOW)).isTrue();
+    }
+
+    @Test
+    @DisplayName("보호 기간이 남은 탈퇴 이력의 닉네임은 중복으로 본다")
+    void nicknameProtectedAfterWithdrawal() {
+        User user = userRepository.save(createUser("민트초코"));
+        user.withdraw();
+        entityManager.flush();
+        insertHistory(user, "민트초코", "WITHDRAWN", NOW.plusDays(90), false);
+
+        assertThat(userRepository.isNicknameTaken("민트초코", NOW)).isTrue();
+    }
+
+    @Test
+    @DisplayName("보호 기간이 지난 이력의 닉네임은 다시 쓸 수 있다")
+    void nicknameReusableAfterProtection() {
+        User user = userRepository.save(createUser("Lemon"));
+        insertHistory(user, "Mint", "CHANGED", NOW.minusSeconds(1), false);
+
+        assertThat(userRepository.isNicknameTaken("Mint", NOW)).isFalse();
+    }
+
+    @Test
+    @DisplayName("삭제된 이력은 보호 기간이 남아도 보지 않는다")
+    void deletedHistoryIsIgnored() {
+        User user = userRepository.save(createUser("Lemon"));
+        insertHistory(user, "Mint", "CHANGED", NOW.plusDays(1), true);
+
+        assertThat(userRepository.isNicknameTaken("Mint", NOW)).isFalse();
     }
 
     @Test
@@ -154,6 +198,23 @@ class UserRepositoryImplTest {
         assertThat(user.getCreatedBy()).isEqualTo("SYSTEM");
         assertThat(user.getUpdatedBy()).isEqualTo("SYSTEM");
         assertThat(user.getCreatedAt()).isNotNull();
+    }
+
+    /** 이력 엔티티가 아직 없어(T-03에서 만든다) native INSERT로 넣는다. */
+    private void insertHistory(User user, String nickname, String reason, LocalDateTime reservedUntil,
+            boolean deleted) {
+        entityManager.createNativeQuery("""
+                        INSERT INTO user_nickname_histories
+                            (id, user_id, nickname, reason, reserved_until, created_at, updated_at, is_deleted)
+                        VALUES (:id, :userId, :nickname, :reason, :reservedUntil, :now, :now, :deleted)""")
+                .setParameter("id", UUID.randomUUID())
+                .setParameter("userId", user.getId())
+                .setParameter("nickname", nickname)
+                .setParameter("reason", reason)
+                .setParameter("reservedUntil", reservedUntil)
+                .setParameter("now", NOW)
+                .setParameter("deleted", deleted)
+                .executeUpdate();
     }
 
     private User createUser(String nickname) {
