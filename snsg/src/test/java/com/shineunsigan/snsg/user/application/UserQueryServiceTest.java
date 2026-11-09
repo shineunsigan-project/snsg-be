@@ -1,6 +1,7 @@
 package com.shineunsigan.snsg.user.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -21,19 +23,25 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.shineunsigan.snsg.common.exception.BusinessException;
+import com.shineunsigan.snsg.user.application.dto.result.MyProfileResult;
 import com.shineunsigan.snsg.user.application.dto.result.NicknameAvailabilityResult;
 import com.shineunsigan.snsg.user.domain.constants.Gender;
 import com.shineunsigan.snsg.user.domain.constants.NicknameUnavailableReason;
+import com.shineunsigan.snsg.user.domain.exception.UserErrorCode;
 import com.shineunsigan.snsg.user.domain.model.Profile;
 import com.shineunsigan.snsg.user.domain.model.User;
+import com.shineunsigan.snsg.user.domain.repository.UserNicknameHistoryRepository;
 import com.shineunsigan.snsg.user.domain.repository.UserRepository;
 import com.shineunsigan.snsg.user.domain.repository.UserSocialAccountRepository;
 
 /**
  * 닉네임 사용 가능 여부의 판정 순서(형식 → 본인 → 중복)를 본다.
  * 중복 판정 자체(사용 중·보호 중·만료)는 {@code UserRepositoryImplTest}가 실제 DB로 본다.
+ * 내 프로필 조회는 닉네임 변경 가능 시각이 마지막 변경 이력에 따라 정해지는지 본다.
  */
 @ExtendWith(MockitoExtension.class)
 class UserQueryServiceTest {
@@ -45,6 +53,12 @@ class UserQueryServiceTest {
 
     @Mock
     private UserSocialAccountRepository userSocialAccountRepository;
+
+    @Mock
+    private UserNicknameHistoryRepository userNicknameHistoryRepository;
+
+    @Spy
+    private NicknameProperties nicknameProperties = new NicknameProperties(Duration.ofDays(14));
 
     @InjectMocks
     private UserQueryService userQueryService;
@@ -133,5 +147,52 @@ class UserQueryServiceTest {
         assertThat(result.available()).isFalse();
         assertThat(result.reason()).isEqualTo(NicknameUnavailableReason.DUPLICATED);
         verify(userRepository, never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("닉네임을 바꾼 적이 없으면 nicknameChangeableAt은 null")
+    void myProfileWithoutHistory() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(userWithNickname("민트초코")));
+        when(userNicknameHistoryRepository.findLastChangedAt(USER_ID)).thenReturn(Optional.empty());
+
+        MyProfileResult result = userQueryService.getMyProfile(USER_ID);
+
+        assertThat(result.nickname()).isEqualTo("민트초코");
+        assertThat(result.nicknameChangeableAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("마지막 닉네임 변경이 14일 안이면 nicknameChangeableAt은 변경 시각 + 14일")
+    void myProfileWithinRestriction() {
+        LocalDateTime lastChangedAt = LocalDateTime.now().minusDays(3);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(userWithNickname("민트초코")));
+        when(userNicknameHistoryRepository.findLastChangedAt(USER_ID)).thenReturn(Optional.of(lastChangedAt));
+
+        MyProfileResult result = userQueryService.getMyProfile(USER_ID);
+
+        assertThat(result.nicknameChangeableAt()).isEqualTo(lastChangedAt.plusDays(14));
+    }
+
+    @Test
+    @DisplayName("마지막 닉네임 변경이 14일보다 전이면 nicknameChangeableAt은 null")
+    void myProfileAfterRestriction() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(userWithNickname("민트초코")));
+        when(userNicknameHistoryRepository.findLastChangedAt(USER_ID))
+                .thenReturn(Optional.of(LocalDateTime.now().minusDays(15)));
+
+        MyProfileResult result = userQueryService.getMyProfile(USER_ID);
+
+        assertThat(result.nicknameChangeableAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("내 프로필을 조회할 사용자가 없으면(탈퇴 포함) USER_NOT_FOUND")
+    void myProfileUserNotFound() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userQueryService.getMyProfile(USER_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(UserErrorCode.USER_NOT_FOUND);
     }
 }
