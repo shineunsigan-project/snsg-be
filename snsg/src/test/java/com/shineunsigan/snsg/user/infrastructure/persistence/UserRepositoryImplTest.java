@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
@@ -240,6 +241,30 @@ class UserRepositoryImplTest {
 
         assertThat(userRepository.isProfileImageUsedByOthers(used, null)).isTrue();
         assertThat(userRepository.isProfileImageUsedByOthers(uploadedPath(), null)).isFalse();
+    }
+
+    @Test
+    @DisplayName("삭제 여부와 상관없이 ID들을 한 번에 읽고, 없는 ID는 결과에 없다")
+    void findAllByIdIncludingDeleted() {
+        User active = userRepository.save(createUser(randomNickname()));
+        User deleted = userRepository.save(createUser(randomNickname()));
+        deleted.delete();
+        entityManager.flush();
+        entityManager.clear();
+
+        List<User> found = userRepository.findAllByIdIncludingDeleted(
+                List.of(active.getId(), deleted.getId(), UUID.randomUUID()));
+
+        assertThat(found).extracting(User::getId).containsExactlyInAnyOrder(active.getId(), deleted.getId());
+        assertThat(found).filteredOn(user -> user.getId().equals(deleted.getId()))
+                .singleElement()
+                .extracting(User::isDeleted)
+                .isEqualTo(true);
+    }
+
+    /** 공유 DB의 다른 행과 닉네임이 겹치지 않게 무작위로 만든다. */
+    private String randomNickname() {
+        return "t" + UUID.randomUUID().toString().replace("-", "").substring(0, 9);
     }
 
     private String uploadedPath() {
