@@ -3,6 +3,8 @@ package com.shineunsigan.snsg.auth.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -68,7 +70,7 @@ class CompleteSignUpFacadeTest {
         when(signUpSessionPort.find(SIGNUP_TOKEN)).thenReturn(Optional.of(SOCIAL_USER));
         when(userPort.register(any())).thenReturn(userId);
         when(tokenPort.issueAccessToken(userId)).thenReturn("access");
-        when(tokenPort.issueRefreshToken(userId)).thenReturn("refresh");
+        when(tokenPort.issueRefreshToken(eq(userId), anyString())).thenReturn("refresh");
 
         TokenResult result = completeSignUpFacade.completeSignUp(COMMAND);
 

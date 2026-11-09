@@ -316,8 +316,23 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("로그아웃은 인증된 사용자의 토큰을 지우고 쿠키를 만료시킨다")
+    @DisplayName("로그아웃은 인증된 사용자와 refresh 쿠키로 이 기기의 세션을 지우고 쿠키를 만료시킨다")
     void logout() throws Exception {
+        UUID userId = UUID.randomUUID();
+        SecurityContextHolder.getContext()
+                .setAuthentication(new UsernamePasswordAuthenticationToken(userId, null, java.util.List.of()));
+
+        mockMvc.perform(delete("/api/v1/auth/tokens").cookie(new Cookie(AuthCookieFactory.REFRESH_TOKEN, REFRESH_TOKEN)))
+                .andExpect(status().isOk())
+                .andExpect(cookie().maxAge(AuthCookieFactory.REFRESH_TOKEN, 0));
+
+        verify(reissueTokenFacade).logout(userId, REFRESH_TOKEN);
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @DisplayName("refresh 쿠키가 없어도 로그아웃은 200이고 쿠키를 만료시킨다")
+    void logoutWithoutCookie() throws Exception {
         UUID userId = UUID.randomUUID();
         SecurityContextHolder.getContext()
                 .setAuthentication(new UsernamePasswordAuthenticationToken(userId, null, java.util.List.of()));
@@ -326,7 +341,7 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(cookie().maxAge(AuthCookieFactory.REFRESH_TOKEN, 0));
 
-        verify(reissueTokenFacade).logout(userId);
+        verify(reissueTokenFacade).logout(userId, null);
         SecurityContextHolder.clearContext();
     }
 
