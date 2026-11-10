@@ -42,10 +42,12 @@ import com.shineunsigan.snsg.common.web.GlobalExceptionHandler;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.ListParticipantsFacade;
 import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.command.CreateScheduleCommand;
 import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
+import com.shineunsigan.snsg.schedule.application.dto.result.ParticipantListItemResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ParticipantSummaryResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleAgeGroupResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
@@ -57,6 +59,7 @@ import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
 import com.shineunsigan.snsg.schedule.domain.constants.AgePhase;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
+import com.shineunsigan.snsg.schedule.domain.constants.Gender;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
 import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
@@ -95,6 +98,9 @@ class ScheduleControllerTest {
 
     @MockitoBean
     private GetScheduleDetailFacade getScheduleDetailFacade;
+
+    @MockitoBean
+    private ListParticipantsFacade listParticipantsFacade;
 
     @BeforeEach
     void authenticate() {
@@ -377,6 +383,67 @@ class ScheduleControllerTest {
                 .thenThrow(new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND));
 
         mockMvc.perform(get("/api/v1/schedules/{scheduleId}", scheduleId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("SCHEDULE_NOT_FOUND"));
+    }
+
+    // 참여자 명단
+
+    @Test
+    @DisplayName("명단은 인증한 사용자로 facade를 부르고 data에 배열을 준다. isHost·isMe 키 그대로이고 이름·이메일·생년월일·사용자 id가 없다")
+    void listsParticipants() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        when(listParticipantsFacade.list(scheduleId, USER_ID)).thenReturn(List.of(
+                new ParticipantListItemResult("민트초코", "/images/profiles/host.png", Gender.FEMALE,
+                        new ScheduleAgeGroupResult(20, AgePhase.LATE), true, false, false),
+                new ParticipantListItemResult("탈퇴한 사용자", "/images/default-profile.png", Gender.MALE, null, false,
+                        true, true)));
+
+        mockMvc.perform(get("/api/v1/schedules/{scheduleId}/participants", scheduleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].nickname").value("민트초코"))
+                .andExpect(jsonPath("$.data[0].profileImageUrl").value("/images/profiles/host.png"))
+                .andExpect(jsonPath("$.data[0].gender").value("FEMALE"))
+                .andExpect(jsonPath("$.data[0].ageGroup.decade").value(20))
+                .andExpect(jsonPath("$.data[0].ageGroup.phase").value("LATE"))
+                .andExpect(jsonPath("$.data[0].isHost").value(true))
+                .andExpect(jsonPath("$.data[0].isMe").value(false))
+                .andExpect(jsonPath("$.data[0].withdrawn").value(false))
+                .andExpect(jsonPath("$.data[0].host").doesNotExist())
+                .andExpect(jsonPath("$.data[0].me").doesNotExist())
+                .andExpect(jsonPath("$.data[0].name").doesNotExist())
+                .andExpect(jsonPath("$.data[0].email").doesNotExist())
+                .andExpect(jsonPath("$.data[0].birthDate").doesNotExist())
+                .andExpect(jsonPath("$.data[0].userId").doesNotExist())
+                .andExpect(jsonPath("$.data[0].id").doesNotExist())
+                .andExpect(jsonPath("$.data[1].ageGroup").value(nullValue()))
+                .andExpect(jsonPath("$.data[1].isMe").value(true))
+                .andExpect(jsonPath("$.data[1].withdrawn").value(true));
+
+        verify(listParticipantsFacade).list(scheduleId, USER_ID);
+    }
+
+    @Test
+    @DisplayName("명단: facade가 PARTICIPANT_LIST_FORBIDDEN을 던지면 403과 그 code")
+    void participantsForbidden() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        when(listParticipantsFacade.list(scheduleId, USER_ID))
+                .thenThrow(new BusinessException(ScheduleErrorCode.PARTICIPANT_LIST_FORBIDDEN));
+
+        mockMvc.perform(get("/api/v1/schedules/{scheduleId}/participants", scheduleId))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PARTICIPANT_LIST_FORBIDDEN"));
+    }
+
+    @Test
+    @DisplayName("명단: facade가 SCHEDULE_NOT_FOUND를 던지면 404와 그 code")
+    void participantsNotFound() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        when(listParticipantsFacade.list(scheduleId, USER_ID))
+                .thenThrow(new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND));
+
+        mockMvc.perform(get("/api/v1/schedules/{scheduleId}/participants", scheduleId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("SCHEDULE_NOT_FOUND"));
     }

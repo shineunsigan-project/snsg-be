@@ -41,6 +41,7 @@ import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.ListParticipantsFacade;
 import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
@@ -112,6 +113,9 @@ class SecurityConfigTest {
 
     @MockitoBean
     private GetScheduleDetailFacade getScheduleDetailFacade;
+
+    @MockitoBean
+    private ListParticipantsFacade listParticipantsFacade;
 
     @Test
     @DisplayName("닉네임 사용 가능 여부는 토큰 없이 부를 수 있다")
@@ -219,6 +223,14 @@ class SecurityConfigTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
         mockMvc.perform(post("/api/v1/schedules").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    @DisplayName("참여자 명단은 토큰 없이 부르면 401. 상세의 공개 경로 패턴은 하위 경로에 걸리지 않는다")
+    void participantsRequireToken() throws Exception {
+        mockMvc.perform(get("/api/v1/schedules/{scheduleId}/participants", UUID.randomUUID()))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }

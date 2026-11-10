@@ -37,6 +37,7 @@ import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSche
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardPageResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQueryResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleParticipantQueryResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.WithdrawalEligibilityResult;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
@@ -53,7 +54,7 @@ import com.shineunsigan.snsg.schedule.domain.repository.ScheduleRepository;
 
 /**
  * 목록의 페이지 크기(기본·상한·하한), 날짜 필터 해석과 오류 순서, 다음 페이지 판정(한 건 더 읽기), 카드 변환,
- * 상세의 없는 일정과 판정 결과 담기, 탈퇴 가능 여부와 가능 시각 계산을 본다.
+ * 상세의 없는 일정과 판정 결과 담기, 명단의 오류 순서(없는 일정 → 권한)와 결과 담기, 탈퇴 가능 여부와 가능 시각 계산을 본다.
  * 쿼리 조건 자체는 ScheduleRepositoryImplTest가 실제 PostgreSQL에서 본다.
  */
 @ExtendWith(MockitoExtension.class)
@@ -294,6 +295,41 @@ class ScheduleQueryServiceTest {
         when(activityCategoryRepository.findAllNotDeletedByIds(List.of(CATEGORY_ID))).thenReturn(List.of());
 
         assertThat(scheduleQueryService.findDetail(schedule.getId(), USER_ID).categoryName()).isEmpty();
+    }
+
+    // 참여자 명단
+
+    @Test
+    @DisplayName("명단: 일정이 없으면(삭제 포함) 보는 사람과 관계없이 SCHEDULE_NOT_FOUND다")
+    void participantsNotFound() {
+        UUID scheduleId = UUID.randomUUID();
+        when(scheduleRepository.findById(scheduleId)).thenReturn(Optional.empty());
+
+        assertError(() -> scheduleQueryService.findParticipants(scheduleId, USER_ID),
+                ScheduleErrorCode.SCHEDULE_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("명단: 개설자도 확정 참여자도 아니면 PARTICIPANT_LIST_FORBIDDEN이다")
+    void participantsForbidden() {
+        Schedule schedule = schedule(CATEGORY_ID, 0);
+        when(scheduleRepository.findById(schedule.getId())).thenReturn(Optional.of(schedule));
+
+        assertError(() -> scheduleQueryService.findParticipants(schedule.getId(), USER_ID),
+                ScheduleErrorCode.PARTICIPANT_LIST_FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("명단: 확정 참여자를 명단 순서로 담고 개설자 행만 isHost다")
+    void participants() {
+        Schedule schedule = schedule(CATEGORY_ID, 0);
+        schedule.join(USER_ID, LocalDateTime.now(), PROPERTIES.completionAfter());
+        when(scheduleRepository.findById(schedule.getId())).thenReturn(Optional.of(schedule));
+
+        List<ScheduleParticipantQueryResult> result = scheduleQueryService.findParticipants(schedule.getId(), USER_ID);
+
+        assertThat(result).containsExactly(new ScheduleParticipantQueryResult(schedule.getHostUserId(), true),
+                new ScheduleParticipantQueryResult(USER_ID, false));
     }
 
     // 탈퇴 가능 여부
