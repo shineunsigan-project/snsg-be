@@ -46,6 +46,20 @@ interface ScheduleJpaRepository extends JpaRepository<Schedule, UUID> {
     boolean existsConfirmedScheduledBetween(@Param("userId") UUID userId, @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
+    /** 내 확정 참여 행(user_id, status 인덱스)에서 출발해 일정과 조인한다. 맞는 일정이 없으면 null이다. */
+    @Query("""
+            select max(s.startAt)
+            from ScheduleParticipant p join p.schedule s
+            where p.userId = :userId
+              and p.status = com.shineunsigan.snsg.schedule.domain.constants.ParticipationStatus.CONFIRMED
+              and p.isDeleted = false
+              and s.isDeleted = false
+              and s.status <> com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus.CANCELED
+              and s.startAt > :startAfter
+            """)
+    LocalDateTime findLatestConfirmedNotCanceledStartAtAfter(@Param("userId") UUID userId,
+            @Param("startAfter") LocalDateTime startAfter);
+
     @Modifying
     @Query("""
             update Schedule s

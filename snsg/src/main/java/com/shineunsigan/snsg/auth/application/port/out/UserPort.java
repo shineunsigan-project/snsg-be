@@ -26,6 +26,11 @@ public interface UserPort {
     String uploadProfileImage(byte[] content);
 
     /**
+     * 사용자가 직접 요청한 탈퇴. 없거나 이미 탈퇴한 사용자면 user 도메인의 USER_NOT_FOUND가 그대로 나간다.
+     */
+    void withdraw(UUID userId);
+
+    /**
      * 소셜 연동이 끊긴 사용자를 탈퇴시킨다. 없는 계정이면 아무 일도 하지 않는다.
      */
     void withdrawBySocialAccount(SocialProvider provider, String providerUserId);

@@ -17,10 +17,13 @@ import com.shineunsigan.snsg.schedule.domain.model.ScheduleCreationRule;
  * @param completionAfter 시작 후 이 시간이 지나면 완료로 본다. 같으면 완료다
  * @param pageSizeDefault 일정 목록 한 페이지의 기본 개수(size 생략 시)
  * @param pageSizeMax     일정 목록 한 페이지의 최대 개수. 넘게 요청하면 이 값으로 줄인다
+ * @param withdrawalBlockAfterStart 확정 참여(개설 포함)한 취소되지 않은 일정의 시작 + 이 시간이 지나기 전에는 탈퇴할 수 없다.
+ *                                  같으면 탈퇴할 수 있다
  */
 @ConfigurationProperties(prefix = "schedule")
 public record ScheduleProperties(int capacityMin, int capacityMax, Duration minLeadTime, int maxAdvanceDays,
-        Duration overlapWindow, Duration completionAfter, int pageSizeDefault, int pageSizeMax) {
+        Duration overlapWindow, Duration completionAfter, int pageSizeDefault, int pageSizeMax,
+        Duration withdrawalBlockAfterStart) {
 
     public ScheduleCreationRule creationRule() {
         return new ScheduleCreationRule(capacityMin, capacityMax, minLeadTime, maxAdvanceDays);

@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.schedule.application;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,8 @@ import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSche
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardPageResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQueryResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.WithdrawalEligibilityResult;
+import com.shineunsigan.snsg.schedule.application.port.in.CheckWithdrawableUseCase;
 import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
@@ -26,7 +29,7 @@ import com.shineunsigan.snsg.schedule.domain.repository.ScheduleRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 일정 목록 3종(모집 중, 참여한, 개설한)과 일정 상세. 목록은 커서 페이지로 읽어 카드로 바꾼다.
+ * 일정 목록 3종(모집 중, 참여한, 개설한), 일정 상세와 탈퇴 가능 여부. 목록은 커서 페이지로 읽어 카드로 바꾼다.
  * <p>
  * 한 페이지보다 한 건 더 읽어 다음 페이지가 있는지 정한다. 총 건수가 페이지 크기의 배수여도 빈 페이지를 한 번 더 부르지 않게 하기 위해서다.
  * 지금 시각은 요청마다 한 번 잡아 쿼리 조건과 표시 상태에 함께 쓴다.
@@ -34,7 +37,7 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
-public class ScheduleQueryService {
+public class ScheduleQueryService implements CheckWithdrawableUseCase {
 
     private final ScheduleRepository scheduleRepository;
     private final ActivityCategoryRepository activityCategoryRepository;
@@ -80,6 +83,15 @@ public class ScheduleQueryService {
         return ScheduleDetailQueryResult.of(schedule, categoryName,
                 schedule.displayStatus(now, scheduleProperties.completionAfter()), viewerRole,
                 schedule.availableActions(viewerRole, now, scheduleProperties.completionAfter()));
+    }
+
+    /** 탈퇴 가능 시각은 막는 일정 중 가장 늦은 시작 + 탈퇴 제한 시간이다. */
+    @Override
+    public WithdrawalEligibilityResult checkWithdrawable(UUID userId) {
+        Duration blockAfterStart = scheduleProperties.withdrawalBlockAfterStart();
+        return scheduleRepository.findLatestWithdrawalBlockingStartAt(userId, LocalDateTime.now(), blockAfterStart)
+                .map(latestStartAt -> WithdrawalEligibilityResult.blockedUntil(latestStartAt.plus(blockAfterStart)))
+                .orElseGet(WithdrawalEligibilityResult::allowed);
     }
 
     private static ScheduleCursor decodeCursor(String cursor) {

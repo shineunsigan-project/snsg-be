@@ -59,6 +59,11 @@ public class UserAdapter implements UserPort {
     }
 
     @Override
+    public void withdraw(UUID userId) {
+        withdrawUserUseCase.withdraw(userId);
+    }
+
+    @Override
     public void withdrawBySocialAccount(SocialProvider provider, String providerUserId) {
         withdrawUserUseCase.withdrawBySocialAccount(toUserProvider(provider), providerUserId);
     }
