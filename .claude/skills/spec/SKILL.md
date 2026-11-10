@@ -70,6 +70,8 @@ description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md�
 - **복사해서 바로 실행할 수 있는 전문으로 적는다.** 디렉터리 이동까지 포함한다. "테스트를 돌린다" 같은 서술은 검증 명령이 아니다. 에이전트가 명령을 조립하게 두면 조립한 명령이 실제로 그 항목을 확인하는지 아무도 모른다.
 - **기대 결과를 함께 적는다.** 명령만 있으면 **무엇이 성공인지 에이전트가 정한다.**
 - **테스트를 다시 돌려야 의미가 있는 검증에는 `cleanTest`를 붙인다**(`./gradlew cleanTest test --tests ...`). 코드가 그대로면 Gradle이 test를 UP-TO-DATE로 건너뛰어, "연속 3회 통과"가 실제로는 한 번만 돈 결과가 된다(SHI-156).
+- **기대 결과가 그 명령으로 실제로 나올 수 있는지 확인한다.** 패턴이 기대하지 않은 파일까지 잡거나, 반대로 기대한 파일을 잡지 못하면 구현이 맞아도 FAIL이 나거나 틀려도 PASS가 난다. 파일 하나를 가리킬 때는 경로 끝을 고정한다(`grep -E '/SecurityConfig\.java$'` → 출력 없음, `grep -x` 전체 줄 일치). 부분 일치 `grep SecurityConfig.java`는 `SecurityConfigTest.java`도 잡지 않고, `.`이 아무 문자와 맞아 다른 이름도 잡을 수 있다(SHI-178에서 기대 출력 "`SecurityConfigTest.java`만"이 나올 수 없었다).
+- **변경 경로를 허용 목록으로 검사하는 GOAL에는 `.claude/tasks/SHI-<번호>/task.md`를 넣는다.** task.md도 스테이징돼 diff에 들어간다. 빠뜨리면 검증 단계가 task.md를 범위 밖 변경으로 읽어 오판한다(T-18).
 
 ```markdown
 1. 닉네임이 2자 미만이면 `BusinessException(UserErrorCode.INVALID_NICKNAME)`이 난다.

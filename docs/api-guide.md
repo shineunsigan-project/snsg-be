@@ -589,6 +589,8 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   | `PARTICIPANT` | 멤버로 참여 확정한 사람 |
   | `NON_PARTICIPANT` | 로그인했지만 참여하지 않은 사람. 참여를 취소한 사람도 여기다 |
 
+  참여자 명단(아래 "참여자 명단")은 `viewerRole`이 `HOST`·`PARTICIPANT`일 때만 펼칠 수 있다. 그 밖은 403이다.
+
 - `availableActions`: **들어 있는 동작의 버튼만 활성으로 그린다.** 버튼을 보일지, 비활성 버튼에 어떤 문구(모집 마감·일정 완료·일정 취소됨 등)를 쓸지는 `viewerRole`과 `displayStatus`를 보고 FE가 정한다.
 
   | 값 | 버튼 | 누가, 언제 | 누르면 |
@@ -618,6 +620,78 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 
   `SCHEDULE_NOT_FOUND`(404)는 없는 경로의 404(`INVALID_REQUEST`)와 **`code`로 구분한다.** 이 API에는 401이 없다.
 
+  ```json
+  { "isSuccess": false, "code": "SCHEDULE_NOT_FOUND", "message": "찾을 수 없는 일정이에요." }
+  ```
+- 조회만 하므로 **같은 요청을 몇 번 다시 보내도 된다.** 실패하면 그대로 재시도한다.
+
+### 참여자 명단
+
+`GET /api/v1/schedules/{scheduleId}/participants`. 일정의 확정 참여자(개설자 포함) 명단을 준다.
+
+- **부르는 화면**: 일정 상세 화면에서 참여자 명단을 펼칠 때. **상세의 `viewerRole`이 `HOST`·`PARTICIPANT`일 때만** 펼치게 하고 이 API를 부른다. `GUEST`·`NON_PARTICIPANT`에게는 명단을 펼치는 버튼을 보여주지 않는다.
+- **인증이 필요하다.** 토큰이 없거나 만료되면 401 `UNAUTHENTICATED`다. 재발급 후 다시 부르고, 재발급도 실패하면 로그인 화면으로 간다. 상세와 달리 토큰이 선택이 아니다.
+- **볼 수 있는 사람**: 개설자와 멤버로 참여 확정한 사람. 참여한 적 없는 사람, 참여를 취소한 사람은 403 `PARTICIPANT_LIST_FORBIDDEN`이다. 일정이 취소(`CANCELED`)·완료(`COMPLETED`)·모집 마감이어도 개설자와 확정 참여자는 볼 수 있다.
+- **요청 본문은 없다.** 경로의 `scheduleId`(UUID 문자열)만 보낸다. 보는 사람은 토큰의 사용자다.
+- 응답 `data`는 **항목 배열**이다. 커서·페이지가 없다(정원 안이라 최대 24명이 한 번에 온다).
+- 응답 예시(참여한 멤버가 본 경우):
+
+  ```json
+  {
+    "isSuccess": true,
+    "data": [
+      {
+        "nickname": "민트초코", "profileImageUrl": "/images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png",
+        "gender": "FEMALE", "ageGroup": { "decade": 20, "phase": "LATE" },
+        "isHost": true, "isMe": false, "withdrawn": false
+      },
+      {
+        "nickname": "탈퇴한 사용자", "profileImageUrl": "/images/default-profile.png",
+        "gender": "MALE", "ageGroup": null,
+        "isHost": false, "isMe": false, "withdrawn": true
+      },
+      {
+        "nickname": "초코민트", "profileImageUrl": "/images/profiles/1b2c3d4e-5f60-7182-93a4-b5c6d7e8f9a0.png",
+        "gender": "MALE", "ageGroup": { "decade": 30, "phase": "EARLY" },
+        "isHost": false, "isMe": true, "withdrawn": false
+      }
+    ]
+  }
+  ```
+
+  | 필드 | 의미 | null |
+  | --- | --- | --- |
+  | `nickname` | 닉네임. 탈퇴했으면 `"탈퇴한 사용자"` | 아니다 |
+  | `profileImageUrl` | 프로필 사진 경로(도메인 없이 경로만). 탈퇴했으면 기본 이미지 경로 | 아니다 |
+  | `gender` | 성별. `MALE` 남자, `FEMALE` 여자. 탈퇴한 사람도 저장된 성별이 온다 | **사용자 정보를 찾을 수 없으면 `null`**. 그때는 성별을 표시하지 않는다 |
+  | `ageGroup` | 연령대. `decade`(십의 자리 × 10)와 `phase`(`EARLY` 초반, `MID` 중반, `LATE` 후반)로, 상세의 연령대와 같은 형태다. "20대 후반"처럼 그린다 | **탈퇴했거나 사용자 정보를 찾을 수 없으면 `null`**. 그때는 연령대를 표시하지 않는다 |
+  | `isHost` | 개설자면 `true`. 개설자는 항상 맨 앞 한 명이다 | 아니다 |
+  | `isMe` | 보는 사람 본인이면 `true`. 개설자가 보면 맨 앞 항목이 `isHost`·`isMe` 모두 `true`다 | 아니다 |
+  | `withdrawn` | 탈퇴했거나 사용자 정보를 찾을 수 없으면 `true`. 탈퇴 표시를 붙일 때 쓴다 | 아니다 |
+
+  이름·이메일·생년월일·사용자 ID는 **주지 않는다.**
+- **탈퇴한 사람**: 명단에서 빠지지 않는다. 닉네임 `"탈퇴한 사용자"`, 기본 이미지, `ageGroup` `null`, `withdrawn` `true`로 온다. 성별은 그대로 온다.
+- **정렬**: 개설자가 맨 앞이고, 그 뒤 멤버는 **참여 일시가 이른 순**(같으면 참여 기록 순)이다. 참여를 취소한 사람은 오지 않는다. **취소 후 다시 참여한 사람은 다시 참여한 시각 자리에 한 번만 온다.**
+- **빈 배열은 오지 않는다.** 개설자는 항상 명단에 있다. 멤버가 없으면 개설자 한 명만 온다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 401 | `UNAUTHENTICATED` | 토큰이 없거나 만료·무효 | 재발급 후 다시 부르고, 실패하면 로그인 화면으로 |
+  | 403 | `PARTICIPANT_LIST_FORBIDDEN` | 개설자도 확정 참여자도 아니다(참여한 적 없음, 참여를 취소함 포함) | 정상 흐름에서는 상세의 `viewerRole`로 막으므로 나지 않는다. 났으면(그 사이 다른 기기에서 참여를 취소한 경우 등) 일정 상세를 다시 불러 그린다 |
+  | 404 | `SCHEDULE_NOT_FOUND` | 없거나 삭제된 일정 | 토스트로 `message`("찾을 수 없는 일정이에요.")를 보여주고 일정 목록 화면으로 간다. 일정 상세 API의 404와 같은 처리다 |
+  | 400 | `INVALID_REQUEST` | `scheduleId`가 UUID 형식이 아니다 | 정상 화면 흐름에서는 나지 않는다 |
+
+  여러 조건에 걸리면 **`SCHEDULE_NOT_FOUND` → `PARTICIPANT_LIST_FORBIDDEN`** 순서로 앞의 것이 온다. 없거나 삭제된 일정은 누가 불러도 404다.
+
+  `SCHEDULE_NOT_FOUND`(404)는 없는 경로의 404(`INVALID_REQUEST`)와 **`code`로 구분한다.**
+
+  ```json
+  { "isSuccess": false, "code": "UNAUTHENTICATED", "message": "로그인이 필요합니다." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "PARTICIPANT_LIST_FORBIDDEN", "message": "참여한 일정만 참여자 명단을 볼 수 있어요." }
+  ```
   ```json
   { "isSuccess": false, "code": "SCHEDULE_NOT_FOUND", "message": "찾을 수 없는 일정이에요." }
   ```
@@ -874,6 +948,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 일정 목록 (활동 필터) | `GET /api/v1/activity-categories` | 받은 순서대로 필터를 그린다 |
 | 일정 개설 ([일정 열기]) | `POST /api/v1/schedules` | 201이면 내가 연 일정 목록(LIST-05)으로 이동하고 팝업을 띄운다. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 그 밖의 400·409는 해당 입력을 다시 고르게 한다. 응답 전까지 버튼을 막는다 |
 | 일정 상세 (진입, 참여·참여 취소 뒤) | `GET /api/v1/schedules/{scheduleId}` (로그인했으면 access token 포함) | `availableActions`에 든 버튼만 활성으로 그린다. 비활성 버튼 문구는 `displayStatus`로 정한다. `LOGIN_TO_JOIN`을 누르면 로그인 화면으로. 404 `SCHEDULE_NOT_FOUND`면 토스트 후 일정 목록으로 |
+| 일정 상세 (참여자 명단 펼치기, `viewerRole`이 `HOST`·`PARTICIPANT`일 때만) | `GET /api/v1/schedules/{scheduleId}/participants` | 받은 순서대로 그린다(개설자가 맨 앞). `isHost`면 개설자 표시, `isMe`면 본인 표시, `withdrawn`이면 탈퇴 표시. 403 `PARTICIPANT_LIST_FORBIDDEN`이면 상세를 다시 불러 그린다. 404 `SCHEDULE_NOT_FOUND`면 토스트 후 일정 목록으로. 401이면 재발급 후 다시 부른다 |
 | 일정 상세 ([참여하기]) | `POST /api/v1/schedules/{scheduleId}/participants` | 200이든 409든 상세를 다시 불러 그린다. 409 `SCHEDULE_TIME_CONFLICT`면 `message`를 보여준다. 404 `SCHEDULE_NOT_FOUND`면 일정 목록으로 보내고 토스트. 응답 전까지 버튼을 막는다 |
 | 일정 상세 (참여 취소 팝업 [확인]) | `DELETE /api/v1/schedules/{scheduleId}/participants/me` | 200이든 409든 상세를 다시 불러 그린다. 409 `NOT_PARTICIPANT`는 이미 취소된 상태다. 404 `SCHEDULE_NOT_FOUND`면 일정 목록으로 보내고 토스트 |
 | 일정 목록 · 모집 중 탭 (LIST-01·02, 필터 LIST-03) | `GET /api/v1/schedules` (토큰 없이) | 탭 진입과 필터 변경 때 `cursor` 없이 부르고, 끝까지 스크롤하면 `cursor=nextCursor`로 다음 페이지를 붙인다. `nextCursor`가 null이면 더 부르지 않는다. 빈 `items`면 결과 없음. 400 `INVALID_DATE_FILTER`면 날짜를 다시 고르게 하고, `INVALID_CURSOR`면 처음부터 다시 부른다 |
