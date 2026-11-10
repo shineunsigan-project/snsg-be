@@ -2,6 +2,7 @@ package com.shineunsigan.snsg.schedule.presentation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -65,7 +66,7 @@ import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
 /**
- * 요청 단계에서 정한 규칙(필수값, 앞뒤 공백을 뺀 제목·설명 길이, 예상 소요 값, 목록 쿼리 파라미터)과 성공 응답 형태만 본다.
+ * 요청 단계에서 정한 규칙(필수값, 앞뒤 공백을 뺀 제목·설명·취소 사유 길이, 예상 소요 값, 목록 쿼리 파라미터)과 성공 응답 형태만 본다.
  * <p>
  * auth를 import하지 않는다. 인증 필터는 auth 패키지를 스캔에서 빼서 올리지 않고,
  * 인증 주체는 SecurityContext에 직접 넣는다.
@@ -80,6 +81,7 @@ class ScheduleControllerTest {
     private static final UUID CATEGORY_ID = UUID.randomUUID();
     private static final String TITLE_MESSAGE = "활동명은 1~20자로 적어주세요.";
     private static final String DESCRIPTION_MESSAGE = "10자 이상 적어주세요.";
+    private static final String CANCEL_REASON_MESSAGE = "취소 사유는 1~100자로 적어주세요.";
 
     @Autowired
     private MockMvc mockMvc;
@@ -203,6 +205,92 @@ class ScheduleControllerTest {
                 .andExpect(jsonPath("$.data").doesNotExist());
 
         verify(scheduleCommandService).leave(scheduleId, USER_ID);
+    }
+
+    // 일정 전체 취소
+
+    @Test
+    @DisplayName("일정을 취소하면 200이고 data가 없다. 경로의 일정 id, 요청한 사용자, 사유를 그대로 서비스에 넘긴다")
+    void cancelsSchedule() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+
+        performCancel(scheduleId, "{\"reason\": \"개인 사정으로 취소해요.\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(scheduleCommandService).cancel(scheduleId, USER_ID, "개인 사정으로 취소해요.");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"{}", "{\"reason\": null}", "{\"reason\": \"\"}", "{\"reason\": \"   \"}",
+            "{\"reason\": \" \\n \"}"})
+    @DisplayName("사유가 없음·null·빈 문자열·공백만이면 400 INVALID_REQUEST와 reason 필드 오류이고 서비스를 부르지 않는다")
+    void blankCancelReason(String body) throws Exception {
+        performCancel(UUID.randomUUID(), body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.errors[0].field").value("reason"))
+                .andExpect(jsonPath("$.errors[0].message").value(CANCEL_REASON_MESSAGE));
+        verify(scheduleCommandService, never()).cancel(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("앞뒤 공백을 뺀 사유가 101자면 400 INVALID_REQUEST와 reason 필드 오류이고 서비스를 부르지 않는다")
+    void cancelReasonTooLong() throws Exception {
+        performCancel(UUID.randomUUID(), "{\"reason\": \" " + "가".repeat(101) + " \"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.errors[0].field").value("reason"));
+        verify(scheduleCommandService, never()).cancel(any(), any(), any());
+    }
+
+    @ParameterizedTest(name = "[{0}]")
+    @ValueSource(strings = {"", "{\"reason\": "})
+    @DisplayName("본문이 없거나 JSON이 깨졌으면 400 INVALID_REQUEST이고 errors 없이 message만 준다. 서비스를 부르지 않는다")
+    void unreadableCancelBody(String body) throws Exception {
+        performCancel(UUID.randomUUID(), body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("요청 형식이 올바르지 않습니다."))
+                .andExpect(jsonPath("$.errors").doesNotExist());
+        verify(scheduleCommandService, never()).cancel(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("앞뒤 공백을 포함해 보내도 뺀 사유가 100자면 요청 단계를 통과한다")
+    void cancelReasonWithSurroundingSpacesPasses() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        String reason = "  " + "가".repeat(100) + "  ";
+
+        performCancel(scheduleId, "{\"reason\": \"" + reason + "\"}")
+                .andExpect(status().isOk());
+
+        verify(scheduleCommandService).cancel(scheduleId, USER_ID, reason);
+    }
+
+    @Test
+    @DisplayName("서비스가 NOT_HOST를 던지면 403과 그 code")
+    void cancelNotHost() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        doThrow(new BusinessException(ScheduleErrorCode.NOT_HOST))
+                .when(scheduleCommandService).cancel(scheduleId, USER_ID, "사유");
+
+        performCancel(scheduleId, "{\"reason\": \"사유\"}")
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("NOT_HOST"));
+    }
+
+    @Test
+    @DisplayName("서비스가 SCHEDULE_NOT_CANCELABLE을 던지면 409와 그 code")
+    void cancelNotCancelable() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        doThrow(new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_CANCELABLE))
+                .when(scheduleCommandService).cancel(scheduleId, USER_ID, "사유");
+
+        performCancel(scheduleId, "{\"reason\": \"사유\"}")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("SCHEDULE_NOT_CANCELABLE"));
     }
 
     // 목록 3종
@@ -448,13 +536,32 @@ class ScheduleControllerTest {
                 .andExpect(jsonPath("$.code").value("SCHEDULE_NOT_FOUND"));
     }
 
+    @Test
+    @DisplayName("상세: 취소된 일정이면 cancellation에 사유와 취소 일시를 준다")
+    void detailWithCancellation() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        when(getScheduleDetailFacade.get(scheduleId, USER_ID)).thenReturn(detail(scheduleId, ViewerRole.HOST,
+                new ScheduleDetailQueryResult.Cancellation("개인 사정으로 취소해요.",
+                        LocalDateTime.of(2026, 11, 12, 8, 30, 12))));
+
+        mockMvc.perform(get("/api/v1/schedules/{scheduleId}", scheduleId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.cancellation.reason").value("개인 사정으로 취소해요."))
+                .andExpect(jsonPath("$.data.cancellation.canceledAt").value("2026-11-12T08:30:12"));
+    }
+
     private static ScheduleDetailResult detail(UUID scheduleId, ViewerRole viewerRole) {
+        return detail(scheduleId, viewerRole, null);
+    }
+
+    private static ScheduleDetailResult detail(UUID scheduleId, ViewerRole viewerRole,
+            ScheduleDetailQueryResult.Cancellation cancellation) {
         ScheduleDetailQueryResult schedule = new ScheduleDetailQueryResult(scheduleId, "보드게임 같이 해요",
                 "처음 오시는 분도 환영해요.", LocalDateTime.of(2026, 11, 14, 19, 30), LocalDateTime.of(2026, 11, 10, 9, 0),
                 DurationType.NORMAL, CATEGORY_ID, "보드게임", UUID.randomUUID(), List.of(), 2, 6, 4,
                 new ScheduleDetailQueryResult.Place("보드게임카페", "서울특별시 마포구 와우산로 1", "2층",
                         new BigDecimal("37.5500000"), new BigDecimal("126.9200000"), "11440"),
-                DisplayStatus.RECRUITING, viewerRole, List.of(ScheduleAction.JOIN));
+                DisplayStatus.RECRUITING, viewerRole, List.of(ScheduleAction.JOIN), cancellation);
         return new ScheduleDetailResult(schedule, new ScheduleHostResult("민트초코", "/images/default-profile.png", false),
                 new ParticipantSummaryResult(2, 1, 1, new ScheduleAgeGroupResult(20, AgePhase.LATE), null), "마포구");
     }
@@ -464,6 +571,12 @@ class ScheduleControllerTest {
                 LocalDateTime.of(2026, 11, 14, 19, 30), 2, 6, 4, DisplayStatus.RECRUITING,
                 LocalDateTime.of(2026, 11, 10, 9, 0));
         return new ScheduleListResult(List.of(new ScheduleListItemResult(card, "마포구")), nextCursor);
+    }
+
+    private ResultActions performCancel(UUID scheduleId, String body) throws Exception {
+        return mockMvc.perform(post("/api/v1/schedules/{scheduleId}/cancellation", scheduleId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body));
     }
 
     private ResultActions perform(String body) throws Exception {

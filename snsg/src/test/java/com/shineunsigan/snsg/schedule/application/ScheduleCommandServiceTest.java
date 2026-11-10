@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -52,8 +53,12 @@ import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.place.application.PlaceQueryService;
 import com.shineunsigan.snsg.place.infrastructure.persistence.PlaceRepositoryImpl;
 import com.shineunsigan.snsg.schedule.application.dto.command.CreateScheduleCommand;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQueryResult;
 import com.shineunsigan.snsg.schedule.application.port.out.UserPort;
+import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
+import com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus;
+import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
 import com.shineunsigan.snsg.schedule.domain.model.PlaceSnapshot;
@@ -302,6 +307,55 @@ class ScheduleCommandServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("일정 전체 취소 흐름")
+    @ExtendWith(MockitoExtension.class)
+    class CancelFlow {
+
+        @Mock
+        private ScheduleRepository scheduleRepository;
+
+        @Mock
+        private ActivityCategoryRepository activityCategoryRepository;
+
+        private ScheduleCommandService scheduleCommandService;
+
+        private final UUID hostId = UUID.randomUUID();
+        private final UUID scheduleId = UUID.randomUUID();
+
+        @BeforeEach
+        void setUp() {
+            scheduleCommandService = new ScheduleCommandService(scheduleRepository, activityCategoryRepository,
+                    Flow.PROPERTIES);
+        }
+
+        @Test
+        @DisplayName("일정이 없으면 SCHEDULE_NOT_FOUND이고 사용자를 잠그지 않는다")
+        void scheduleNotFound() {
+            when(scheduleRepository.findByIdForUpdate(scheduleId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> scheduleCommandService.cancel(scheduleId, hostId, "사유"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ScheduleCommandServiceTest::errorCodeOf)
+                    .isEqualTo(ScheduleErrorCode.SCHEDULE_NOT_FOUND);
+            verify(scheduleRepository, never()).lockUser(any());
+        }
+
+        @Test
+        @DisplayName("일정을 잠가 읽고 취소한다. 사용자를 잠그지 않고 잠금 없는 조회도 부르지 않는다")
+        void cancelsWithScheduleLockOnly() {
+            Schedule schedule = openSchedule(hostId);
+            when(scheduleRepository.findByIdForUpdate(scheduleId)).thenReturn(Optional.of(schedule));
+
+            scheduleCommandService.cancel(scheduleId, hostId, "개인 사정으로 취소해요.");
+
+            assertThat(schedule.getStatus()).isEqualTo(ScheduleStatus.CANCELED);
+            verify(scheduleRepository).findByIdForUpdate(scheduleId);
+            verify(scheduleRepository, never()).lockUser(any());
+            verify(scheduleRepository, never()).findById(any());
+        }
+    }
+
     /** 이틀 뒤에 시작하는 모집 중 일정(정원 6). */
     private static Schedule openSchedule(UUID hostId) {
         return Schedule.create(hostId, BOARD_GAME_ID, "보드게임 같이 해요", "처음 오시는 분도 환영해요.", DurationType.NORMAL,
@@ -309,7 +363,7 @@ class ScheduleCommandServiceTest {
     }
 
     /**
-     * 테스트 트랜잭션을 끄고 스레드가 각자 커밋한다. 커밋한 행(이 사용자가 연 일정과 그 참여 행)은 끝나면 지운다.
+     * 테스트 트랜잭션을 끄고 스레드가 각자 커밋한다. 커밋한 행(이 사용자가 연 일정과 그 참여 행·취소 행)은 끝나면 지운다.
      */
     @Nested
     @DisplayName("동시 요청")
@@ -332,9 +386,18 @@ class ScheduleCommandServiceTest {
 
         private final UUID userId = UUID.randomUUID();
 
+        @Autowired
+        private ScheduleRepository scheduleRepository;
+
         @AfterEach
         void deleteCommittedRows() {
+            SecurityContextHolder.clearContext();
             new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                entityManager.createNativeQuery("""
+                                DELETE FROM schedule_cancellations
+                                WHERE schedule_id IN (SELECT id FROM schedules WHERE host_user_id = ?)""")
+                        .setParameter(1, userId)
+                        .executeUpdate();
                 entityManager.createNativeQuery("""
                                 DELETE FROM schedule_participants
                                 WHERE schedule_id IN (SELECT id FROM schedules WHERE host_user_id = ?)""")
@@ -457,6 +520,104 @@ class ScheduleCommandServiceTest {
                     scheduleId)).isEqualTo(1);
         }
 
+        @Test
+        @DisplayName("개설자가 취소하면 취소 행(created_by = 개설자, 사유는 앞뒤 공백을 뺀 값)이 커밋되고 일정은 CANCELED, 모집 상태·확정 인원·참여 행은 그대로다")
+        void cancelCommitsCancellationByHost() {
+            UUID scheduleId = createScheduleWithCapacity(4);
+            scheduleCommandService.join(scheduleId, UUID.randomUUID());
+            SecurityContextHolder.getContext()
+                    .setAuthentication(new UsernamePasswordAuthenticationToken(userId, null, List.of()));
+
+            scheduleCommandService.cancel(scheduleId, userId, "  개인 사정으로 취소해요.  ");
+
+            Object[] cancellation = (Object[]) entityManager.createNativeQuery("""
+                            SELECT created_by, reason FROM schedule_cancellations
+                            WHERE schedule_id = ? AND is_deleted = FALSE""")
+                    .setParameter(1, scheduleId)
+                    .getSingleResult();
+            assertThat(cancellation).containsExactly(userId.toString(), "개인 사정으로 취소해요.");
+            assertThat(countBySchedule("""
+                    SELECT COUNT(*) FROM schedules
+                    WHERE id = ? AND status = 'CANCELED' AND recruitment_status = 'RECRUITING' AND confirmed_count = 2""",
+                    scheduleId)).isEqualTo(1);
+            assertThat(countBySchedule("SELECT COUNT(*) FROM schedule_participants WHERE schedule_id = ?",
+                    scheduleId)).isEqualTo(2);
+            assertThat(countBySchedule("""
+                    SELECT COUNT(*) FROM schedule_participants
+                    WHERE schedule_id = ? AND status = 'CONFIRMED'""", scheduleId)).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("개설자가 같은 일정을 동시에 두 번 취소하면 하나만 성공하고 다른 하나는 SCHEDULE_NOT_CANCELABLE, 취소 행은 하나다")
+        void onlyOneOfConcurrentCancelsSucceeds() throws Exception {
+            UUID scheduleId = createScheduleWithCapacity(4);
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            Callable<Boolean> cancel = () -> {
+                ready.countDown();
+                start.await();
+                scheduleCommandService.cancel(scheduleId, userId, "개인 사정으로 취소해요.");
+                return true;
+            };
+
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            List<Boolean> canceled = new ArrayList<>();
+            List<Throwable> failures = new ArrayList<>();
+            try {
+                List<Future<Boolean>> futures = List.of(executor.submit(cancel), executor.submit(cancel));
+                ready.await();
+                start.countDown();
+                for (Future<Boolean> future : futures) {
+                    try {
+                        canceled.add(future.get(30, TimeUnit.SECONDS));
+                    } catch (ExecutionException exception) {
+                        failures.add(exception.getCause());
+                    }
+                }
+            } finally {
+                executor.shutdownNow();
+            }
+
+            assertThat(canceled).hasSize(1);
+            assertThat(failures).singleElement()
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(ScheduleCommandServiceTest::errorCodeOf)
+                    .isEqualTo(ScheduleErrorCode.SCHEDULE_NOT_CANCELABLE);
+            assertThat(countBySchedule("SELECT COUNT(*) FROM schedule_cancellations WHERE schedule_id = ?",
+                    scheduleId)).isEqualTo(1);
+            assertThat(countBySchedule("SELECT COUNT(*) FROM schedules WHERE id = ? AND status = 'CANCELED'",
+                    scheduleId)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("취소한 일정을 상세 조회(잠금 없는 조회)로 다시 읽으면 CANCELED이고 취소 기록의 사유·취소 일시(취소 행 created_at)가 담긴다. 취소하지 않은 일정은 비어 있다")
+        void canceledScheduleIsReadWithCancellation() {
+            UUID canceledId = createScheduleWithCapacity(4);
+            scheduleCommandService.cancel(canceledId, userId, " 개인 사정으로 취소해요. ");
+            // 같은 시작 시각이라 취소한 뒤에 연다. 취소된 일정은 겹침 검사에서 빠진다.
+            UUID openId = createScheduleWithCapacity(4);
+            Object createdAt = entityManager.createNativeQuery(
+                            "SELECT created_at FROM schedule_cancellations WHERE schedule_id = ?")
+                    .setParameter(1, canceledId)
+                    .getSingleResult();
+
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                entityManager.flush();
+                entityManager.clear();
+                Schedule canceled = scheduleRepository.findById(canceledId).orElseThrow();
+                Schedule open = scheduleRepository.findById(openId).orElseThrow();
+                LocalDateTime now = LocalDateTime.now();
+
+                assertThat(canceled.displayStatus(now, Flow.PROPERTIES.completionAfter()))
+                        .isEqualTo(DisplayStatus.CANCELED);
+                assertThat(ScheduleDetailQueryResult.of(canceled, "보드게임", DisplayStatus.CANCELED,
+                        ViewerRole.GUEST, List.of()).cancellation())
+                        .isEqualTo(new ScheduleDetailQueryResult.Cancellation("개인 사정으로 취소해요.",
+                                toLocalDateTime(createdAt)));
+                assertThat(open.cancellation()).isEmpty();
+            });
+        }
+
         /** 이 클래스의 사용자가 연 일정. 끝나면 deleteCommittedRows가 지운다. */
         private UUID createScheduleWithCapacity(int capacity) {
             return scheduleCommandService.create(new CreateScheduleCommand(userId, BOARD_GAME_ID, UUID.randomUUID(),
@@ -469,6 +630,10 @@ class ScheduleCommandServiceTest {
                 query.setParameter(i + 1, parameters[i]);
             }
             return ((Number) query.getSingleResult()).longValue();
+        }
+
+        private static LocalDateTime toLocalDateTime(Object value) {
+            return value instanceof Timestamp timestamp ? timestamp.toLocalDateTime() : (LocalDateTime) value;
         }
 
         private long count(String sql) {
