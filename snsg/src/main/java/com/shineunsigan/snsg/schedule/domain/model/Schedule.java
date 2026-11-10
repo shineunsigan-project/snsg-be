@@ -34,7 +34,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 일정. 참여 행({@link ScheduleParticipant})을 구성요소로 갖는 애그리거트 루트다.
+ * 일정. 참여 행({@link ScheduleParticipant})과 취소 기록({@link ScheduleCancellation})을 구성요소로 갖는 애그리거트 루트다.
  * <p>
  * 상태는 두 축이다. 일정 자체의 상태({@code status})와 모집 상태({@code recruitmentStatus}).
  * 화면에 보여줄 상태는 두 축과 시각을 합쳐 {@link #displayStatus}가 판정한다.
@@ -53,6 +53,8 @@ public class Schedule extends BaseAuditEntity {
     private static final int DESCRIPTION_MIN_LENGTH = 10;
     private static final int DESCRIPTION_MAX_LENGTH = 500;
     private static final int HOST_COUNT = 1;
+    private static final int CANCEL_REASON_MIN_LENGTH = 1;
+    private static final int CANCEL_REASON_MAX_LENGTH = 100;
 
     /** 참여자 명단 순서. 개설자 행 먼저, 그 뒤 참여 일시, 같으면 행 id 순이다. */
     private static final Comparator<ScheduleParticipant> PARTICIPANT_LIST_ORDER =
@@ -105,6 +107,14 @@ public class Schedule extends BaseAuditEntity {
 
     @OneToMany(mappedBy = "schedule", cascade = CascadeType.PERSIST)
     private List<ScheduleParticipant> participants = new ArrayList<>();
+
+    /**
+     * 일정 전체 취소 기록. 0~1건이다. 취소된 일정의 상세에서만 읽는다({@link #cancellation()}).
+     * 역방향 {@code @OneToOne}은 지연 로딩이 되지 않아 목록·잠금 조회마다 SELECT가 나가므로 지연 컬렉션으로 둔다.
+     */
+    @Getter(AccessLevel.NONE)
+    @OneToMany(mappedBy = "schedule", cascade = CascadeType.PERSIST)
+    private List<ScheduleCancellation> cancellations = new ArrayList<>();
 
     private Schedule(UUID hostUserId, UUID categoryId, String title, String description, DurationType durationType,
             LocalDateTime startAt, int capacity, UUID placeId, PlaceSnapshot place) {
@@ -236,9 +246,41 @@ public class Schedule extends BaseAuditEntity {
                     ? List.of(ScheduleAction.JOIN) : List.of();
             case PARTICIPANT -> isParticipationCancelable(displayStatus)
                     ? List.of(ScheduleAction.CANCEL_PARTICIPATION) : List.of();
-            case HOST -> status == ScheduleStatus.SCHEDULED && startAt.isAfter(now)
-                    ? List.of(ScheduleAction.CANCEL_SCHEDULE) : List.of();
+            case HOST -> isCancelable(now) ? List.of(ScheduleAction.CANCEL_SCHEDULE) : List.of();
         };
+    }
+
+    /**
+     * 개설자가 일정 전체를 취소한다. 개설자 아님 → 취소할 수 없는 일정 → 사유 형식 순서로 거부한다.
+     * 권한을 상태보다 먼저 봐 개설자가 아닌 사람에게 일정 상태를 알려주지 않는다.
+     * 예정(SCHEDULED)이고 시작 전일 때만 취소할 수 있다. 정원이 차 마감됐어도 시작 전이면 취소할 수 있다.
+     * 모집 상태·확정 인원·참여 행은 바꾸지 않는다. 사유는 앞뒤 공백을 뺀 값으로 길이를 보고 그 값을 저장한다.
+     *
+     * @param now 시작 전인지 판정할 기준 시각
+     */
+    public void cancel(UUID userId, String reason, LocalDateTime now) {
+        if (!hostUserId.equals(userId)) {
+            throw new BusinessException(ScheduleErrorCode.NOT_HOST);
+        }
+        if (!isCancelable(now)) {
+            throw new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_CANCELABLE);
+        }
+        String strippedReason = validateCancelReason(reason);
+        status = ScheduleStatus.CANCELED;
+        cancellations.add(ScheduleCancellation.of(this, strippedReason));
+    }
+
+    /**
+     * 취소 기록. 취소된 일정이 아니면 비어 있다. 취소되지 않은 일정은 취소 행을 읽지 않는다.
+     * 취소 행은 지연 로딩이라 트랜잭션 안에서 불러야 한다.
+     */
+    public Optional<ScheduleCancellation> cancellation() {
+        if (status != ScheduleStatus.CANCELED) {
+            return Optional.empty();
+        }
+        return cancellations.stream()
+                .filter(cancellation -> !cancellation.isDeleted())
+                .findFirst();
     }
 
     /** 확정 참여자(개설자 포함)의 사용자 id. 참여를 취소한 행과 삭제된 행은 빠진다. */
@@ -289,6 +331,11 @@ public class Schedule extends BaseAuditEntity {
         }
     }
 
+    /** 화면의 [일정 취소]와 같은 판정이다. 예정(SCHEDULED)이고 시작 전이다. 시작 시각과 같으면 취소할 수 없다. */
+    private boolean isCancelable(LocalDateTime now) {
+        return status == ScheduleStatus.SCHEDULED && startAt.isAfter(now);
+    }
+
     private static boolean isParticipationCancelable(DisplayStatus displayStatus) {
         return displayStatus == DisplayStatus.RECRUITING || displayStatus == DisplayStatus.RECRUITMENT_CLOSED;
     }
@@ -304,6 +351,14 @@ public class Schedule extends BaseAuditEntity {
         String stripped = strip(title);
         if (!hasLengthBetween(stripped, TITLE_MIN_LENGTH, TITLE_MAX_LENGTH)) {
             throw new BusinessException(ScheduleErrorCode.INVALID_TITLE);
+        }
+        return stripped;
+    }
+
+    private static String validateCancelReason(String reason) {
+        String stripped = strip(reason);
+        if (!hasLengthBetween(stripped, CANCEL_REASON_MIN_LENGTH, CANCEL_REASON_MAX_LENGTH)) {
+            throw new BusinessException(ScheduleErrorCode.INVALID_CANCEL_REASON);
         }
         return stripped;
     }

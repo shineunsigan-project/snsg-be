@@ -322,6 +322,81 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiResponseVoid"
+  /api/v1/schedules/{scheduleId}/cancellation:
+    post:
+      tags:
+      - 일정
+      summary: 일정 전체 취소
+      description: |-
+        개설자가 일정 전체를 취소한다. 일정 상세 화면(HOST)의 [일정 취소] → 사유 입력 팝업의 [확인]에서 부른다. 로그인이 필요하다.
+        상세의 availableActions에 CANCEL_SCHEDULE이 있을 때만 [일정 취소]를 활성으로 그린다. 시작 전까지만 취소할 수 있고, 정원이 차 모집 마감이어도 시작 전이면 취소할 수 있다.
+        성공하면 200이고 data는 없다. 성공이든 실패든 일정 상세(GET /api/v1/schedules/{scheduleId})를 다시 불러 화면을 그린다.
+        취소하면 상세의 displayStatus가 CANCELED가 되고 cancellation에 사유와 취소 일시가 온다. 참여자의 참여 기록은 그대로 남는다. 취소는 되돌릴 수 없다.
+        참여자에게 알림은 가지 않는다. 참여자는 상세나 참여한 일정 목록의 CANCELED(일정 취소됨)로 안다.
+        두 번 눌려 같은 요청이 두 번 와도 취소는 한 번이다. 두 번째 요청은 409 SCHEDULE_NOT_CANCELABLE이고, 첫 요청이 이미 성공한 것이다.
+        여러 조건에 걸리면 INVALID_REQUEST(요청 형식) → SCHEDULE_NOT_FOUND → NOT_HOST → SCHEDULE_NOT_CANCELABLE → INVALID_CANCEL_REASON 순서로 앞의 것이 온다.
+      operationId: cancel
+      parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelScheduleRequest"
+        required: true
+      responses:
+        "200":
+          description: 취소 완료. data는 없다. 일정 상세를 다시 불러 그린다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
+        "400":
+          description: |-
+            INVALID_REQUEST(필드 검증 실패): reason이 없거나 null이거나, 앞뒤 공백을 뺀 길이가 1~100자가 아니다.
+            errors에 field = reason과 문구가 온다. 팝업에 errors[0].message를 보여주고 사유를 다시 적게 한다.
+            INVALID_REQUEST(요청 형식 오류): 본문이 없거나 JSON이 깨졌거나 scheduleId가 UUID 형식이 아니다. errors는 없고 message만 온다.
+            정상 화면 흐름에서는 나지 않는다. 났으면 팝업에 message를 보여준다.
+            INVALID_CANCEL_REASON: 서버의 안전망. 요청 검증을 통과한 값이면 나지 않는다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
+        "401":
+          description: "UNAUTHENTICATED: 토큰이 없거나 만료·무효. 재발급 후 다시 부르거나 로그인 화면으로 간다"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
+        "403":
+          description: |-
+            NOT_HOST: 내가 연 일정이 아니다. 정상 흐름에서는 상세의 availableActions로 막으므로 나지 않는다.
+            났으면 message를 보여주고 상세를 다시 불러 그린다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
+        "404":
+          description: |-
+            SCHEDULE_NOT_FOUND: 없거나 삭제된 일정. "찾을 수 없는 일정이에요." 토스트를 보여주고 목록 화면으로 간다.
+            없는 경로의 404(INVALID_REQUEST)와는 code로 구분한다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
+        "409":
+          description: |-
+            SCHEDULE_NOT_CANCELABLE: 이미 취소됐거나(두 번 눌렸을 때 포함) 시작했거나 완료된 일정이다.
+            message를 보여주고 팝업을 닫은 뒤 상세를 다시 불러 그린다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
   /api/v1/auth/tokens:
     post:
       tags:
@@ -648,7 +723,7 @@ paths:
         그에 맞는 availableActions가 온다. 틀리거나 만료된 토큰은 401이 아니라 토큰이 없는 것(GUEST)으로 처리한다.
         버튼은 availableActions에 든 동작만 활성으로 그린다. 비활성 버튼의 문구(모집 마감·완료·취소됨 등)는 displayStatus를 보고 FE가 정한다.
         시작 시각이 지났는데 아직 모집 중으로 저장된 일정(상태 전환 전)도 displayStatus = RECRUITMENT_CLOSED로 온다.
-        장소는 개설 시점의 값이다. 일정 취소 사유는 아직 응답에 없다(일정 전체 취소 API와 함께 생긴다).
+        장소는 개설 시점의 값이다. 개설자가 취소한 일정이면 cancellation에 취소 사유와 취소 일시가 온다(보는 사람과 관계없이). 취소되지 않았으면 null이다.
         조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
       operationId: getDetail
       parameters:
@@ -1114,6 +1189,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FieldError"
+    CancelScheduleRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: |-
+            취소 사유. 필수다. 앞뒤 공백을 뺀 길이로 1~100자. 줄바꿈을 쓸 수 있다. 저장되는 값은 앞뒤 공백을 뺀 값이다.
+            취소된 일정 상세의 cancellation.reason으로 참여자에게 보인다
+          example: 개인 사정으로 일정을 취소하게 됐어요. 죄송해요.
+          pattern: "^\\s*\\S(?:[\\s\\S]{0,98}\\S)?\\s*$"
+      required:
+      - reason
     ApiResponseTokenResponse:
       type: object
       properties:
@@ -1476,6 +1563,18 @@ components:
           - MID
           - LATE
           example: LATE
+    ScheduleDetailCancellation:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: 개설자가 적은 취소 사유. 1~100자이고 줄바꿈이 들어 있을 수 있다
+          example: 개인 사정으로 일정을 취소하게 됐어요. 죄송해요.
+        canceledAt:
+          type: string
+          format: date-time
+          description: "취소 일시. 한국 시간, 오프셋 없는 ISO-8601"
+          example: 2026-11-12T08:30:12.345
     ScheduleDetailCategory:
       type: object
       properties:
@@ -1655,6 +1754,11 @@ components:
             - JOIN
             - CANCEL_PARTICIPATION
             - CANCEL_SCHEDULE
+        cancellation:
+          $ref: "#/components/schemas/ScheduleDetailCancellation"
+          description: |-
+            일정 취소 정보. 개설자가 일정을 취소했으면(displayStatus = CANCELED) 온다. 보는 사람의 역할과 관계없이(GUEST 포함) 같다.
+            취소되지 않은 일정이면 null
     ApiResponseListScheduleParticipant:
       type: object
       properties:

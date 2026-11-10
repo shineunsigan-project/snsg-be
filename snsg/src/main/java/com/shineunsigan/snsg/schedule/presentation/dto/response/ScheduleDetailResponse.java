@@ -79,7 +79,12 @@ public record ScheduleDetailResponse(
                 JOIN: [참여하기](NON_PARTICIPANT, 모집 중). CANCEL_PARTICIPATION: [참여 취소](PARTICIPANT, 모집 중·모집 마감).
                 CANCEL_SCHEDULE: [일정 취소](HOST, 취소·완료되지 않았고 시작 전)""",
                 example = "[\"JOIN\"]")
-        List<ScheduleAction> availableActions) {
+        List<ScheduleAction> availableActions,
+
+        @Schema(description = """
+                일정 취소 정보. 개설자가 일정을 취소했으면(displayStatus = CANCELED) 온다. 보는 사람의 역할과 관계없이(GUEST 포함) 같다.
+                취소되지 않은 일정이면 null""", nullable = true)
+        Cancellation cancellation) {
 
     public static ScheduleDetailResponse from(ScheduleDetailResult result) {
         ScheduleDetailQueryResult schedule = result.schedule();
@@ -89,7 +94,22 @@ public record ScheduleDetailResponse(
                 schedule.confirmedCount(), schedule.capacity(), schedule.remainingSeats(),
                 ParticipantSummary.from(result.participantSummary()),
                 Place.from(schedule.place(), result.regionName()), schedule.displayStatus(), schedule.viewerRole(),
-                schedule.availableActions());
+                schedule.availableActions(), Cancellation.from(schedule.cancellation()));
+    }
+
+    @Schema(name = "ScheduleDetailCancellation")
+    public record Cancellation(
+
+            @Schema(description = "개설자가 적은 취소 사유. 1~100자이고 줄바꿈이 들어 있을 수 있다",
+                    example = "개인 사정으로 일정을 취소하게 됐어요. 죄송해요.")
+            String reason,
+
+            @Schema(description = "취소 일시. 한국 시간, 오프셋 없는 ISO-8601", example = "2026-11-12T08:30:12.345")
+            LocalDateTime canceledAt) {
+
+        static Cancellation from(ScheduleDetailQueryResult.Cancellation cancellation) {
+            return cancellation == null ? null : new Cancellation(cancellation.reason(), cancellation.canceledAt());
+        }
     }
 
     @Schema(name = "ScheduleDetailCategory")
