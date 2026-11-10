@@ -21,6 +21,7 @@ import com.shineunsigan.snsg.common.web.ApiResponse;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.ListParticipantsFacade;
 import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
@@ -28,6 +29,7 @@ import com.shineunsigan.snsg.schedule.presentation.dto.request.CreateScheduleReq
 import com.shineunsigan.snsg.schedule.presentation.dto.response.CreateScheduleResponse;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.ScheduleCardPageResponse;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.ScheduleDetailResponse;
+import com.shineunsigan.snsg.schedule.presentation.dto.response.ScheduleParticipantResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -49,6 +51,7 @@ public class ScheduleController {
     private final ScheduleCommandService scheduleCommandService;
     private final ListSchedulesFacade listSchedulesFacade;
     private final GetScheduleDetailFacade getScheduleDetailFacade;
+    private final ListParticipantsFacade listParticipantsFacade;
 
     @PostMapping
     @Operation(summary = "일정 개설",
@@ -287,5 +290,39 @@ public class ScheduleController {
             @PathVariable UUID scheduleId) {
         return ResponseEntity.ok(ApiResponse.success(
                 ScheduleDetailResponse.from(getScheduleDetailFacade.get(scheduleId, userId))));
+    }
+
+    @GetMapping("/{scheduleId}/participants")
+    @Operation(summary = "참여자 명단",
+            description = """
+                    일정의 확정 참여자(개설자 포함) 명단을 준다. 일정 상세 화면에서 참여자 명단을 펼칠 때 부른다. 로그인이 필요하다.
+                    개설자와 확정 참여자만 볼 수 있다. 상세의 viewerRole이 HOST·PARTICIPANT일 때만 명단을 펼치게 하고, 그 밖(GUEST·NON_PARTICIPANT)은 부르지 않는다.
+                    일정이 취소·완료·모집 마감이어도 개설자와 확정 참여자는 볼 수 있다.
+                    data는 항목 배열이고 페이지가 없다(정원 안이라 최대 24명). 개설자가 항상 맨 앞이라 빈 배열은 오지 않는다.
+                    정렬은 개설자 먼저, 그 뒤 참여 일시가 이른 순(같으면 참여 기록 순)이다. 참여를 취소한 사람은 오지 않고,
+                    취소 후 다시 참여한 사람은 다시 참여한 시각 자리에 한 번만 온다.
+                    탈퇴한 사람은 닉네임 "탈퇴한 사용자", 기본 이미지, ageGroup null, withdrawn = true로 온다.
+                    여러 조건에 걸리면 SCHEDULE_NOT_FOUND → PARTICIPANT_LIST_FORBIDDEN 순서로 앞의 것이 온다.
+                    조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.""")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+                    description = "참여자 명단. 개설자가 맨 앞이고 그 뒤 참여 일시 순이다"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
+                    description = "INVALID_REQUEST: scheduleId가 UUID 형식이 아니다. 정상 화면 흐름에서는 나지 않는다"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
+                    description = "UNAUTHENTICATED: 토큰이 없거나 만료·무효. 재발급 후 다시 부르거나 로그인 화면으로 간다"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403",
+                    description = """
+                            PARTICIPANT_LIST_FORBIDDEN: 개설자도 확정 참여자도 아니다(참여한 적 없음, 참여를 취소함 포함).
+                            정상 흐름에서는 상세의 viewerRole로 막으므로 나지 않는다. 났으면(그 사이 참여를 취소한 경우 등) 상세를 다시 불러 그린다"""),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
+                    description = """
+                            SCHEDULE_NOT_FOUND: 없거나 삭제된 일정. "찾을 수 없는 일정이에요." 토스트를 보여주고 목록 화면으로 간다.
+                            없는 경로의 404(INVALID_REQUEST)와는 code로 구분한다""")})
+    public ResponseEntity<ApiResponse<List<ScheduleParticipantResponse>>> listParticipants(
+            @AuthenticationPrincipal UUID userId, @PathVariable UUID scheduleId) {
+        return ResponseEntity.ok(ApiResponse.success(listParticipantsFacade.list(scheduleId, userId).stream()
+                .map(ScheduleParticipantResponse::from)
+                .toList()));
     }
 }

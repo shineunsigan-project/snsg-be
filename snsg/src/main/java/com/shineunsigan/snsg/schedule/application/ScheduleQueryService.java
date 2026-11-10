@@ -15,6 +15,7 @@ import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSche
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardPageResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQueryResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleParticipantQueryResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.WithdrawalEligibilityResult;
 import com.shineunsigan.snsg.schedule.application.port.in.CheckWithdrawableUseCase;
 import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
@@ -29,7 +30,7 @@ import com.shineunsigan.snsg.schedule.domain.repository.ScheduleRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 일정 목록 3종(모집 중, 참여한, 개설한), 일정 상세와 탈퇴 가능 여부. 목록은 커서 페이지로 읽어 카드로 바꾼다.
+ * 일정 목록 3종(모집 중, 참여한, 개설한), 일정 상세, 참여자 명단과 탈퇴 가능 여부. 목록은 커서 페이지로 읽어 카드로 바꾼다.
  * <p>
  * 한 페이지보다 한 건 더 읽어 다음 페이지가 있는지 정한다. 총 건수가 페이지 크기의 배수여도 빈 페이지를 한 번 더 부르지 않게 하기 위해서다.
  * 지금 시각은 요청마다 한 번 잡아 쿼리 조건과 표시 상태에 함께 쓴다.
@@ -83,6 +84,20 @@ public class ScheduleQueryService implements CheckWithdrawableUseCase {
         return ScheduleDetailQueryResult.of(schedule, categoryName,
                 schedule.displayStatus(now, scheduleProperties.completionAfter()), viewerRole,
                 schedule.availableActions(viewerRole, now, scheduleProperties.completionAfter()));
+    }
+
+    /**
+     * 참여자 명단. 삭제되지 않은 일정을 잠금 없이 읽고(없으면 SCHEDULE_NOT_FOUND), 보는 사람이 볼 수 있는지 본 뒤
+     * (아니면 PARTICIPANT_LIST_FORBIDDEN) 명단 순서의 확정 참여자를 준다.
+     * 참여 행은 지연 로딩이라 트랜잭션 안에서 결과로 바꾼다.
+     */
+    public List<ScheduleParticipantQueryResult> findParticipants(UUID scheduleId, UUID viewerId) {
+        Schedule schedule = scheduleRepository.findById(scheduleId)
+                .orElseThrow(() -> new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND));
+        schedule.validateParticipantListViewable(viewerId);
+        return schedule.confirmedParticipantsInListOrder().stream()
+                .map(ScheduleParticipantQueryResult::from)
+                .toList();
     }
 
     /** 탈퇴 가능 시각은 막는 일정 중 가장 늦은 시작 + 탈퇴 제한 시간이다. */
