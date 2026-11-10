@@ -207,13 +207,52 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 
 ### 탈퇴
 
-`DELETE /api/v1/users/me`를 access token으로 호출한다.
+회원 탈퇴 화면(MY-04)의 흐름은 **탈퇴 가능 확인 → 재확인 → 탈퇴**다. 두 API 모두 access token이 필요하다(없으면 401 `UNAUTHENTICATED`).
 
+1. [회원 탈퇴]를 누르면 `GET /api/v1/users/me/withdrawal-eligibility`를 부른다.
+2. `withdrawable`이 `false`면 탈퇴 불가 팝업을 띄우고 `availableAt`(그 시각 이후 탈퇴 가능)을 안내한다. `true`면 되돌릴 수 없음을 알리는 재확인 팝업을 띄운다.
+3. 재확인 팝업에서 확인을 누르면 `DELETE /api/v1/users/me`를 부른다.
+
+**탈퇴를 막는 일정**: 내가 확정 참여했거나 개설한 일정 중 취소되지 않았고(예정·완료 모두) 시작 후 24시간이 지나지 않은 것이 하나라도 있으면 탈퇴할 수 없다.
+
+- 취소된 일정과 참여를 취소한 일정은 막지 않는다. 시작 + 24시간이 정확히 지금이면 막지 않는다.
+- 완료(시작 + 12시간) 뒤에도 시작 + 24시간까지는 막는다.
+
+#### 탈퇴 가능 여부
+
+`GET /api/v1/users/me/withdrawal-eligibility`
+
+- 응답 예:
+  ```json
+  { "isSuccess": true,
+    "data": { "withdrawable": false, "availableAt": "2026-11-15T19:00:00" } }
+  ```
+  - `withdrawable`: 지금 탈퇴할 수 있는지. 탈퇴할 수 없어도 200이다.
+  - `availableAt`: 탈퇴할 수 있게 되는 시각(한국 시간). 막는 일정 중 시작 시각이 가장 늦은 일정의 시작 + 24시간이다. **`withdrawable`이 `true`면 `null`이다**(`"availableAt": null`로 온다).
+- 결과는 안내용이다. 이 응답 뒤에 일정에 참여하면 탈퇴가 409 `WITHDRAWAL_BLOCKED`로 막힐 수 있다.
+- 조회만 하므로 **같은 요청을 몇 번 다시 보내도 된다.**
+
+#### 탈퇴
+
+`DELETE /api/v1/users/me`
+
+- 탈퇴 가능 여부와 같은 기준으로 남은 일정을 다시 확인한다. 막는 일정이 있으면 409이고 아무것도 바뀌지 않는다.
 - 계정이 삭제 표시된다. **되돌릴 수 없다.** 이름·이메일·닉네임·생년월일·프로필 사진 원본은 90일 보관한 뒤 비식별 값으로 바뀌고, 그때 올렸던 사진 파일도 지워진다.
 - 탈퇴한 회원의 닉네임은 90일 동안 다른 사람이 쓸 수 없다(`DUPLICATED_NICKNAME`).
 - **카카오 연결도 서버가 끊는다.** 사용자가 카카오 설정에서 따로 끊을 필요가 없다.
-- 모든 기기의 refresh token이 즉시 무효가 된다. 다른 기기의 로그인도 끊긴다. **쿠키는 서버가 비우지 않으므로** 탈퇴 직후 `DELETE /api/v1/auth/tokens`(로그아웃)를 한 번 더 호출해 쿠키를 정리한다.
+- 모든 기기의 refresh token이 즉시 무효가 된다. 다른 기기의 로그인도 끊긴다. **성공 응답이 refreshToken 쿠키를 만료시킨다**(`Set-Cookie`, `Max-Age=0`). 브라우저가 쿠키 만료를 적용하도록 credentials를 포함해 호출한다(공통 규칙). 로그아웃을 따로 부르지 않는다.
+- 성공(200, `{"isSuccess":true}`)하면 메모리의 access token을 버리고 로그인 전 화면으로 보낸다.
 - 다시 가입하면 **이전 활동과 이어지지 않는 새 계정**이 된다. 같은 카카오 계정이어도 그렇다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 409 | `WITHDRAWAL_BLOCKED` | 탈퇴를 막는 일정이 있다. 쿠키는 그대로다 | `message`("모든 일정 취소 혹은 진행 중 이후 24시간이 지나야 탈퇴할 수 있어요.")를 보여준다. 가능 시각은 탈퇴 가능 여부 API의 `availableAt`으로 다시 받아 안내한다 |
+  | 404 | `USER_NOT_FOUND` | 토큰의 사용자가 없거나 이미 탈퇴했고, 탈퇴를 막는 일정은 없다(두 번 눌렸거나 남은 access token으로 호출) | 탈퇴가 끝난 것으로 보고 토큰을 버린 뒤 로그인 전 화면으로 |
+
+- 남은 일정 확인이 사용자 확인보다 먼저다. 카카오에서 연결을 끊어 탈퇴된 사용자(아래 절)는 일정이 그대로 남는다. 그 사용자가 막는 일정이 남은 채로 남은 access token으로 부르면 404가 아니라 409 `WITHDRAWAL_BLOCKED`다.
+
+- 두 번 눌려 다시 보내면 두 번째 요청은 404 `USER_NOT_FOUND`다. 응답 전까지 버튼을 막는다.
 
 ### 사용자가 카카오에서 연결을 끊은 경우
 
@@ -826,7 +865,8 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 프로필 수정 (사진 변경) | `POST /api/v1/users/me/profile-image` | 받은 경로를 미리보기에 쓰고 저장 요청의 `profileImageUrl`에 넣는다. 이 호출만으로는 프로필이 바뀌지 않는다 |
 | 프로필 수정 (저장) | `PATCH /api/v1/users/me` | 200이면 응답으로 화면을 갱신. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 409 `DUPLICATED_NICKNAME`이면 다른 닉네임 안내, `NICKNAME_CHANGE_RESTRICTED`면 바꿀 수 있는 날짜 안내 |
 | 설정 · 로그아웃 | `DELETE /api/v1/auth/tokens` | 응답과 무관하게 메모리의 토큰을 버리고 로그인 화면 |
-| 설정 · 탈퇴 | `DELETE /api/v1/users/me` → `DELETE /api/v1/auth/tokens` | 되돌릴 수 없음을 한 번 확인받고 호출. 끝나면 로그인 화면 |
+| 회원 탈퇴 ([회원 탈퇴], MY-04) | `GET /api/v1/users/me/withdrawal-eligibility` | `withdrawable`이 false면 탈퇴 불가 팝업에 `availableAt`을 안내. true면 재확인 팝업 |
+| 회원 탈퇴 (재확인 팝업 확인, MY-04) | `DELETE /api/v1/users/me` (credentials 포함) | 200이면 토큰을 버리고 로그인 전 화면. 쿠키는 응답이 만료시키므로 로그아웃을 부르지 않는다. 409 `WITHDRAWAL_BLOCKED`면 `message`를 보여주고 가능 시각을 다시 받아 안내. 404 `USER_NOT_FOUND`면 이미 탈퇴한 것이므로 200과 같이 처리. 응답 전까지 버튼을 막는다 |
 | 일정 목록 (지역 필터) | `GET /api/v1/regions` | 받은 순서대로 필터를 그린다 |
 | 장소 선택 (지역 칩) | `GET /api/v1/regions` | 받은 순서대로 칩을 그린다 |
 | 장소 선택 (목록·지도) | `GET /api/v1/place-candidates` | 화면 진입과 지역 칩 변경 때 부른다. 받은 순서대로 목록과 지도 핀을 그린다. 빈 배열이면 결과 없음. 400 `INVALID_CATEGORY`면 활동을, `INVALID_REGION`이면 지역을 다시 고르게 한다 |
