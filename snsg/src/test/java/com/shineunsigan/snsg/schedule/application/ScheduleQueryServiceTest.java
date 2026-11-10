@@ -37,6 +37,7 @@ import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSche
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardPageResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQueryResult;
+import com.shineunsigan.snsg.schedule.application.dto.result.WithdrawalEligibilityResult;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
@@ -52,14 +53,14 @@ import com.shineunsigan.snsg.schedule.domain.repository.ScheduleRepository;
 
 /**
  * 목록의 페이지 크기(기본·상한·하한), 날짜 필터 해석과 오류 순서, 다음 페이지 판정(한 건 더 읽기), 카드 변환,
- * 상세의 없는 일정과 판정 결과 담기를 본다.
+ * 상세의 없는 일정과 판정 결과 담기, 탈퇴 가능 여부와 가능 시각 계산을 본다.
  * 쿼리 조건 자체는 ScheduleRepositoryImplTest가 실제 PostgreSQL에서 본다.
  */
 @ExtendWith(MockitoExtension.class)
 class ScheduleQueryServiceTest {
 
     private static final ScheduleProperties PROPERTIES = new ScheduleProperties(4, 24, Duration.ofHours(1), 30,
-            Duration.ofHours(12), Duration.ofHours(12), 20, 50);
+            Duration.ofHours(12), Duration.ofHours(12), 20, 50, Duration.ofHours(24));
     private static final UUID CATEGORY_ID = UUID.randomUUID();
     private static final UUID USER_ID = UUID.randomUUID();
     private static final PlaceSnapshot PLACE = PlaceSnapshot.of("보드게임카페", "서울특별시 마포구 와우산로 1", "2층",
@@ -293,6 +294,33 @@ class ScheduleQueryServiceTest {
         when(activityCategoryRepository.findAllNotDeletedByIds(List.of(CATEGORY_ID))).thenReturn(List.of());
 
         assertThat(scheduleQueryService.findDetail(schedule.getId(), USER_ID).categoryName()).isEmpty();
+    }
+
+    // 탈퇴 가능 여부
+
+    @Test
+    @DisplayName("탈퇴: 막는 일정이 없으면 탈퇴할 수 있고 가능 시각은 null이다")
+    void withdrawableWithoutBlockingSchedule() {
+        when(scheduleRepository.findLatestWithdrawalBlockingStartAt(eq(USER_ID), any(), eq(Duration.ofHours(24))))
+                .thenReturn(Optional.empty());
+
+        WithdrawalEligibilityResult result = scheduleQueryService.checkWithdrawable(USER_ID);
+
+        assertThat(result.withdrawable()).isTrue();
+        assertThat(result.availableAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("탈퇴: 막는 일정이 있으면 탈퇴할 수 없고 가능 시각은 가장 늦은 시작 + 설정 기간(24시간)이다")
+    void notWithdrawableWithBlockingSchedule() {
+        LocalDateTime latestStartAt = LocalDateTime.of(2027, 3, 12, 19, 0);
+        when(scheduleRepository.findLatestWithdrawalBlockingStartAt(eq(USER_ID), any(), eq(Duration.ofHours(24))))
+                .thenReturn(Optional.of(latestStartAt));
+
+        WithdrawalEligibilityResult result = scheduleQueryService.checkWithdrawable(USER_ID);
+
+        assertThat(result.withdrawable()).isFalse();
+        assertThat(result.availableAt()).isEqualTo(LocalDateTime.of(2027, 3, 13, 19, 0));
     }
 
     private void assertRecruitingLimit(Integer size, int expectedLimit) {

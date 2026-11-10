@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
@@ -28,7 +29,7 @@ import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
 import jakarta.persistence.EntityManager;
 
 /**
- * 시간 겹침 쿼리, 일정 잠금 조회와 잠금 없는 조회, 일정 목록 3종 쿼리, 상태 전환 일괄 UPDATE와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
+ * 시간 겹침 쿼리, 일정 잠금 조회와 잠금 없는 조회, 탈퇴를 막는 일정 조회, 일정 목록 3종 쿼리, 상태 전환 일괄 UPDATE와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
  * 일정·참여 행은 native INSERT로 넣는다. 사용자 id는 테스트마다 무작위라 다른 데이터와 섞이지 않는다.
  * 테스트 트랜잭션은 롤백된다.
  */
@@ -50,6 +51,8 @@ class ScheduleRepositoryImplTest {
     private static final LocalDateTime TRANSITION_NOW = LocalDateTime.of(2020, 1, 1, 12, 0);
     /** 넣은 행의 created_at·updated_at. 전환되지 않은 행은 이 값이 그대로 남는다. */
     private static final LocalDateTime INSERTED_AT = LocalDateTime.of(2019, 12, 1, 9, 0);
+    /** 탈퇴 제한 시간(schedule.withdrawal-block-after-start). */
+    private static final Duration WITHDRAWAL_BLOCK = Duration.ofHours(24);
 
     @Autowired
     private ScheduleRepositoryImpl scheduleRepository;
@@ -170,6 +173,95 @@ class ScheduleRepositoryImplTest {
         UUID schedule = insertSchedule(row().deleted(true));
 
         assertThat(scheduleRepository.findById(schedule)).isEmpty();
+    }
+
+    // 탈퇴를 막는 일정. 사용자 id가 무작위라 다른 데이터와 섞이지 않는다. 기준 시각은 NOW로 고정한다.
+
+    @Test
+    @DisplayName("멤버로 확정 참여한 예정 일정이 내일 시작하면 탈퇴를 막는다")
+    void memberScheduleBlocksWithdrawal() {
+        UUID schedule = insertSchedule(row().startAt(NOW.plusDays(1)));
+        insertParticipant(schedule, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(latestWithdrawalBlockingStartAt()).hasValue(NOW.plusDays(1));
+    }
+
+    @Test
+    @DisplayName("개설만 한(HOST 행) 일정도 탈퇴를 막는다")
+    void hostedScheduleBlocksWithdrawal() {
+        UUID schedule = insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId));
+        insertParticipant(schedule, userId, "HOST", "CONFIRMED", false);
+
+        assertThat(latestWithdrawalBlockingStartAt()).hasValue(NOW.plusDays(1));
+    }
+
+    @Test
+    @DisplayName("취소된 일정만 있으면 탈퇴를 막는 일정이 없다")
+    void canceledScheduleDoesNotBlockWithdrawal() {
+        UUID hosted = insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId).status("CANCELED"));
+        insertParticipant(hosted, userId, "HOST", "CONFIRMED", false);
+        UUID joined = insertSchedule(row().startAt(NOW.plusDays(2)).status("CANCELED"));
+        insertParticipant(joined, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(latestWithdrawalBlockingStartAt()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("참여를 취소한 일정만 있으면 탈퇴를 막는 일정이 없다")
+    void canceledParticipationDoesNotBlockWithdrawal() {
+        UUID schedule = insertSchedule(row().startAt(NOW.plusDays(1)));
+        insertParticipant(schedule, userId, "MEMBER", "CANCELED", false);
+
+        assertThat(latestWithdrawalBlockingStartAt()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("삭제된 일정과 삭제된 참여 행은 탈퇴를 막지 않는다")
+    void deletedScheduleOrParticipationDoesNotBlockWithdrawal() {
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).deleted(true)), userId, "MEMBER",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1))), userId, "MEMBER", "CONFIRMED", true);
+
+        assertThat(latestWithdrawalBlockingStartAt()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("완료된 일정이라도 시작 후 18시간(완료 12~24시간 사이)이면 탈퇴를 막는다")
+    void completedScheduleWithin24HoursBlocksWithdrawal() {
+        UUID schedule = insertSchedule(row().startAt(NOW.minusHours(18)).status("COMPLETED"));
+        insertParticipant(schedule, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(latestWithdrawalBlockingStartAt()).hasValue(NOW.minusHours(18));
+    }
+
+    @Test
+    @DisplayName("시작 + 24시간이 기준 시각과 정확히 같으면 탈퇴를 막지 않는다")
+    void exactlyBlockPeriodDoesNotBlockWithdrawal() {
+        UUID schedule = insertSchedule(row().startAt(NOW.minus(WITHDRAWAL_BLOCK)).status("COMPLETED"));
+        insertParticipant(schedule, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(latestWithdrawalBlockingStartAt()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("시작 + 24시간이 기준 시각 1분 뒤면 탈퇴를 막는다")
+    void oneMinuteBeforeBlockPeriodEndsBlocksWithdrawal() {
+        LocalDateTime startAt = NOW.minus(WITHDRAWAL_BLOCK).plusMinutes(1);
+        UUID schedule = insertSchedule(row().startAt(startAt).status("COMPLETED"));
+        insertParticipant(schedule, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(latestWithdrawalBlockingStartAt()).hasValue(startAt);
+    }
+
+    @Test
+    @DisplayName("탈퇴를 막는 일정이 여럿이면 시작 시각이 가장 늦은 일정을 준다")
+    void latestBlockingScheduleIsReturned() {
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(3))), userId, "MEMBER", "CONFIRMED", false);
+        UUID hosted = insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId));
+        insertParticipant(hosted, userId, "HOST", "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.minusHours(1))), userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(latestWithdrawalBlockingStartAt()).hasValue(NOW.plusDays(3));
     }
 
     // DB 제약
@@ -572,6 +664,10 @@ class ScheduleRepositoryImplTest {
     /** PostgreSQL uuid는 바이트를 부호 없이 비교한다. 소문자 16진 문자열의 사전 순과 같다. */
     private static List<UUID> sortedLikePostgres(List<UUID> ids) {
         return ids.stream().sorted(Comparator.comparing(UUID::toString)).toList();
+    }
+
+    private Optional<LocalDateTime> latestWithdrawalBlockingStartAt() {
+        return scheduleRepository.findLatestWithdrawalBlockingStartAt(userId, NOW, WITHDRAWAL_BLOCK);
     }
 
     private boolean overlaps(LocalDateTime startAt) {

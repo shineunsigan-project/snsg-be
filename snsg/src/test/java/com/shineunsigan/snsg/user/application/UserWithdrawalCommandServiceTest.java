@@ -182,6 +182,18 @@ class UserWithdrawalCommandServiceTest {
         }
 
         @Test
+        @DisplayName("타 도메인이 부르는 사용자 요청 탈퇴(withdraw(userId))는 사유 USER_REQUESTED로 기록한다")
+        void withdrawByUseCaseRecordsUserRequested() {
+            UUID userId = UUID.randomUUID();
+            stubWithdrawable(userId, user("민트초코", UPLOADED_IMAGE), List.of());
+            LocalDateTime before = LocalDateTime.now();
+
+            service.withdraw(userId);
+
+            assertRecorded(WithdrawReason.USER_REQUESTED, before, LocalDateTime.now());
+        }
+
+        @Test
         @DisplayName("소셜 연결 끊기 탈퇴는 사유 SOCIAL_UNLINKED인 탈퇴 기록과 WITHDRAWN 닉네임 이력을 같은 기한으로 남긴다")
         void withdrawBySocialAccountRecordsWithdrawalAndHistory() {
             User user = user("민트초코", UPLOADED_IMAGE);
