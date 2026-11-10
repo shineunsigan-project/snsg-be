@@ -537,7 +537,8 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
       },
       "displayStatus": "RECRUITING",
       "viewerRole": "NON_PARTICIPANT",
-      "availableActions": ["JOIN"]
+      "availableActions": ["JOIN"],
+      "cancellation": null
     }
   }
   ```
@@ -568,8 +569,11 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   | `displayStatus` | 화면에 보여줄 상태. 아래 표 |
   | `viewerRole` | 보는 사람의 역할. 아래 표 |
   | `availableActions` | 지금 누를 수 있는 동작. 아래 표. 비어 있으면 누를 수 있는 버튼이 없다 |
+  | `cancellation` | 일정 취소 정보. 개설자가 취소한 일정(`displayStatus` = `CANCELED`)이면 온다. 보는 사람의 역할과 관계없이(`GUEST` 포함) 같다. **취소되지 않은 일정이면 `null`** |
+  | `cancellation.reason` | 개설자가 적은 취소 사유. 1~100자이고 줄바꿈이 들어 있을 수 있다 |
+  | `cancellation.canceledAt` | 취소 일시. 오프셋 없는 한국 시간 |
 
-  `minAgeGroup`·`maxAgeGroup` 말고는 null이 아니다. 장소는 **개설 시점의 값**이다. 장소 정보가 나중에 바뀌어도 이 일정에는 개설 때 값이 그대로 온다.
+  `minAgeGroup`·`maxAgeGroup`·`cancellation` 말고는 null이 아니다. 장소는 **개설 시점의 값**이다. 장소 정보가 나중에 바뀌어도 이 일정에는 개설 때 값이 그대로 온다.
 
 - `displayStatus`는 목록과 같은 값이다. 상세에서는 네 값이 모두 올 수 있다.
 
@@ -598,7 +602,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   | `LOGIN_TO_JOIN` | [참여하기] | `GUEST`, 모집 중 | 로그인 화면으로 보낸다 |
   | `JOIN` | [참여하기] | `NON_PARTICIPANT`, 모집 중 | 참여 API(`POST /api/v1/schedules/{scheduleId}/participants`) |
   | `CANCEL_PARTICIPATION` | [참여 취소] | `PARTICIPANT`, 모집 중·모집 마감(완료 전이면 시작 후도 포함) | 참여 취소 확인 팝업(DTL-07) → 참여 취소 API |
-  | `CANCEL_SCHEDULE` | [일정 취소] | `HOST`, 취소·완료되지 않았고 시작 전(정원이 차 마감됐어도 시작 전이면 온다) | 일정 전체 취소 API. **아직 없다**(T-15에서 생긴다). 그때까지 이 값을 받아도 부를 API가 없다 |
+  | `CANCEL_SCHEDULE` | [일정 취소] | `HOST`, 취소·완료되지 않았고 시작 전(정원이 차 마감됐어도 시작 전이면 온다) | 사유 입력 팝업 → 일정 전체 취소 API(`POST /api/v1/schedules/{scheduleId}/cancellation`) |
 
   역할과 상태별로 정리하면 다음과 같다. 빈칸은 빈 배열이다.
 
@@ -610,7 +614,11 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   | `COMPLETED` | | | | |
   | `CANCELED` | | | | |
 
-- 일정 취소 사유(`cancellation`)는 **아직 응답에 없다.** 일정 전체 취소 API와 함께 생긴다.
+- **취소된 일정**: `displayStatus`가 `CANCELED`이고 `cancellation`에 사유와 취소 일시가 온다. 취소 사유를 보여줄 때 이 값을 쓴다. 예:
+
+  ```json
+  "cancellation": { "reason": "개인 사정으로 일정을 취소하게 됐어요. 죄송해요.", "canceledAt": "2026-11-12T08:30:12.345" }
+  ```
 - 오류:
 
   | 상태 | code | 언제 | 화면에서 할 일 |
@@ -792,6 +800,74 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   ```
 - **두 번 눌렸을 때**: 취소는 한 번만 된다. 두 번째 요청은 409 `NOT_PARTICIPANT`이고, **재시도해도 안전하다.** 첫 응답을 받지 못해 다시 보냈다가 `NOT_PARTICIPANT`를 받았다면 첫 요청이 이미 성공한 것이다.
 
+### 일정 전체 취소
+
+`POST /api/v1/schedules/{scheduleId}/cancellation`. 개설자가 일정 전체를 취소한다.
+
+- **부르는 화면**: 일정 상세(HOST)의 [일정 취소] → **사유 입력 팝업**의 [확인]. 팝업은 FE가 만든다. 사유를 적는 칸 하나와 [확인]·[닫기]가 있으면 된다. [일정 취소]는 상세의 `availableActions`에 `CANCEL_SCHEDULE`이 있을 때만 활성으로 그린다.
+- **인증이 필요하다.** 토큰이 없거나 만료되면 401 `UNAUTHENTICATED`다. 재발급 후 다시 부르고, 재발급도 실패하면 로그인 화면으로 간다.
+- **취소할 수 있는 때**: 개설자 본인이고, 취소·완료되지 않았고, **시작 전**이다. 시작 시각과 같으면(정각) 취소할 수 없다. 정원이 차 모집 마감이어도 시작 전이면 취소할 수 있다. 취소는 **되돌릴 수 없다.**
+- 요청 본문:
+
+  ```json
+  { "reason": "개인 사정으로 일정을 취소하게 됐어요. 죄송해요." }
+  ```
+
+  | 필드 | 의미 | 필수 | 규칙 |
+  | --- | --- | --- | --- |
+  | `reason` | 취소 사유. 취소된 일정 상세의 `cancellation.reason`으로 참여자에게 보인다 | 예 | **앞뒤 공백을 뺀 길이로 1~100자.** 줄바꿈을 쓸 수 있다. 이모지는 한 글자로 센다. 서버는 앞뒤 공백을 뺀 값을 저장한다. 비었거나 공백만이면 400 |
+
+  팝업에서 앞뒤 공백을 뺀 길이가 1~100자가 아니면 [확인]을 막고 문구("취소 사유는 1~100자로 적어주세요.")를 보여준다. 스펙의 `pattern`이 서버와 같은 규칙이다.
+- 성공하면 **200이고 `data`가 없다.**
+  ```json
+  { "isSuccess": true }
+  ```
+- **성공이든 실패든 팝업을 닫고 일정 상세(`GET /api/v1/schedules/{scheduleId}`)를 다시 불러 화면을 그린다.** 단 400 `INVALID_REQUEST`는 팝업을 열어둔 채 문구(`errors`가 있으면 `errors[0].message`, 없으면 `message`)를 보여주고 사유를 다시 적게 한다.
+- 오류:
+
+  | 상태 | code | 언제 | 화면에서 할 일 |
+  | --- | --- | --- | --- |
+  | 400 | `INVALID_REQUEST`(필드 검증 실패) | `reason`이 없거나 `null`이거나, 앞뒤 공백을 뺀 길이가 1~100자가 아니다. **`errors`에 `field` = `reason`과 문구가 온다** | 팝업에 `errors[0].message`를 보여주고 사유를 다시 적게 한다 |
+  | 400 | `INVALID_REQUEST`(요청 형식 오류) | 본문이 없거나 JSON이 깨졌거나 `scheduleId`가 UUID 형식이 아니다. **`errors`가 없고 `message`만 온다** | 정상 화면 흐름에서는 나지 않는다. 났으면 팝업에 `message`를 보여준다 |
+  | 400 | `INVALID_CANCEL_REASON` | 서버의 안전망. 요청 검증을 통과한 값이면 나지 않는다 | `INVALID_REQUEST`와 같게 처리한다 |
+  | 401 | `UNAUTHENTICATED` | 토큰이 없거나 만료·무효 | 재발급 후 다시 부르고, 실패하면 로그인 화면으로 |
+  | 403 | `NOT_HOST` | 내가 연 일정이 아니다 | 정상 흐름에서는 상세의 `availableActions`로 막으므로 나지 않는다. 났으면 `message`를 보여주고 상세를 다시 불러 그린다 |
+  | 404 | `SCHEDULE_NOT_FOUND` | 없거나 삭제된 일정 | 토스트로 `message`("찾을 수 없는 일정이에요.")를 보여주고 일정 목록 화면으로 간다. 일정 상세 API의 404와 같은 처리다 |
+  | 409 | `SCHEDULE_NOT_CANCELABLE` | 이미 취소됐거나(두 번 눌렸을 때 포함) 시작했거나 완료된 일정 | `message`를 보여주고 상세를 다시 불러 그린다 |
+
+  여러 조건에 걸리면 **`INVALID_REQUEST`(요청 형식) → `SCHEDULE_NOT_FOUND` → `NOT_HOST` → `SCHEDULE_NOT_CANCELABLE` → `INVALID_CANCEL_REASON`** 순서로 앞의 것이 온다. 권한을 상태보다 먼저 보므로, 개설자가 아닌 사람은 일정이 이미 취소됐어도 `NOT_HOST`를 받는다.
+
+  `SCHEDULE_NOT_FOUND`(404)는 없는 경로의 404(`INVALID_REQUEST`)와 **`code`로 구분한다.**
+
+  ```json
+  {
+    "isSuccess": false,
+    "code": "INVALID_REQUEST",
+    "message": "요청 형식이 올바르지 않습니다.",
+    "errors": [{ "field": "reason", "message": "취소 사유는 1~100자로 적어주세요." }]
+  }
+  ```
+  ```json
+  { "isSuccess": false, "code": "INVALID_REQUEST", "message": "요청 형식이 올바르지 않습니다." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "NOT_HOST", "message": "내가 연 일정만 취소할 수 있어요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "SCHEDULE_NOT_FOUND", "message": "찾을 수 없는 일정이에요." }
+  ```
+  ```json
+  { "isSuccess": false, "code": "SCHEDULE_NOT_CANCELABLE", "message": "이미 취소됐거나 시작한 일정은 취소할 수 없어요." }
+  ```
+- **두 번 눌렸을 때**: 취소는 한 번만 된다. 두 번째 요청은 409 `SCHEDULE_NOT_CANCELABLE`이다. 첫 응답을 받지 못해 다시 보냈다가 이 code를 받았다면 **첫 요청이 이미 성공한 것**이다. 그래도 첫 응답을 받기 전까지 [확인] 버튼을 막는다.
+- **취소한 뒤 보이는 것**:
+  - 일정 상세: 누가 보든(`GUEST` 포함) `displayStatus`가 `CANCELED`이고 `cancellation`에 사유(`reason`)와 취소 일시(`canceledAt`)가 온다. 개설자의 `availableActions`는 빈 배열이다.
+  - 참여자의 참여 기록은 그대로 남는다. 확정 인원(`confirmedCount`)도 바뀌지 않고, 참여자 명단도 그대로 볼 수 있다.
+  - 참여한 일정 목록·개설한 일정 목록: 완료 시각(시작 + 12시간) 전까지 `displayStatus = CANCELED`("일정 취소됨")로 남는다. 모집 중 목록에서는 빠진다.
+  - 그 일정에는 참여할 수 없고(409 `RECRUIT_CLOSED`), 참여를 취소할 수도 없다(409 `PARTICIPATION_NOT_CANCELABLE`).
+  - 취소된 일정은 탈퇴를 막지 않고, 시간 겹침 검사에서도 빠진다. 참여자는 같은 시간대의 다른 일정에 참여할 수 있다.
+- **알림은 없다.** 취소해도 참여자에게 푸시·메시지가 가지 않는다. 참여자는 상세나 참여한 일정 목록의 "일정 취소됨"으로 안다.
+
 ### 일정 목록
 
 일정 카드 목록 세 가지다. 응답 형태와 페이지 넘기는 방법이 같다.
@@ -947,15 +1023,16 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 일정 개설 (활동 선택) | `GET /api/v1/activity-categories` | 받은 순서대로 활동을 그린다 |
 | 일정 목록 (활동 필터) | `GET /api/v1/activity-categories` | 받은 순서대로 필터를 그린다 |
 | 일정 개설 ([일정 열기]) | `POST /api/v1/schedules` | 201이면 내가 연 일정 목록(LIST-05)으로 이동하고 팝업을 띄운다. 400 `INVALID_REQUEST`면 `errors`의 필드별 문구 표시. 그 밖의 400·409는 해당 입력을 다시 고르게 한다. 응답 전까지 버튼을 막는다 |
-| 일정 상세 (진입, 참여·참여 취소 뒤) | `GET /api/v1/schedules/{scheduleId}` (로그인했으면 access token 포함) | `availableActions`에 든 버튼만 활성으로 그린다. 비활성 버튼 문구는 `displayStatus`로 정한다. `LOGIN_TO_JOIN`을 누르면 로그인 화면으로. 404 `SCHEDULE_NOT_FOUND`면 토스트 후 일정 목록으로 |
+| 일정 상세 (진입, 참여·참여 취소·일정 취소 뒤) | `GET /api/v1/schedules/{scheduleId}` (로그인했으면 access token 포함) | `availableActions`에 든 버튼만 활성으로 그린다. 비활성 버튼 문구는 `displayStatus`로 정한다. `LOGIN_TO_JOIN`을 누르면 로그인 화면으로. 404 `SCHEDULE_NOT_FOUND`면 토스트 후 일정 목록으로 |
 | 일정 상세 (참여자 명단 펼치기, `viewerRole`이 `HOST`·`PARTICIPANT`일 때만) | `GET /api/v1/schedules/{scheduleId}/participants` | 받은 순서대로 그린다(개설자가 맨 앞). `isHost`면 개설자 표시, `isMe`면 본인 표시, `withdrawn`이면 탈퇴 표시. 403 `PARTICIPANT_LIST_FORBIDDEN`이면 상세를 다시 불러 그린다. 404 `SCHEDULE_NOT_FOUND`면 토스트 후 일정 목록으로. 401이면 재발급 후 다시 부른다 |
 | 일정 상세 ([참여하기]) | `POST /api/v1/schedules/{scheduleId}/participants` | 200이든 409든 상세를 다시 불러 그린다. 409 `SCHEDULE_TIME_CONFLICT`면 `message`를 보여준다. 404 `SCHEDULE_NOT_FOUND`면 일정 목록으로 보내고 토스트. 응답 전까지 버튼을 막는다 |
 | 일정 상세 (참여 취소 팝업 [확인]) | `DELETE /api/v1/schedules/{scheduleId}/participants/me` | 200이든 409든 상세를 다시 불러 그린다. 409 `NOT_PARTICIPANT`는 이미 취소된 상태다. 404 `SCHEDULE_NOT_FOUND`면 일정 목록으로 보내고 토스트 |
+| 일정 상세 ([일정 취소] → 사유 입력 팝업 [확인], `availableActions`에 `CANCEL_SCHEDULE`이 있을 때만) | `POST /api/v1/schedules/{scheduleId}/cancellation` | 200이든 403·409든 팝업을 닫고 상세를 다시 불러 그린다. 400 `INVALID_REQUEST`면 팝업에 문구(`errors`가 있으면 `errors[0].message`, 없으면 `message`)를 보여주고 다시 적게 한다. 409 `SCHEDULE_NOT_CANCELABLE`는 이미 취소됐거나 시작한 일정이다(두 번 눌렸으면 첫 요청이 성공한 것). 404 `SCHEDULE_NOT_FOUND`면 토스트 후 일정 목록으로. 응답 전까지 [확인]을 막는다 |
 | 일정 목록 · 모집 중 탭 (LIST-01·02, 필터 LIST-03) | `GET /api/v1/schedules` (토큰 없이) | 탭 진입과 필터 변경 때 `cursor` 없이 부르고, 끝까지 스크롤하면 `cursor=nextCursor`로 다음 페이지를 붙인다. `nextCursor`가 null이면 더 부르지 않는다. 빈 `items`면 결과 없음. 400 `INVALID_DATE_FILTER`면 날짜를 다시 고르게 하고, `INVALID_CURSOR`면 처음부터 다시 부른다 |
 | 일정 목록 · 참여한 일정 탭 (LIST-04) | `GET /api/v1/schedules/participating` | 페이지 넘기기는 모집 중 탭과 같다. `CANCELED`는 "일정 취소됨"으로 그린다. 401이면 재발급 후 다시 부른다 |
 | 일정 목록 · 개설한 일정 탭 (LIST-05), 개설 직후 내가 연 일정 (CRT-07) | `GET /api/v1/schedules/hosted` | 개설 201을 받은 뒤 이 목록으로 와서 부른다. 방금 연 일정이 들어 있다. 페이지 넘기기·401 처리는 위와 같다 |
 
-일정 전체 취소 등 위 표에 없는 일정 API와 알림 API는 아직 없다. 생기면 이 표에 추가한다.
+알림 API는 아직 없다. 일정 API가 새로 생기면 이 표에 추가한다.
 
 ## 로컬에서 서버 띄우기
 

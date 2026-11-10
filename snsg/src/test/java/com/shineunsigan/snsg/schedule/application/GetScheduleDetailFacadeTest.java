@@ -146,7 +146,7 @@ class GetScheduleDetailFacadeTest {
                 6 - confirmedUserIds.size(),
                 new ScheduleDetailQueryResult.Place("보드게임카페", "서울특별시 마포구 와우산로 1", "2층",
                         new BigDecimal("37.5500000"), new BigDecimal("126.9200000"), REGION_CODE),
-                DisplayStatus.RECRUITING, ViewerRole.NON_PARTICIPANT, List.of(ScheduleAction.JOIN));
+                DisplayStatus.RECRUITING, ViewerRole.NON_PARTICIPANT, List.of(ScheduleAction.JOIN), null);
     }
 
     private static ScheduleUserProfileResult profile(String nickname, Gender gender,

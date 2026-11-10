@@ -25,6 +25,9 @@ public enum ScheduleErrorCode implements ErrorCode {
     NOT_PARTICIPANT(ErrorType.CONFLICT, "참여 중인 일정이 아니에요."),
     PARTICIPATION_NOT_CANCELABLE(ErrorType.CONFLICT, "취소되었거나 끝난 일정은 참여를 취소할 수 없어요."),
     PARTICIPANT_LIST_FORBIDDEN(ErrorType.FORBIDDEN, "참여한 일정만 참여자 명단을 볼 수 있어요."),
+    NOT_HOST(ErrorType.FORBIDDEN, "내가 연 일정만 취소할 수 있어요."),
+    SCHEDULE_NOT_CANCELABLE(ErrorType.CONFLICT, "이미 취소됐거나 시작한 일정은 취소할 수 없어요."),
+    INVALID_CANCEL_REASON(ErrorType.INVALID, "취소 사유는 1~100자로 적어주세요."),
     INVALID_DATE_FILTER(ErrorType.INVALID, "끝 날짜는 시작 날짜보다 앞설 수 없어요."),
     INVALID_CURSOR(ErrorType.INVALID, "목록을 처음부터 다시 불러주세요.");
 

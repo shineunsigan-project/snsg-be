@@ -67,6 +67,19 @@ public class ScheduleCommandService {
         schedule.leave(userId, LocalDateTime.now(), scheduleProperties.completionAfter());
     }
 
+    /**
+     * 개설자가 일정 전체를 취소한다. 일정 행만 잠그고 판정한다. 사용자 잠금은 걸지 않는다. 취소는 겹침을 만들지 않는다.
+     * <p>
+     * 잠금으로 같은 일정의 참여·참여 취소·취소를 차례로 세운다. 동시에 들어온 두 취소 중 뒤의 것은 취소된 일정을 보고
+     * SCHEDULE_NOT_CANCELABLE이 되고, 취소 뒤 들어온 참여는 RECRUIT_CLOSED가 된다.
+     * 잠그지 않으면 참여가 바꾼 확정 인원을 옛 값으로 덮어쓸 수 있다.
+     */
+    @Transactional
+    public void cancel(UUID scheduleId, UUID userId, String reason) {
+        Schedule schedule = findScheduleForUpdate(scheduleId);
+        schedule.cancel(userId, reason, LocalDateTime.now());
+    }
+
     /** 시작 시각이 지난 모집 중 일정을 모집 마감으로 바꾼다(스케줄러). */
     @Transactional
     public void closeStartedRecruitments() {

@@ -158,7 +158,7 @@
 
 - 모든 엔티티는 `common/entity`의 `BaseEntity`를 상속한다. id(UUID v7), `createdAt`, `updatedAt`, `isDeleted`가 딸려온다.
 - 변경 주체를 남겨야 하는 엔티티는 `BaseAuditEntity`를 상속한다. `createdBy`, `updatedBy`가 더해진다.
-  - 판단 기준: 도메인 컬럼으로는 알 수 없는 "누가 바꿨나"가 운영에서 궁금해지면 Audit. 예로 일정을 누가 취소했는지(개설자인지 운영자인지), 탈퇴 기록(`user_withdrawals`)을 누가 만들고(본인 요청이면 사용자 id, 웹훅이면 `SYSTEM`) 누가 비식별했는지(`SYSTEM_SCHEDULER`).
+  - 판단 기준: 도메인 컬럼으로는 알 수 없는 "누가 바꿨나"가 운영에서 궁금해지면 Audit. 예로 일정을 누가 취소했는지(`schedule_cancellations`, 개설자인지 운영자인지), 탈퇴 기록(`user_withdrawals`)을 누가 만들고(본인 요청이면 사용자 id, 웹훅이면 `SYSTEM`) 누가 비식별했는지(`SYSTEM_SCHEDULER`).
   - 값은 사용자 id 문자열이거나 `Auditor.SYSTEM`, `Auditor.SYSTEM_SCHEDULER`다. 인증이 없는 요청은 `SYSTEM`이 들어간다.
 - id는 UUID v7(`@UuidGenerator(style = VERSION_7)`)이다. 시간순으로 증가해 인덱스가 조각나지 않고, URL로 남의 데이터를 추측할 수 없다. 다른 키 전략이 꼭 필요한 테이블만 `BaseEntity`를 상속하지 않는다.
   - 예: `regions`. 행정구역 코드(`CHAR(5)`)가 PK인 기준 데이터다. 지우지 않으므로 `is_deleted`가 없고, 숨김은 `is_active`가 맡는다. `created_at`·`updated_at`은 엔티티에서 직접 매핑한다.
@@ -194,7 +194,9 @@
 | 같은 도메인의 다른 애그리거트 | 예 | 걸지 않는다 | 각자 repository로 접근. 포트는 필요 없다 |
 | 다른 도메인 | 아니오 | 걸지 않는다 | 반드시 자기 `port/out` → adapter → 상대 `port/in` |
 
-예: `User`(루트) ← `UserSocialAccount`, `TermsAgreement`는 한 애그리거트라 FK를 건다. `Schedule`(루트) ← `ScheduleParticipant`, `ScheduleMessage`도 같다. 반면 `Schedule`이 참조하는 개설자(user)는 다른 도메인이라 ID만 보관한다.
+예: `User`(루트) ← `UserSocialAccount`, `TermsAgreement`는 한 애그리거트라 FK를 건다. `Schedule`(루트) ← `ScheduleParticipant`, `ScheduleCancellation`, `ScheduleMessage`도 같다. 반면 `Schedule`이 참조하는 개설자(user)는 다른 도메인이라 ID만 보관한다.
+
+- 루트가 구성요소를 0~1건 갖더라도 루트 쪽에 역방향 `@OneToOne(mappedBy)`를 두지 않는다. Hibernate가 역방향 `@OneToOne`은 지연 로딩하지 못해, 루트를 읽는 목록·잠금 조회마다 루트 수만큼 SELECT가 더 나간다(N+1). 루트에서 읽어야 하면 지연 `@OneToMany(mappedBy)` 컬렉션으로 두고, 필요한 경로에서만 읽는다. 예: `Schedule.cancellations`(0~1건). `Schedule.cancellation()`은 상태가 `CANCELED`일 때만 컬렉션을 읽어, 취소되지 않은 일정은 취소 행을 조회하지 않는다. 루트에서 읽을 일이 없으면 구성요소 쪽에만 소유 측 매핑을 둔다(`UserWithdrawal`의 `@OneToOne(fetch = LAZY)`).
 
 ### FK
 
@@ -218,8 +220,8 @@
 
 - 동시에 오면 결과가 어긋나는 판정(정원, 시간 겹침)은 Command 서비스의 트랜잭션 안에서 **잠근 뒤 판정한다.** 잠금은 repository 메서드로 둔다.
   - 사용자 단위: `pg_advisory_xact_lock`(`ScheduleRepository.lockUser`). 같은 사용자의 개설·참여를 차례로 세워 겹침 검사가 서로의 결과를 보게 한다.
-  - 행 단위: `@Lock(PESSIMISTIC_WRITE)` 조회, 즉 `SELECT … FOR UPDATE`(`ScheduleRepository.findByIdForUpdate`). 같은 일정의 참여·참여 취소를 차례로 세운다.
-- **둘을 함께 잡으면 순서는 항상 사용자 → 일정이다.** 순서가 섞이면 교착이 난다. 일정 하나만 잡는 흐름(참여 취소)은 사용자 잠금을 걸지 않는다.
+  - 행 단위: `@Lock(PESSIMISTIC_WRITE)` 조회, 즉 `SELECT … FOR UPDATE`(`ScheduleRepository.findByIdForUpdate`). 같은 일정의 참여·참여 취소·일정 전체 취소를 차례로 세운다.
+- **둘을 함께 잡으면 순서는 항상 사용자 → 일정이다.** 순서가 섞이면 교착이 난다. 일정 하나만 잡는 흐름(참여 취소, 일정 전체 취소)은 사용자 잠금을 걸지 않는다.
 - **잠금 조회는 그 트랜잭션에서 그 행을 처음 읽는 조회여야 한다.** 먼저 잠금 없이 읽어 영속성 컨텍스트에 올려두면, 잠근 뒤에도 옛 값(확정 인원·모집 상태)을 쓴다.
 - **잠그는 조회에 연관 컬렉션을 fetch join하지 않는다.** PostgreSQL은 outer join의 nullable 쪽에 `FOR UPDATE`를 걸 수 없고, 잠글 대상은 루트 행 하나면 된다. 구성요소는 잠근 뒤 지연 로딩으로 읽는다(READ COMMITTED라 앞 트랜잭션이 커밋한 행을 본다).
 - **부분 유니크 인덱스 위반을 오류 코드로 바꾸는 곳은 잠금 없이 경쟁이 실제로 나는 곳뿐이다.** 예: 닉네임(`UserRepositoryImpl.save`가 409 `DUPLICATED_NICKNAME`으로 바꾼다). 잠금으로 직렬화한 경로의 인덱스(`uix_participants_confirmed`)는 앱 경로로는 위반되지 않는 마지막 방어선이라 바꾸지 않는다. 위반되면 잠금 버그이므로 500으로 드러나게 둔다.

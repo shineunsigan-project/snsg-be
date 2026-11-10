@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -34,7 +35,7 @@ import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
 /**
  * 개설의 형식 규칙(제목·설명·시작 일시·인원), 화면 표시 상태 판정, 참여·참여 취소 규칙,
- * 상세를 보는 사람의 역할과 누를 수 있는 동작, 참여자 명단을 볼 수 있는 사람과 명단 순서를 검증한다.
+ * 일정 전체 취소 규칙, 상세를 보는 사람의 역할과 누를 수 있는 동작, 참여자 명단을 볼 수 있는 사람과 명단 순서를 검증한다.
  * 설정값은 운영 설정과 같은 값(4~24명, 1시간, 30일, 완료 12시간)을 넣는다.
  */
 class ScheduleTest {
@@ -607,6 +608,190 @@ class ScheduleTest {
 
             assertInvalid(() -> schedule.leave(userId, now, COMPLETION_AFTER), errorCode);
             assertThat(Snapshot.of(schedule)).isEqualTo(before);
+        }
+    }
+
+    @Nested
+    @DisplayName("일정 전체 취소")
+    class Cancel {
+
+        private final UUID memberId = UUID.randomUUID();
+        private final LocalDateTime joinAt = START_AT.minusHours(2);
+        private final LocalDateTime beforeStart = START_AT.minusMinutes(1);
+
+        @Test
+        @DisplayName("개설자가 시작 전 예정 일정을 취소하면 CANCELED, 취소 기록(사유는 앞뒤 공백을 뺀 값)이 생기고 모집 상태·확정 인원·참여 행은 그대로다")
+        void hostCancelsBeforeStart() {
+            Schedule schedule = joined(CAPACITY);
+            Snapshot before = Snapshot.of(schedule);
+
+            schedule.cancel(HOST_ID, "  개인 사정으로 취소해요.\n죄송해요.  ", beforeStart);
+
+            assertThat(schedule.getStatus()).isEqualTo(ScheduleStatus.CANCELED);
+            assertThat(schedule.cancellation()).hasValueSatisfying(cancellation -> {
+                assertThat(cancellation.getReason()).isEqualTo("개인 사정으로 취소해요.\n죄송해요.");
+                assertThat(cancellation.getSchedule()).isSameAs(schedule);
+            });
+            assertThat(Snapshot.of(schedule)).isEqualTo(before);
+            assertThat(schedule.getParticipants())
+                    .extracting(ScheduleParticipant::getStatus)
+                    .containsOnly(ParticipationStatus.CONFIRMED);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.RECRUITING);
+            assertThat(schedule.getConfirmedCount()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("정원이 차 모집 마감(CLOSED)된 시작 전 일정도 취소된다. 모집 상태는 CLOSED 그대로다")
+        void closedBeforeStartIsCancelable() {
+            Schedule schedule = joined(4);
+            schedule.join(UUID.randomUUID(), joinAt, COMPLETION_AFTER);
+            schedule.join(UUID.randomUUID(), joinAt, COMPLETION_AFTER);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.CLOSED);
+
+            schedule.cancel(HOST_ID, "사유", beforeStart);
+
+            assertThat(schedule.getStatus()).isEqualTo(ScheduleStatus.CANCELED);
+            assertThat(schedule.getRecruitmentStatus()).isEqualTo(RecruitmentStatus.CLOSED);
+            assertThat(schedule.getConfirmedCount()).isEqualTo(4);
+            assertThat(schedule.cancellation()).isPresent();
+        }
+
+        @Test
+        @DisplayName("시작 시각 정각이면 SCHEDULE_NOT_CANCELABLE")
+        void atStartIsRejected() {
+            assertCancelRejected(joined(CAPACITY), HOST_ID, "사유", START_AT,
+                    ScheduleErrorCode.SCHEDULE_NOT_CANCELABLE);
+        }
+
+        @Test
+        @DisplayName("시작 후면 SCHEDULE_NOT_CANCELABLE")
+        void afterStartIsRejected() {
+            assertCancelRejected(joined(CAPACITY), HOST_ID, "사유", START_AT.plusMinutes(1),
+                    ScheduleErrorCode.SCHEDULE_NOT_CANCELABLE);
+        }
+
+        @Test
+        @DisplayName("이미 취소한 일정을 다시 취소하면 SCHEDULE_NOT_CANCELABLE이고 처음 취소 기록이 그대로다")
+        void alreadyCanceledIsRejected() {
+            Schedule schedule = joined(CAPACITY);
+            schedule.cancel(HOST_ID, "처음 사유", beforeStart);
+
+            assertCancelRejected(schedule, HOST_ID, "두 번째 사유", beforeStart,
+                    ScheduleErrorCode.SCHEDULE_NOT_CANCELABLE);
+            assertThat(schedule.cancellation()).hasValueSatisfying(
+                    cancellation -> assertThat(cancellation.getReason()).isEqualTo("처음 사유"));
+        }
+
+        @Test
+        @DisplayName("완료(COMPLETED)된 일정은 SCHEDULE_NOT_CANCELABLE")
+        void completedIsRejected() {
+            Schedule schedule = joined(CAPACITY);
+            ReflectionTestUtils.setField(schedule, "status", ScheduleStatus.COMPLETED);
+
+            assertCancelRejected(schedule, HOST_ID, "사유", beforeStart, ScheduleErrorCode.SCHEDULE_NOT_CANCELABLE);
+        }
+
+        @Test
+        @DisplayName("개설자가 아니면(참여자·참여하지 않은 사람) NOT_HOST")
+        void notHostIsRejected() {
+            Schedule schedule = joined(CAPACITY);
+
+            assertCancelRejected(schedule, memberId, "사유", beforeStart, ScheduleErrorCode.NOT_HOST);
+            assertCancelRejected(schedule, UUID.randomUUID(), "사유", beforeStart, ScheduleErrorCode.NOT_HOST);
+        }
+
+        @Test
+        @DisplayName("이미 취소된 일정에 개설자가 아닌 사람이 보내면 NOT_HOST다(권한을 상태보다 먼저 본다)")
+        void notHostOnCanceledScheduleIsNotHost() {
+            Schedule schedule = joined(CAPACITY);
+            schedule.cancel(HOST_ID, "사유", beforeStart);
+
+            assertCancelRejected(schedule, memberId, "사유", beforeStart, ScheduleErrorCode.NOT_HOST);
+        }
+
+        @ParameterizedTest(name = "[{0}]")
+        @ValueSource(strings = {"", "   ", " \n\t "})
+        @DisplayName("사유가 빈 문자열·공백만이면 INVALID_CANCEL_REASON")
+        void blankReasonIsRejected(String reason) {
+            assertCancelRejected(joined(CAPACITY), HOST_ID, reason, beforeStart,
+                    ScheduleErrorCode.INVALID_CANCEL_REASON);
+        }
+
+        @Test
+        @DisplayName("사유가 null이면 INVALID_CANCEL_REASON")
+        void nullReasonIsRejected() {
+            assertCancelRejected(joined(CAPACITY), HOST_ID, null, beforeStart,
+                    ScheduleErrorCode.INVALID_CANCEL_REASON);
+        }
+
+        @Test
+        @DisplayName("앞뒤 공백을 뺀 길이가 101자면 INVALID_CANCEL_REASON")
+        void tooLongReasonIsRejected() {
+            assertCancelRejected(joined(CAPACITY), HOST_ID, "  " + "가".repeat(101) + "  ", beforeStart,
+                    ScheduleErrorCode.INVALID_CANCEL_REASON);
+        }
+
+        @ParameterizedTest(name = "[{0}]")
+        @MethodSource("validReasons")
+        @DisplayName("앞뒤 공백을 뺀 길이가 1자, 100자(이모지 100개 포함)면 통과하고 뺀 값을 저장한다")
+        void boundaryReasonIsAccepted(String reason, String stored) {
+            Schedule schedule = joined(CAPACITY);
+
+            schedule.cancel(HOST_ID, reason, beforeStart);
+
+            assertThat(schedule.cancellation()).hasValueSatisfying(
+                    cancellation -> assertThat(cancellation.getReason()).isEqualTo(stored));
+        }
+
+        static Stream<Arguments> validReasons() {
+            return Stream.of(
+                    Arguments.of(" 가 ", "가"),
+                    Arguments.of("  " + "가".repeat(100) + "\n", "가".repeat(100)),
+                    Arguments.of("😀".repeat(100), "😀".repeat(100)));
+        }
+
+        @Test
+        @DisplayName("사유가 틀린 비개설자는 NOT_HOST, 사유가 틀린 시작 후 일정은 SCHEDULE_NOT_CANCELABLE이다")
+        void checkOrder() {
+            assertCancelRejected(joined(CAPACITY), memberId, "", beforeStart, ScheduleErrorCode.NOT_HOST);
+            assertCancelRejected(joined(CAPACITY), HOST_ID, "", START_AT, ScheduleErrorCode.SCHEDULE_NOT_CANCELABLE);
+        }
+
+        @Test
+        @DisplayName("취소한 일정에서 개설자의 누를 수 있는 동작은 없고 표시 상태는 CANCELED다")
+        void canceledScheduleHasNoHostAction() {
+            Schedule schedule = joined(CAPACITY);
+
+            schedule.cancel(HOST_ID, "사유", beforeStart);
+
+            assertThat(schedule.displayStatus(beforeStart, COMPLETION_AFTER)).isEqualTo(DisplayStatus.CANCELED);
+            assertThat(schedule.availableActions(ViewerRole.HOST, beforeStart, COMPLETION_AFTER)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("취소하지 않은 일정은 취소 기록이 비어 있다")
+        void notCanceledHasNoCancellation() {
+            assertThat(joined(CAPACITY).cancellation()).isEmpty();
+        }
+
+        /** 개설자와 memberId가 확정 참여한 일정. */
+        private Schedule joined(int capacity) {
+            Schedule schedule = create(TITLE, DESCRIPTION, START_AT, capacity, NOW);
+            schedule.join(memberId, joinAt, COMPLETION_AFTER);
+            return schedule;
+        }
+
+        /** 거부되면 일정 상태·취소 기록·참여 행·확정 인원·모집 상태가 바뀌지 않는다. */
+        private void assertCancelRejected(Schedule schedule, UUID userId, String reason, LocalDateTime now,
+                ScheduleErrorCode errorCode) {
+            Snapshot before = Snapshot.of(schedule);
+            ScheduleStatus statusBefore = schedule.getStatus();
+            Optional<ScheduleCancellation> cancellationBefore = schedule.cancellation();
+
+            assertInvalid(() -> schedule.cancel(userId, reason, now), errorCode);
+            assertThat(Snapshot.of(schedule)).isEqualTo(before);
+            assertThat(schedule.getStatus()).isEqualTo(statusBefore);
+            assertThat(schedule.cancellation()).isEqualTo(cancellationBefore);
         }
     }
 

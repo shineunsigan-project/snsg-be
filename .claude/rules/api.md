@@ -69,7 +69,7 @@ paths:
   - `code`와 `message`는 **실패 전용**이다. 성공 응답에서는 비어 있어 JSON에 나가지 않는다.
   - `errors`(`[{field, message}]`)는 **요청 DTO의 Bean Validation 필드 오류일 때만** 담긴다(`code`는 `INVALID_REQUEST`). JSON 변환 실패(enum 밖 값, 없는 날짜, 타입 오류), `BusinessException`, 404·405 등에는 담지 않는다. 정상적인 FE 입력으로는 나오지 않는 값이라 필드별 안내가 필요 없다.
 - 성공: `ApiResponse.success(data)` 또는 `ApiResponse.success()`. **성공 코드 체계는 두지 않는다.**
-  - 돌려줄 값이 없으면 반환 타입을 `ResponseEntity<ApiResponse<Void>>`로 두고 `ApiResponse.success()`를 200으로 준다. 본문은 `{"isSuccess":true}`다. 예: 로그아웃, 탈퇴, 일정 참여·참여 취소.
+  - 돌려줄 값이 없으면 반환 타입을 `ResponseEntity<ApiResponse<Void>>`로 두고 `ApiResponse.success()`를 200으로 준다. 본문은 `{"isSuccess":true}`다. 예: 로그아웃, 탈퇴, 일정 참여·참여 취소·전체 취소.
   - FE가 성공을 분기해야 하면 code가 아니라 `data`의 필드로 준다(예: `isNewUser`). code로 분기하면 코드가 하나 늘 때 FE가 조용히 깨진다.
   - 화면 문구는 FE가 가진다. 성공 메시지를 서버가 내려주면 문구 하나 바꾸는 데 서버 배포가 필요하다.
 - 실패: `BusinessException(<Domain>ErrorCode)`를 던지고, `common.web`의 전역 예외 처리에서 `ApiResponse.error(...)`로 변환한다.
@@ -111,6 +111,8 @@ FE는 작업할 때마다 이 저장소를 받아가 `docs/`를 본다. FE에 AP
   - 토큰 없이 호출하는 엔드포인트는 메서드에 `@SecurityRequirements`를 달아 전역 bearer 요구를 지운다. 같은 컨트롤러에 인증이 필요한 엔드포인트가 섞이므로 클래스에 달지 않는다.
     - 선택 인증 API(위 인증 주체 항목)에는 달지 않는다. 전역 요구를 지우면 swagger-ui가 토큰을 보내지 않아 토큰이 있을 때의 응답을 시험할 수 없다. 대신 description에 토큰은 선택이라는 것, 토큰이 있으면 무엇이 달라지는지, 틀린 토큰은 익명으로 처리한다는 것을 적는다. 예: `UserController`의 닉네임 사용 가능 여부.
 - Request/Response record 필드에는 `@Schema(description, example)`을 단다.
+  - **null이 될 수 있는 응답 필드는 description에 null이 되는 조건을 적는다.** springdoc이 스펙을 OpenAPI 3.1.0으로 만들며, `$ref`로 나가는 필드(중첩 record·enum)에는 `@Schema(nullable = true)`를 출력하지 않는다(`docs/openapi.yaml`에 `nullable`이 한 건도 없다). `types = {"object", "null"}`은 `$ref`와 AND로 묶여 null을 무효로 만드는 잘못된 스키마라 쓰지 않는다. 예: `ScheduleDetailResponse`의 `cancellation`, `minAgeGroup`·`maxAgeGroup`.
+- `docs/api-guide.md` 에러 표에서 `INVALID_REQUEST`의 `errors`를 쓰라고 안내할 때는 **필드 검증 실패에만** 쓴다. 본문 없음·JSON 깨짐·경로 변수 형식 오류도 같은 `INVALID_REQUEST`지만 `errors`가 없다(응답과 예외 절). 둘이 같은 화면에서 날 수 있으면 행을 나눠 `errors` 유무와 보여줄 문구(`errors[0].message` / `message`)를 따로 적는다. 예: 일정 전체 취소.
 - API를 바꾸면 같은 PR에서 `OPENAPI_UPDATE=true ./gradlew test --tests '*OpenApiSpecTest'`로 `docs/openapi.yaml`을 다시 만들어 커밋한다. 코드와 다르면 빌드가 실패한다.
   - `docs/openapi.yaml`은 API를 바꾼 코드와 **같은 커밋**에 넣는다. `docs:` 커밋으로 떼면 그 사이 커밋에서 `OpenApiSpecTest`가 실패한다. `docs/api-guide.md`는 빌드가 대조하지 않으므로 따로 커밋해도 된다.
 - 여러 호출에 걸친 흐름, 공통 규칙, 화면별로 쓰는 API가 바뀌면 `docs/api-guide.md`도 고친다. 이건 빌드가 잡지 못한다.
