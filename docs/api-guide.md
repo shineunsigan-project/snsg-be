@@ -58,7 +58,7 @@
 | 400 | `UNDERAGE` | 가입일 기준 만 18세 미만 | 가입할 수 없음을 안내 |
 | 400 | `INVALID_PROFILE_IMAGE` | JPG·PNG가 아니거나 빈 파일. 5MB를 넘는 파일은 이 코드가 아니라 `413 INVALID_REQUEST`로 온다(업로드 크기 한도에서 먼저 걸린다) | 다른 사진 선택 안내 |
 | 400 | `INVALID_PROFILE_IMAGE_URL` | 가입·프로필 수정 요청의 `profileImageUrl`이 업로드 API가 준 경로가 아니거나, 다른 회원이 쓰고 있는 경로 | FE 버그다. 업로드 응답의 값을 그대로 넣는다 |
-| 409 | `ALREADY_WITHDRAWN` | 이미 탈퇴한 사용자 | 로그인 화면으로 |
+| 404 | `USER_NOT_FOUND` | 토큰의 사용자가 없거나 이미 탈퇴했다(남은 access token으로 호출). 탈퇴 API의 두 번째 요청도 이 코드다 | 로그인 화면으로. 탈퇴 API에서는 탈퇴가 끝난 것으로 본다 |
 
 엔드포인트마다 추가로 나는 에러는 `openapi.yaml`의 응답 코드별 설명에 있다.
 
