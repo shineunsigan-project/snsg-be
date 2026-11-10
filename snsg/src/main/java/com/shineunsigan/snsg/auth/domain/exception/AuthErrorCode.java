@@ -14,6 +14,7 @@ public enum AuthErrorCode implements ErrorCode {
     UNSUPPORTED_SOCIAL_PROVIDER(ErrorType.INVALID, "지원하지 않는 소셜 로그인입니다."),
     INVALID_WEBHOOK_SENDER(ErrorType.FORBIDDEN, "허용되지 않은 요청입니다."),
     INVALID_PROFILE_IMAGE_URL(ErrorType.INVALID, "프로필 사진은 업로드한 사진만 쓸 수 있어요."),
+    WITHDRAWAL_BLOCKED(ErrorType.CONFLICT, "모든 일정 취소 혹은 진행 중 이후 24시간이 지나야 탈퇴할 수 있어요."),
     INVALID_SOCIAL_CODE(ErrorType.UNAUTHENTICATED, "소셜 로그인에 실패했습니다. 다시 시도해주세요."),
     SOCIAL_USER_FETCH_FAILED(ErrorType.INTERNAL, "소셜 사용자 정보를 가져오지 못했습니다.");
 

@@ -6,7 +6,6 @@ import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,8 +20,6 @@ import com.shineunsigan.snsg.common.web.ApiResponse;
 import com.shineunsigan.snsg.user.application.UploadProfileImageFacade;
 import com.shineunsigan.snsg.user.application.UserProfileCommandService;
 import com.shineunsigan.snsg.user.application.UserQueryService;
-import com.shineunsigan.snsg.user.application.UserWithdrawalCommandService;
-import com.shineunsigan.snsg.user.domain.constants.WithdrawReason;
 import com.shineunsigan.snsg.user.presentation.dto.request.UpdateMyProfileRequest;
 import com.shineunsigan.snsg.user.presentation.dto.response.MyProfileResponse;
 import com.shineunsigan.snsg.user.presentation.dto.response.NicknameAvailabilityResponse;
@@ -42,7 +39,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class UserController {
 
-    private final UserWithdrawalCommandService userWithdrawalCommandService;
     private final UserQueryService userQueryService;
     private final UserProfileCommandService userProfileCommandService;
     private final UploadProfileImageFacade uploadProfileImageFacade;
@@ -123,24 +119,6 @@ public class UserController {
         String profileImageUrl = uploadProfileImageFacade.upload(image.getBytes());
 
         return ResponseEntity.ok(ApiResponse.success(new ProfileImageResponse(profileImageUrl)));
-    }
-
-    @DeleteMapping("/me")
-    @Operation(summary = "탈퇴",
-            description = """
-                    사용자를 탈퇴시킨다. 계정은 삭제 표시되고, 이름·이메일·닉네임·생년월일·프로필 사진 원본은 90일 보관한 뒤 비식별한다.
-                    탈퇴한 닉네임은 90일 동안 다른 사람이 쓸 수 없다.
-                    카카오 연결도 끊어지므로 다시 로그인하면 동의 화면부터 시작한다.
-                    되돌릴 수 없고, 다시 가입하면 이전 활동과 이어지지 않는 새 계정이 된다.
-                    refresh token은 즉시 무효가 되지만 쿠키는 남는다. 탈퇴 직후 로그아웃 API를 한 번 호출해 쿠키를 비운다.""")
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "탈퇴 완료"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
-                    description = "토큰이 없거나 유효하지 않다")})
-    public ResponseEntity<ApiResponse<Void>> withdraw(@AuthenticationPrincipal UUID userId) {
-        userWithdrawalCommandService.withdraw(userId, WithdrawReason.USER_REQUESTED);
-
-        return ResponseEntity.ok(ApiResponse.success());
     }
 
     /**

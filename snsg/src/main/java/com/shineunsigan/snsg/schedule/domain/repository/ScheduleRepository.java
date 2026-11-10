@@ -37,6 +37,14 @@ public interface ScheduleRepository {
      */
     boolean existsOverlapping(UUID userId, LocalDateTime startAt, Duration window);
 
+    /**
+     * 탈퇴를 막는 일정 중 가장 늦은 시작 시각. 막는 일정이 없으면 비어 있다.
+     * 막는 일정은 그 사용자가 확정 참여(개설자 포함)한, 삭제되지 않고 취소(CANCELED)되지 않은 일정(예정·완료) 중
+     * 시작 + blockAfterStart가 now보다 뒤인 것이다. 정확히 now와 같으면 막지 않는다.
+     */
+    Optional<LocalDateTime> findLatestWithdrawalBlockingStartAt(UUID userId, LocalDateTime now,
+            Duration blockAfterStart);
+
     /*
      * 일정 목록 3종. 모두 삭제되지 않은 일정을 (start_at, id) 오름차순으로 limit건까지 준다.
      * after가 있으면 그 (start_at, id)보다 뒤의 일정만 준다(keyset). null이면 처음부터다.

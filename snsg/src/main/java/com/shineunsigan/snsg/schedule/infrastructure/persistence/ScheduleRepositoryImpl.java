@@ -56,6 +56,13 @@ public class ScheduleRepositoryImpl implements ScheduleRepository {
                 startAt.plus(window));
     }
 
+    @Override
+    public Optional<LocalDateTime> findLatestWithdrawalBlockingStartAt(UUID userId, LocalDateTime now,
+            Duration blockAfterStart) {
+        return Optional.ofNullable(scheduleJpaRepository.findLatestConfirmedNotCanceledStartAtAfter(userId,
+                now.minus(blockAfterStart)));
+    }
+
     /** 선택 조건이 있어 JPQL을 조건별로 이어 만든다. 컬렉션 파라미터에 null을 바인딩하지 않기 위해서다. */
     @Override
     public List<Schedule> findRecruiting(RecruitingScheduleFilter filter, LocalDateTime now, ScheduleCursor after,

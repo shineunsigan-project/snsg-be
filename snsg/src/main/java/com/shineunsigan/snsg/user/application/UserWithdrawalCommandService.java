@@ -47,6 +47,12 @@ public class UserWithdrawalCommandService implements WithdrawUserUseCase {
     private final NicknameProperties nicknameProperties;
     private final WithdrawalProperties withdrawalProperties;
 
+    @Override
+    @Transactional
+    public void withdraw(UUID userId) {
+        withdraw(userId, WithdrawReason.USER_REQUESTED);
+    }
+
     /**
      * 소셜 쪽에서 연동을 끊었다는 통지로 탈퇴시킨다.
      * 가입하지 않은 사용자(동의 화면에서 이탈 등)에 대해서도 통지가 오므로 없으면 넘어간다.

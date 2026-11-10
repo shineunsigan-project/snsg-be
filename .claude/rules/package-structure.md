@@ -31,6 +31,9 @@
 - **도메인 간 의존은 한 방향만 둔다.** A가 B를 호출하면 B는 A를 호출하지 않는다. 서로 참조하는 두 도메인은 사실상 한 덩어리여서 나중에 분리할 수 없다.
   - 반대 방향이 필요해지면 호출 대신 **이벤트**를 쓴다. 발행하는 쪽은 받는 쪽을 모른다.
   - 어느 쪽이 상대를 알아야 하는지 애매하면, **데이터를 소유한 쪽이 모르게** 만든다.
+  - 한 흐름이 두 도메인에 걸치는데 어느 쪽이 상대를 부르면 순환이 되면, 자기 데이터가 없는 도메인이 흐름을 조합한다.
+    - 예: 탈퇴는 user의 일이지만 확인할 데이터(남은 일정)는 schedule에 있다. schedule → user가 이미 있어 user가 schedule을 부를 수 없으므로 auth가 조합한다. `WithdrawFacade`(`SchedulePort`로 탈퇴 가능 확인 → `UserPort.withdraw`), `CheckWithdrawalFacade`. 의존은 auth → schedule, auth → user다.
+    - 사용자 요청 탈퇴만 확인하고, 카카오 연결 끊기 웹훅 탈퇴(`HandleSocialUnlinkFacade`)는 확인하지 않는다. 그래서 user `WithdrawUserUseCase`의 입구가 둘(`withdraw`, `withdrawBySocialAccount`)이다.
 - application·domain과 infrastructure 사이는 반드시 DIP. application·domain은 infrastructure를 import하지 않는다.
   - DB: `domain/repository` 인터페이스 ← `infrastructure/persistence`의 `XxxRepositoryImpl`
   - 그 외 외부 기술(Redis, Kafka, 외부 API, 타 도메인 등): `application/port/out`의 `XxxPort` ← `infrastructure`의 `XxxAdapter`
@@ -79,7 +82,7 @@
 - UseCase 구현만을 위한 별도 facade/adapter 클래스, 즉 서비스 메서드 하나로 넘기기만 하는 클래스는 만들지 않는다. facade 기준(Service와 Facade 절)에 해당하는 흐름이면 facade가 `port/in`을 구현해도 된다.
 - 서비스 분리 시 UseCase 하나가 `/internal/v1` API 하나가 된다. 호출 측 adapter는 HTTP 클라이언트로 교체한다.
 - outbound `port/out/XxxPort`: application이 필요로 하는 외부 기능. 기술 이름이 아니라 역할로 이름 짓는다 (`UserSettingPort`, `MatchingEventPort`).
-  - 포트 이름은 도메인마다 겹쳐도 된다(auth·schedule 모두 `UserPort`). 단 **adapter는 Spring 빈이라 단순 클래스명이 다른 도메인과 같으면 빈 이름이 겹쳐 기동이 실패한다**(`ConflictingBeanDefinitionException`). 겹치면 앞에 자기 도메인 이름을 붙인다. 예: auth의 `UserAdapter`가 있어 schedule은 `ScheduleUserAdapter`·`SchedulePlaceAdapter`다.
+  - 포트 이름은 도메인마다 겹쳐도 된다(auth·schedule 모두 `UserPort`). 단 **adapter는 Spring 빈이라 단순 클래스명이 다른 도메인과 같으면 빈 이름이 겹쳐 기동이 실패한다**(`ConflictingBeanDefinitionException`). 겹치면 앞에 자기 도메인 이름을 붙인다. 예: auth의 `UserAdapter`가 있어 schedule은 `ScheduleUserAdapter`·`SchedulePlaceAdapter`다. auth가 schedule을 부르는 adapter는 `AuthScheduleAdapter`다.
 - adapter가 설정값을 읽어 정책을 수행해도 된다. 예로 JWT 어댑터가 `auth.access-token-validity`를 읽어 만료를 계산한다. 정책의 이름은 포트 메서드(`issueAccessToken`)가 드러내고 숫자는 설정에 있으면 충분하다.
   - 단 **정책에 분기가 생기면 application으로 올린다.** 사용자·상황에 따라 값이 달라질 때, 종류가 셋 이상으로 늘 때, 계산에 조건이 붙을 때다.
 
@@ -274,6 +277,7 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 
 - **prefix를 흔한 OS 환경변수 이름(`user`, `home`, `path`, `lang` 등)과 같게 두지 않는다.** Spring은 OS 환경변수도 속성으로 읽어 `USER`를 `user` 속성으로 잡는다. prefix와 정확히 같은 이름의 값이 있으면 Binder가 그 문자열을 record에 바인딩하려 해 기동이 실패할 수 있다. 리눅스 운영 서버에는 `USER`·`HOME`·`PATH`가 항상 있다. 예: 닉네임 정책은 `user.*`가 아니라 `nickname.*`(`user/application/NicknameProperties`)다. 탈퇴 회원 비식별 배치는 `withdrawal.*`(`user/application/WithdrawalProperties`)다. 페이지 크기·실행 시각은 닉네임 정책이 아니라 `nickname.*`에 두지 않았다.
 - 두 규칙이 같은 기간을 쓰면 설정 하나에서 읽는다. 예: `nickname.protect-after-change`는 바꾸기 전 닉네임 보호 기간이자 닉네임 재변경 제한 기간이다. `nickname.protect-after-withdrawal`은 탈퇴 닉네임 보호 기간이자 탈퇴 원본 보관 기간(`user_withdrawals.anonymize_due_at`)이다.
+- 설정은 그 값으로 계산하는 도메인에 둔다. 예: `schedule.withdrawal-block-after-start`(탈퇴를 막는 기간)는 흐름은 auth가 조합하지만 schedule이 탈퇴 가능 시각을 계산해 돌려주므로 `ScheduleProperties`에 있다.
 - 예외: 애노테이션 속성이 읽는 값은 record를 주입할 자리가 없어 자리표시자(`"${...}"`)로 읽는다. 예: `@Scheduled(fixedDelayString = "${schedule.status-transition-interval}")`, `@Scheduled(cron = "${withdrawal.anonymize-cron}")`. 그 키는 record에 넣지 않고, 넣지 않은 이유를 yaml 주석으로 남긴다(`@ConfigurationProperties`는 모르는 키를 무시한다).
 
 ## 코드 작성

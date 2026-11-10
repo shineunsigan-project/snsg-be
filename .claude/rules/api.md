@@ -19,6 +19,7 @@ paths:
 ## Controller
 
 - 사용자용 Controller는 같은 도메인의 application에 의존한다. 자기 도메인 안에서 끝나는 일은 Service(`UserController`, `RegionController`, `ScheduleController`의 참여 취소), 이벤트 발행 포트가 아닌 `port/out`(외부 API·Redis·파일 저장소·타 도메인) 호출이나 여러 서비스 조합이 필요한 흐름은 행위별 facade `XxxFacade`다(`AuthController`, `ScheduleController`의 개설·참여). 한 Controller 안에서도 엔드포인트마다 따로 정한다. 기준은 `.claude/rules/package-structure.md` Service와 Facade 절.
+- Controller는 흐름을 조합하는 도메인에 두고, URL과 `@Tag`는 FE가 보는 리소스를 따른다. 그래서 Controller의 도메인과 URL prefix가 다를 수 있다. 예: auth `WithdrawalController`가 `/api/v1/users/me`의 탈퇴 가능 여부(`GET /withdrawal-eligibility`)와 탈퇴(`DELETE`)를 맡고 `@Tag(name = "사용자")`를 쓴다. 흐름을 auth가 조합하는 이유는 `.claude/rules/package-structure.md` 의존 방향 절.
 - `/internal/v1` Controller(서비스 분리 후)는 `application/port/in`의 UseCase에 의존한다.
 - 반환 타입은 `ResponseEntity<ApiResponse<XxxResponse>>`. Entity나 Result를 그대로 반환하지 않는다.
 - 요청은 `@Valid` + Request record의 Bean Validation으로 형식만 검증한다. 비즈니스 규칙 검증은 domain에서 한다.

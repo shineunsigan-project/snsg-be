@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -30,8 +31,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import com.shineunsigan.snsg.auth.application.CheckWithdrawalFacade;
+import com.shineunsigan.snsg.auth.application.WithdrawFacade;
 import com.shineunsigan.snsg.auth.application.port.out.TokenPort;
 import com.shineunsigan.snsg.auth.domain.exception.AuthErrorCode;
+import com.shineunsigan.snsg.auth.presentation.AuthCookieFactory;
+import com.shineunsigan.snsg.auth.presentation.WithdrawalController;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
@@ -44,7 +49,6 @@ import com.shineunsigan.snsg.schedule.presentation.ScheduleController;
 import com.shineunsigan.snsg.user.application.UploadProfileImageFacade;
 import com.shineunsigan.snsg.user.application.UserProfileCommandService;
 import com.shineunsigan.snsg.user.application.UserQueryService;
-import com.shineunsigan.snsg.user.application.UserWithdrawalCommandService;
 import com.shineunsigan.snsg.user.application.dto.result.NicknameAvailabilityResult;
 import com.shineunsigan.snsg.user.presentation.UserController;
 
@@ -52,7 +56,7 @@ import com.shineunsigan.snsg.user.presentation.UserController;
  * 실제 {@link SecurityConfig}와 인증 필터·진입점을 올려 공개 경로의 인가 규칙을 본다.
  * 토큰 검증 adapter만 mock으로 바꾼다.
  */
-@WebMvcTest(controllers = {UserController.class, ScheduleController.class})
+@WebMvcTest(controllers = {UserController.class, ScheduleController.class, WithdrawalController.class})
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, JwtAuthenticationEntryPoint.class,
         SecurityConfigTest.CorsTestConfig.class})
 class SecurityConfigTest {
@@ -77,7 +81,13 @@ class SecurityConfigTest {
     private TokenPort tokenPort;
 
     @MockitoBean
-    private UserWithdrawalCommandService userWithdrawalCommandService;
+    private CheckWithdrawalFacade checkWithdrawalFacade;
+
+    @MockitoBean
+    private WithdrawFacade withdrawFacade;
+
+    @MockitoBean
+    private AuthCookieFactory authCookieFactory;
 
     @MockitoBean
     private UserQueryService userQueryService;
@@ -156,6 +166,22 @@ class SecurityConfigTest {
     void uploadProfileImageRequiresToken() throws Exception {
         mockMvc.perform(multipart(ME + "/profile-image")
                         .file(new MockMultipartFile("image", "me.png", MediaType.IMAGE_PNG_VALUE, new byte[] {1})))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    @DisplayName("탈퇴 가능 여부는 토큰 없이 부르면 401")
+    void withdrawalEligibilityRequiresToken() throws Exception {
+        mockMvc.perform(get(ME + "/withdrawal-eligibility"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    @DisplayName("탈퇴는 토큰 없이 부르면 401")
+    void withdrawRequiresToken() throws Exception {
+        mockMvc.perform(delete(ME))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
