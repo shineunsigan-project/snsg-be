@@ -34,7 +34,7 @@ import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
 /**
  * 개설의 형식 규칙(제목·설명·시작 일시·인원), 화면 표시 상태 판정, 참여·참여 취소 규칙,
- * 상세를 보는 사람의 역할과 누를 수 있는 동작을 검증한다.
+ * 상세를 보는 사람의 역할과 누를 수 있는 동작, 참여자 명단을 볼 수 있는 사람과 명단 순서를 검증한다.
  * 설정값은 운영 설정과 같은 값(4~24명, 1시간, 30일, 완료 12시간)을 넣는다.
  */
 class ScheduleTest {
@@ -663,6 +663,118 @@ class ScheduleTest {
             schedule.leave(left, NOW, COMPLETION_AFTER);
 
             assertThat(schedule.confirmedUserIds()).containsExactlyInAnyOrder(HOST_ID, stayed);
+        }
+    }
+
+    @Nested
+    @DisplayName("참여자 명단")
+    class ParticipantList {
+
+        private final Schedule schedule = create(TITLE, DESCRIPTION, START_AT, CAPACITY, NOW);
+
+        @Test
+        @DisplayName("개설자와 확정 멤버는 볼 수 있다")
+        void hostAndConfirmedMemberCanView() {
+            UUID member = UUID.randomUUID();
+            schedule.join(member, NOW, COMPLETION_AFTER);
+
+            schedule.validateParticipantListViewable(HOST_ID);
+            schedule.validateParticipantListViewable(member);
+        }
+
+        @Test
+        @DisplayName("참여한 적이 없으면 PARTICIPANT_LIST_FORBIDDEN")
+        void neverJoinedCannotView() {
+            assertInvalid(() -> schedule.validateParticipantListViewable(UUID.randomUUID()),
+                    ScheduleErrorCode.PARTICIPANT_LIST_FORBIDDEN);
+        }
+
+        @Test
+        @DisplayName("참여를 취소해 취소된 행만 있으면 PARTICIPANT_LIST_FORBIDDEN")
+        void leftCannotView() {
+            UUID left = UUID.randomUUID();
+            schedule.join(left, NOW, COMPLETION_AFTER);
+            schedule.leave(left, NOW, COMPLETION_AFTER);
+
+            assertInvalid(() -> schedule.validateParticipantListViewable(left),
+                    ScheduleErrorCode.PARTICIPANT_LIST_FORBIDDEN);
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = ScheduleStatus.class, names = {"CANCELED", "COMPLETED"})
+        @DisplayName("일정이 취소·완료돼도 개설자와 확정 멤버는 볼 수 있다")
+        void canceledOrCompletedScheduleCanBeViewed(ScheduleStatus status) {
+            UUID member = UUID.randomUUID();
+            schedule.join(member, NOW, COMPLETION_AFTER);
+            ReflectionTestUtils.setField(schedule, "status", status);
+
+            schedule.validateParticipantListViewable(HOST_ID);
+            schedule.validateParticipantListViewable(member);
+        }
+
+        @Test
+        @DisplayName("개설자가 맨 앞(개설자 행이 더 늦게 만들어졌어도), 그 뒤 멤버는 참여 일시 순이다")
+        void hostFirstThenByCreatedAt() {
+            UUID first = UUID.randomUUID();
+            UUID second = UUID.randomUUID();
+            UUID third = UUID.randomUUID();
+            schedule.join(third, NOW, COMPLETION_AFTER);
+            schedule.join(first, NOW, COMPLETION_AFTER);
+            schedule.join(second, NOW, COMPLETION_AFTER);
+            joinedAt(HOST_ID, NOW.plusHours(1));
+            joinedAt(first, NOW.plusMinutes(1));
+            joinedAt(second, NOW.plusMinutes(2));
+            joinedAt(third, NOW.plusMinutes(3));
+
+            assertThat(listUserIds()).containsExactly(HOST_ID, first, second, third);
+        }
+
+        @Test
+        @DisplayName("취소된 행과 삭제된 행은 빠진다")
+        void excludesCanceledAndDeletedRows() {
+            UUID stayed = UUID.randomUUID();
+            UUID left = UUID.randomUUID();
+            UUID deleted = UUID.randomUUID();
+            schedule.join(stayed, NOW, COMPLETION_AFTER);
+            schedule.join(left, NOW, COMPLETION_AFTER);
+            schedule.join(deleted, NOW, COMPLETION_AFTER);
+            schedule.leave(left, NOW, COMPLETION_AFTER);
+            rowsOf(schedule, deleted).forEach(ScheduleParticipant::delete);
+            joinedAt(HOST_ID, NOW);
+            joinedAt(stayed, NOW.plusMinutes(1));
+            joinedAt(left, NOW.plusMinutes(2));
+            joinedAt(deleted, NOW.plusMinutes(3));
+
+            assertThat(listUserIds()).containsExactly(HOST_ID, stayed);
+        }
+
+        @Test
+        @DisplayName("참여 취소 후 다시 참여한 사람은 한 번만 나오고 새 행의 참여 일시 자리에 온다")
+        void rejoinedAppearsOnceAtNewRow() {
+            UUID rejoined = UUID.randomUUID();
+            UUID other = UUID.randomUUID();
+            schedule.join(rejoined, NOW, COMPLETION_AFTER);
+            schedule.leave(rejoined, NOW, COMPLETION_AFTER);
+            schedule.join(other, NOW, COMPLETION_AFTER);
+            schedule.join(rejoined, NOW, COMPLETION_AFTER);
+            List<ScheduleParticipant> rejoinedRows = rowsOf(schedule, rejoined);
+            ReflectionTestUtils.setField(rejoinedRows.get(0), "createdAt", NOW.plusMinutes(1));
+            ReflectionTestUtils.setField(rejoinedRows.get(1), "createdAt", NOW.plusMinutes(3));
+            joinedAt(HOST_ID, NOW);
+            joinedAt(other, NOW.plusMinutes(2));
+
+            assertThat(listUserIds()).containsExactly(HOST_ID, other, rejoined);
+        }
+
+        /** 그 사용자의 행 모두의 참여 일시를 정한다. Auditing이 채우는 값이라 직접 넣는다. */
+        private void joinedAt(UUID userId, LocalDateTime createdAt) {
+            rowsOf(schedule, userId).forEach(row -> ReflectionTestUtils.setField(row, "createdAt", createdAt));
+        }
+
+        private List<UUID> listUserIds() {
+            return schedule.confirmedParticipantsInListOrder().stream()
+                    .map(ScheduleParticipant::getUserId)
+                    .toList();
         }
     }
 

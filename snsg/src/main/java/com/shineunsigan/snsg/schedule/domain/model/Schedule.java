@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,6 +14,7 @@ import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
 import com.shineunsigan.snsg.schedule.domain.constants.HostType;
+import com.shineunsigan.snsg.schedule.domain.constants.ParticipantRole;
 import com.shineunsigan.snsg.schedule.domain.constants.RecruitmentStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus;
@@ -51,6 +53,12 @@ public class Schedule extends BaseAuditEntity {
     private static final int DESCRIPTION_MIN_LENGTH = 10;
     private static final int DESCRIPTION_MAX_LENGTH = 500;
     private static final int HOST_COUNT = 1;
+
+    /** 참여자 명단 순서. 개설자 행 먼저, 그 뒤 참여 일시, 같으면 행 id 순이다. */
+    private static final Comparator<ScheduleParticipant> PARTICIPANT_LIST_ORDER =
+            Comparator.comparing((ScheduleParticipant participant) -> participant.getRole() != ParticipantRole.HOST)
+                    .thenComparing(ScheduleParticipant::getCreatedAt)
+                    .thenComparing(ScheduleParticipant::getId);
 
     @Column(nullable = false, updatable = false)
     private UUID hostUserId;
@@ -238,6 +246,29 @@ public class Schedule extends BaseAuditEntity {
         return participants.stream()
                 .filter(ScheduleParticipant::isConfirmed)
                 .map(ScheduleParticipant::getUserId)
+                .toList();
+    }
+
+    /**
+     * 참여자 명단을 볼 수 있는지 본다. 개설자와 확정 참여자만 본다({@link #viewerRole}의 HOST·PARTICIPANT).
+     * 참여를 취소한 사람과 참여한 적 없는 사람은 볼 수 없다. 일정 상태(취소·완료·모집 마감)는 보지 않는다.
+     */
+    public void validateParticipantListViewable(UUID viewerId) {
+        ViewerRole role = viewerRole(viewerId);
+        if (role != ViewerRole.HOST && role != ViewerRole.PARTICIPANT) {
+            throw new BusinessException(ScheduleErrorCode.PARTICIPANT_LIST_FORBIDDEN);
+        }
+    }
+
+    /**
+     * 명단 순서로 정렬한 확정 참여 행(개설자 포함). 개설자가 맨 앞이고, 그 뒤 참여 일시가 이른 순, 같으면 행 id 순이다.
+     * 참여를 취소한 행과 삭제된 행은 빠진다. 취소 후 다시 참여한 사람은 새 행의 참여 일시 자리에 한 번만 온다.
+     * 명단은 정원 안이라 페이지가 없어 여기서 정렬한다.
+     */
+    public List<ScheduleParticipant> confirmedParticipantsInListOrder() {
+        return participants.stream()
+                .filter(ScheduleParticipant::isConfirmed)
+                .sorted(PARTICIPANT_LIST_ORDER)
                 .toList();
     }
 

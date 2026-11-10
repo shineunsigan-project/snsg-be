@@ -205,6 +205,64 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseCreateScheduleResponse"
   /api/v1/schedules/{scheduleId}/participants:
+    get:
+      tags:
+      - 일정
+      summary: 참여자 명단
+      description: |-
+        일정의 확정 참여자(개설자 포함) 명단을 준다. 일정 상세 화면에서 참여자 명단을 펼칠 때 부른다. 로그인이 필요하다.
+        개설자와 확정 참여자만 볼 수 있다. 상세의 viewerRole이 HOST·PARTICIPANT일 때만 명단을 펼치게 하고, 그 밖(GUEST·NON_PARTICIPANT)은 부르지 않는다.
+        일정이 취소·완료·모집 마감이어도 개설자와 확정 참여자는 볼 수 있다.
+        data는 항목 배열이고 페이지가 없다(정원 안이라 최대 24명). 개설자가 항상 맨 앞이라 빈 배열은 오지 않는다.
+        정렬은 개설자 먼저, 그 뒤 참여 일시가 이른 순(같으면 참여 기록 순)이다. 참여를 취소한 사람은 오지 않고,
+        취소 후 다시 참여한 사람은 다시 참여한 시각 자리에 한 번만 온다.
+        탈퇴한 사람은 닉네임 "탈퇴한 사용자", 기본 이미지, ageGroup null, withdrawn = true로 온다.
+        여러 조건에 걸리면 SCHEDULE_NOT_FOUND → PARTICIPANT_LIST_FORBIDDEN 순서로 앞의 것이 온다.
+        조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
+      operationId: listParticipants
+      parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: 참여자 명단. 개설자가 맨 앞이고 그 뒤 참여 일시 순이다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListScheduleParticipant"
+        "400":
+          description: "INVALID_REQUEST: scheduleId가 UUID 형식이 아니다. 정상 화면 흐름에서는 나지\
+            \ 않는다"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListScheduleParticipant"
+        "401":
+          description: "UNAUTHENTICATED: 토큰이 없거나 만료·무효. 재발급 후 다시 부르거나 로그인 화면으로 간다"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListScheduleParticipant"
+        "403":
+          description: |-
+            PARTICIPANT_LIST_FORBIDDEN: 개설자도 확정 참여자도 아니다(참여한 적 없음, 참여를 취소함 포함).
+            정상 흐름에서는 상세의 viewerRole로 막으므로 나지 않는다. 났으면(그 사이 참여를 취소한 경우 등) 상세를 다시 불러 그린다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListScheduleParticipant"
+        "404":
+          description: |-
+            SCHEDULE_NOT_FOUND: 없거나 삭제된 일정. "찾을 수 없는 일정이에요." 토스트를 보여주고 목록 화면으로 간다.
+            없는 경로의 404(INVALID_REQUEST)와는 code로 구분한다
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListScheduleParticipant"
     post:
       tags:
       - 일정
@@ -1597,6 +1655,58 @@ components:
             - JOIN
             - CANCEL_PARTICIPATION
             - CANCEL_SCHEDULE
+    ApiResponseListScheduleParticipant:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScheduleParticipant"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    ScheduleParticipant:
+      type: object
+      description: 참여자 명단의 한 사람. 이름·이메일·생년월일·사용자 ID는 주지 않는다
+      properties:
+        nickname:
+          type: string
+          description: 닉네임. 탈퇴했으면 "탈퇴한 사용자"
+          example: 민트초코
+        profileImageUrl:
+          type: string
+          description: 프로필 사진 경로. 도메인 없이 경로만 온다. 탈퇴했으면 기본 이미지 경로
+          example: /images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png
+        gender:
+          type: string
+          description: "성별. MALE 남자, FEMALE 여자. 탈퇴한 사람도 저장된 성별이 온다. 사용자 정보를 찾을 수 없\
+            으면 null"
+          enum:
+          - FEMALE
+          - MALE
+          example: FEMALE
+        ageGroup:
+          $ref: "#/components/schemas/ScheduleDetailAgeGroup"
+          description: 연령대. 탈퇴했거나 사용자 정보를 찾을 수 없으면 null
+        isHost:
+          type: boolean
+          description: 개설자면 true. 명단에서 개설자는 항상 맨 앞 한 명이다
+          example: true
+        isMe:
+          type: boolean
+          description: 보는 사람 본인이면 true. 개설자가 보면 개설자 항목이 isHost·isMe 모두 true다
+          example: false
+        withdrawn:
+          type: boolean
+          description: 탈퇴했거나 사용자 정보를 찾을 수 없으면 true. 화면에 탈퇴 표시를 붙일 때 쓴다
+          example: false
     ApiResponseListRegionResponse:
       type: object
       properties:
