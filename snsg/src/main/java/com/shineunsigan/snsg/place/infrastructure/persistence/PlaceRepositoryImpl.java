@@ -56,4 +56,12 @@ public class PlaceRepositoryImpl implements PlaceRepository {
         return placeJpaRepository.countOpenBySourceRegion(source, regionCodes).stream()
                 .collect(Collectors.toMap(row -> (String) row[0], row -> (Long) row[1]));
     }
+
+    @Override
+    public void markSynced(PlaceSource source, Collection<String> sourceIds, LocalDateTime syncedAt) {
+        if (sourceIds.isEmpty()) {
+            return;
+        }
+        placeJpaRepository.markSynced(source, sourceIds, syncedAt);
+    }
 }

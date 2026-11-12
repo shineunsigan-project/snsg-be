@@ -20,7 +20,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 원천 적재 결과를 places에 반영한다. 적재 배치가 페이지마다 {@link #upsert}를, 원천마다 {@link #closeMissing}을 부른다.
+ * 원천 적재 결과를 places에 반영한다. 적재 배치가 페이지마다 {@link #reflectPage}를, 원천마다 {@link #closeMissing}을 부른다.
  */
 @Slf4j
 @Service
@@ -29,6 +29,22 @@ public class PlaceCommandService {
 
     private final PlaceRepository placeRepository;
     private final PlaceProperties placeProperties;
+
+    /**
+     * 원천 페이지 하나를 한 트랜잭션에서 반영한다. 적재 대상 행은 {@link #upsert}하고, 적재 대상에서 걸러졌지만
+     * 원천에 있는 행은 이미 places에 있으면 마지막 확인 시각만 갱신해 폐업 처리에서 빠지게 한다.
+     * 걸러진 행을 먼저 갱신한다. 일괄 UPDATE 전에 엔티티를 읽어두면 영속성 컨텍스트가 옛 값을 보기 때문이다.
+     *
+     * @param confirmedOnlySourceIds 업종 필터나 값 정리에서 걸러진 행의 원천 식별자
+     */
+    @Transactional
+    public void reflectPage(PlaceSource source, List<UpsertPlaceCommand> rows,
+            Collection<String> confirmedOnlySourceIds) {
+        placeRepository.markSynced(source, confirmedOnlySourceIds, LocalDateTime.now());
+        if (!rows.isEmpty()) {
+            upsert(rows);
+        }
+    }
 
     /**
      * 원천에서 확인한 행을 반영한다. 처음 보는 (source, sourceId)는 검수 대기 후보로 만들고,

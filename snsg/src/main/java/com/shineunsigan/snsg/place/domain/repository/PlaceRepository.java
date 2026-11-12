@@ -43,4 +43,10 @@ public interface PlaceRepository {
      * 원천 지역별로 그 원천의 CANDIDATE·APPROVED 중 폐업하지 않은 행 수. 행이 없는 지역은 빠진다.
      */
     Map<String, Long> countOpenBySourceRegion(PlaceSource source, Collection<String> regionCodes);
+
+    /**
+     * 그 원천의 sourceIds 행의 마지막 확인 시각만 syncedAt으로 바꾼다. 다른 값과 폐업 여부는 그대로다.
+     * 적재 대상에서 걸러졌지만 원천에는 있는 행을 폐업으로 오인하지 않게 한다. 영속성 컨텍스트를 거치지 않는 일괄 UPDATE다.
+     */
+    void markSynced(PlaceSource source, Collection<String> sourceIds, LocalDateTime syncedAt);
 }
