@@ -56,6 +56,8 @@ tasks.named('test') {
     // 스펙만 손댄 변경을 잡지 못한다.
     inputs.files(file('../docs/openapi.yaml')).withPropertyName('openapiSpec')
             .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(file('../docs/openapi-admin.yaml')).withPropertyName('openapiAdminSpec')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.property('openapiUpdate', System.getenv('OPENAPI_UPDATE') ?: '')
     environment 'OPENAPI_UPDATE', System.getenv('OPENAPI_UPDATE') ?: ''
 
