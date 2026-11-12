@@ -72,7 +72,8 @@ public class AdminAuthController {
                     쿠키를 받아야 하므로 credentials를 포함해 호출한다.
                     아이디가 없는 것과 비밀번호가 틀린 것은 구분하지 않고 401 INVALID_ADMIN_CREDENTIALS다.
                     같은 아이디로 5회 연속 실패하면 15분 동안 잠기고(401 ADMIN_LOGIN_LOCKED), 잠긴 동안은 비밀번호가 맞아도 같은 코드다.
-                    비밀번호가 맞았지만 승인 대기면 403 ADMIN_PENDING_APPROVAL이다.
+                    비밀번호가 맞았지만 승인 대기면 403 ADMIN_PENDING_APPROVAL, 가입이 거절됐으면 403 ADMIN_REJECTED,
+                    이용 중지됐으면 403 ADMIN_SUSPENDED다. 비밀번호가 틀리면 상태와 관계없이 401 INVALID_ADMIN_CREDENTIALS다.
                     로그인할 때마다 새 기기 세션이 생긴다. 다른 기기의 로그인은 끊기지 않는다.
                     세션은 로그인 후 12시간에 끝난다. 재발급해도 늘어나지 않는다.""")
     @ApiResponses({
@@ -85,7 +86,10 @@ public class AdminAuthController {
                             INVALID_ADMIN_CREDENTIALS: 아이디가 없거나 비밀번호가 틀렸다. 아이디 또는 비밀번호가 틀렸다고 안내한다.
                             ADMIN_LOGIN_LOCKED: 같은 아이디로 5회 연속 실패해 15분 동안 잠겼다. 잠시 후 다시 시도하라고 안내한다"""),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403",
-                    description = "ADMIN_PENDING_APPROVAL: 비밀번호는 맞지만 아직 승인되지 않았다. 승인 대기 안내를 보여준다")})
+                    description = """
+                            ADMIN_PENDING_APPROVAL: 비밀번호는 맞지만 아직 승인되지 않았다. 승인 대기 안내를 보여준다.
+                            ADMIN_REJECTED: 비밀번호는 맞지만 가입이 거절됐다. message를 보여준다. 이 아이디로는 다시 가입·로그인할 수 없다.
+                            ADMIN_SUSPENDED: 비밀번호는 맞지만 이용이 중지됐다. message를 보여준다. MASTER가 해제하면 다시 로그인할 수 있다""")})
     public ResponseEntity<ApiResponse<AdminTokenResponse>> login(@Valid @RequestBody AdminLoginRequest request) {
         AdminTokenResult result = adminLoginFacade.login(request.toCommand());
 

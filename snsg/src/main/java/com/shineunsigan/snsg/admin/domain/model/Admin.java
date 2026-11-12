@@ -116,6 +116,40 @@ public class Admin extends BaseAuditEntity {
         return status == AdminStatus.APPROVED;
     }
 
+    /** 가입을 승인한다. 승인 대기일 때만 된다. */
+    public void approve() {
+        changeStatus(AdminStatus.PENDING, AdminStatus.APPROVED);
+    }
+
+    /** 가입을 거절한다. 승인 대기일 때만 된다. 거절은 되돌리지 않는다. */
+    public void reject() {
+        changeStatus(AdminStatus.PENDING, AdminStatus.REJECTED);
+    }
+
+    /** 이용을 중지한다. 승인된 어드민일 때만 된다. */
+    public void suspend() {
+        changeStatus(AdminStatus.APPROVED, AdminStatus.SUSPENDED);
+    }
+
+    /** 이용 중지를 해제해 다시 승인 상태로 둔다. 이용 중지일 때만 된다. */
+    public void unsuspend() {
+        changeStatus(AdminStatus.SUSPENDED, AdminStatus.APPROVED);
+    }
+
+    /**
+     * MASTER는 DB로만 만들고 관리하므로 API로 상태를 바꾸지 않는다(MASTER_NOT_MODIFIABLE).
+     * 출발 상태가 아니면(같은 동작을 다시 부른 경우 포함) ADMIN_STATUS_CONFLICT이고 아무것도 바꾸지 않는다.
+     */
+    private void changeStatus(AdminStatus from, AdminStatus to) {
+        if (role == AdminRole.MASTER) {
+            throw new BusinessException(AdminErrorCode.MASTER_NOT_MODIFIABLE);
+        }
+        if (status != from) {
+            throw new BusinessException(AdminErrorCode.ADMIN_STATUS_CONFLICT);
+        }
+        this.status = to;
+    }
+
     private static void validateLoginId(String loginId) {
         if (loginId == null || !LOGIN_ID.matcher(loginId).matches()) {
             throw new BusinessException(AdminErrorCode.INVALID_LOGIN_ID);

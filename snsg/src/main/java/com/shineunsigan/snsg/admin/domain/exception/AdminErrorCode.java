@@ -18,9 +18,17 @@ public enum AdminErrorCode implements ErrorCode {
     INVALID_ADMIN_CREDENTIALS(ErrorType.UNAUTHENTICATED, "아이디 또는 비밀번호가 올바르지 않아요."),
     ADMIN_LOGIN_LOCKED(ErrorType.UNAUTHENTICATED, "로그인에 여러 번 실패해 잠시 잠겼어요. 잠시 후 다시 시도해주세요."),
     ADMIN_PENDING_APPROVAL(ErrorType.FORBIDDEN, "가입 승인을 기다리고 있어요. 승인된 뒤 로그인할 수 있어요."),
+    ADMIN_REJECTED(ErrorType.FORBIDDEN, "가입이 거절됐어요. 자세한 내용은 MASTER에게 문의해주세요."),
+    ADMIN_SUSPENDED(ErrorType.FORBIDDEN, "이용이 중지된 계정이에요. 자세한 내용은 MASTER에게 문의해주세요."),
     INVALID_ADMIN_REFRESH_TOKEN(ErrorType.UNAUTHENTICATED, "다시 로그인해야 합니다."),
     /** 어드민 인증 필터 안에서만 쓴다. 응답으로는 나가지 않고 보호 경로는 공통 401이 된다. */
-    INVALID_ADMIN_ACCESS_TOKEN(ErrorType.UNAUTHENTICATED, "로그인이 필요합니다.");
+    INVALID_ADMIN_ACCESS_TOKEN(ErrorType.UNAUTHENTICATED, "로그인이 필요합니다."),
+    /** MASTER 전용 경로를 MASTER가 아닌 어드민이 불렀다. 어드민 보안 체인의 접근 거부 처리기가 낸다. */
+    MASTER_ONLY(ErrorType.FORBIDDEN, "MASTER만 할 수 있어요."),
+    ADMIN_NOT_FOUND(ErrorType.NOT_FOUND, "찾을 수 없는 어드민이에요."),
+    MASTER_NOT_MODIFIABLE(ErrorType.FORBIDDEN, "MASTER 계정은 승인·거절·이용 중지할 수 없어요."),
+    ADMIN_STATUS_CONFLICT(ErrorType.CONFLICT, "지금 상태에서는 할 수 없어요. 목록을 새로 불러 상태를 확인해주세요."),
+    INVALID_CURSOR(ErrorType.INVALID, "목록을 처음부터 다시 불러주세요.");
 
     private final ErrorType errorType;
     private final String message;

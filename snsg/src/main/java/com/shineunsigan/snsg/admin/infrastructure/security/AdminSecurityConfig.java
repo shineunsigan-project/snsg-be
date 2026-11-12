@@ -23,6 +23,9 @@ import lombok.RequiredArgsConstructor;
  * <p>
  * 공개 경로는 여기에만 적고 <b>HTTP 메서드와 경로를 정확히</b> 지정한다. 그 밖의 어드민 경로는 모두 인증이 필요하다.
  * {@code POST /api/admin/v1/auth/tokens}(재발급)는 공개지만 {@code DELETE}(로그아웃)는 인증이 필요하다.
+ * <p>
+ * 어드민 관리 경로({@code /api/admin/v1/admins} 아래)는 MASTER 전용이고, 내 정보({@code GET …/admins/me})만 인증으로 연다.
+ * 역할은 필터가 요청마다 DB에서 읽은 값이다. 역할이 모자라면 403 {@code MASTER_ONLY}({@link AdminAccessDeniedHandler}).
  */
 @Configuration
 @RequiredArgsConstructor
@@ -34,6 +37,7 @@ public class AdminSecurityConfig {
     private final AdminTokenPort adminTokenPort;
     private final AdminQueryService adminQueryService;
     private final AdminAuthenticationEntryPoint adminAuthenticationEntryPoint;
+    private final AdminAccessDeniedHandler adminAccessDeniedHandler;
 
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -48,8 +52,12 @@ public class AdminSecurityConfig {
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers(HttpMethod.POST, "/api/admin/v1/auth/signup", "/api/admin/v1/auth/login",
                                 "/api/admin/v1/auth/tokens").permitAll()
+                        // 순서가 중요하다. 매처는 처음 맞는 것이 이긴다. me를 MASTER 경로보다 먼저 둬야 ADMIN도 내 정보를 본다.
+                        .requestMatchers(HttpMethod.GET, "/api/admin/v1/admins/me").authenticated()
+                        .requestMatchers("/api/admin/v1/admins", "/api/admin/v1/admins/**").hasRole("MASTER")
                         .anyRequest().authenticated())
-                .exceptionHandling(handling -> handling.authenticationEntryPoint(adminAuthenticationEntryPoint))
+                .exceptionHandling(handling -> handling.authenticationEntryPoint(adminAuthenticationEntryPoint)
+                        .accessDeniedHandler(adminAccessDeniedHandler))
                 .addFilterBefore(new AdminAuthenticationFilter(adminTokenPort, adminQueryService),
                         UsernamePasswordAuthenticationFilter.class)
                 .build();

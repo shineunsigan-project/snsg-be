@@ -1,6 +1,7 @@
 package com.shineunsigan.snsg.admin.application;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +14,13 @@ import com.shineunsigan.snsg.common.exception.BusinessException;
 
 import lombok.RequiredArgsConstructor;
 
+/**
+ * 어드민 가입 신청과 MASTER의 상태 변경(승인·거절·이용 중지·해제).
+ * <p>
+ * 상태 변경은 대상 행을 잠근 뒤 판정한다. 두 MASTER가 같은 대상을 동시에 처리하면 뒤 요청은 앞 커밋을 기다렸다가
+ * 바뀐 상태를 보고 ADMIN_STATUS_CONFLICT가 된다. 엔티티를 읽어 바꾸므로 {@code updated_by}에 처리한 MASTER의 adminId가 남는다.
+ * 판정 순서는 대상 조회(ADMIN_NOT_FOUND) → MASTER인지(MASTER_NOT_MODIFIABLE) → 전이 가능한지(ADMIN_STATUS_CONFLICT)다.
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -31,9 +39,32 @@ public class AdminCommandService {
         adminRepository.save(admin);
     }
 
+    public void approve(UUID adminId) {
+        findForUpdate(adminId).approve();
+    }
+
+    public void reject(UUID adminId) {
+        findForUpdate(adminId).reject();
+    }
+
+    /** 세션 삭제는 하지 않는다. Redis는 트랜잭션 밖에서 {@link SuspendAdminFacade}가 지운다. */
+    public void suspend(UUID adminId) {
+        findForUpdate(adminId).suspend();
+    }
+
+    public void unsuspend(UUID adminId) {
+        findForUpdate(adminId).unsuspend();
+    }
+
     private void validateLoginIdNotTaken(String loginId) {
         if (adminRepository.existsByLoginId(loginId)) {
             throw new BusinessException(AdminErrorCode.DUPLICATED_LOGIN_ID);
         }
+    }
+
+    /** 이 트랜잭션에서 대상을 처음 읽는 조회다. 잠금 없이 먼저 읽으면 잠근 뒤에도 옛 상태를 본다. */
+    private Admin findForUpdate(UUID adminId) {
+        return adminRepository.findByIdForUpdate(adminId)
+                .orElseThrow(() -> new BusinessException(AdminErrorCode.ADMIN_NOT_FOUND));
     }
 }

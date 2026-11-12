@@ -9,6 +9,7 @@ import com.shineunsigan.snsg.admin.application.dto.result.AdminCredentialResult;
 import com.shineunsigan.snsg.admin.application.dto.result.AdminTokenResult;
 import com.shineunsigan.snsg.admin.application.port.out.LoginAttemptPort;
 import com.shineunsigan.snsg.admin.application.port.out.PasswordHashPort;
+import com.shineunsigan.snsg.admin.domain.constants.AdminStatus;
 import com.shineunsigan.snsg.admin.domain.exception.AdminErrorCode;
 import com.shineunsigan.snsg.admin.domain.model.Admin;
 import com.shineunsigan.snsg.common.exception.BusinessException;
@@ -19,7 +20,7 @@ import lombok.RequiredArgsConstructor;
  * 어드민 로그인. 잠금 확인 → 아이디로 조회 → 비밀번호 대조 → 실패 횟수 초기화 → 상태 확인 → 발급 순서다.
  * <p>
  * 아이디가 없는 것과 비밀번호가 틀린 것은 같은 오류다. 아이디가 없어도 더미 해시와 대조해 응답 시간으로도
- * 계정이 있는지 드러나지 않게 한다. 승인 대기 여부는 비밀번호가 맞은 뒤에만 알려준다.
+ * 계정이 있는지 드러나지 않게 한다. 승인 대기·거절·이용 중지 여부는 비밀번호가 맞은 뒤에만 알려준다.
  */
 @Service
 @RequiredArgsConstructor
@@ -42,7 +43,7 @@ public class AdminLoginFacade {
         loginAttemptPort.reset(loginId);
 
         AdminCredentialResult admin = credential.orElseThrow();
-        validateApproved(admin);
+        validateApproved(admin.status());
         return adminTokenIssuer.issue(admin.id());
     }
 
@@ -69,9 +70,16 @@ public class AdminLoginFacade {
                 locked ? AdminErrorCode.ADMIN_LOGIN_LOCKED : AdminErrorCode.INVALID_ADMIN_CREDENTIALS);
     }
 
-    private void validateApproved(AdminCredentialResult admin) {
-        if (!admin.approved()) {
-            throw new BusinessException(AdminErrorCode.ADMIN_PENDING_APPROVAL);
+    /** 승인된 어드민만 발급한다. 아니면 상태별로 원인을 알려준다. */
+    private void validateApproved(AdminStatus status) {
+        AdminErrorCode error = switch (status) {
+            case APPROVED -> null;
+            case PENDING -> AdminErrorCode.ADMIN_PENDING_APPROVAL;
+            case REJECTED -> AdminErrorCode.ADMIN_REJECTED;
+            case SUSPENDED -> AdminErrorCode.ADMIN_SUSPENDED;
+        };
+        if (error != null) {
+            throw new BusinessException(error);
         }
     }
 }

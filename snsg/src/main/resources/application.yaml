@@ -82,6 +82,8 @@ admin:
   refresh-token-validity: 12h
   login-max-failures: 5
   login-lock-duration: 15m
+  page-size-default: 20
+  page-size-max: 50
 
 place:
   close-max-ratio: 0.3
