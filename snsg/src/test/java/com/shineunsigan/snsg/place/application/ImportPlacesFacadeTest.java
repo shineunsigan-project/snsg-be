@@ -73,7 +73,7 @@ class ImportPlacesFacadeTest {
     private static final PlaceProperties PROPERTIES = new PlaceProperties(new BigDecimal("0.3"), Duration.ofSeconds(10),
             3, List.of("R10405", "R10499"), List.of("보드게임", "보드카페", "방탈출"),
             Map.of(PlaceType.BOARD_GAME_CAFE, List.of("보드"),
-                    PlaceType.ESCAPE_ROOM, List.of("방탈출", "이스케이프", "escape")));
+                    PlaceType.ESCAPE_ROOM, List.of("방탈출", "이스케이프", "escape")), 20, 50);
 
     private static final String TARGET_CATEGORY = "R10405";
     private static final String OTHER_CATEGORY = "I21201";
@@ -568,10 +568,10 @@ class ImportPlacesFacadeTest {
                                                 region_code, status, is_closed, source, source_id, source_name,
                                                 source_road_address, source_address_detail, source_latitude,
                                                 source_longitude, source_region_code, last_synced_at,
-                                                created_at, updated_at, is_deleted)
+                                                created_at, updated_at, is_deleted, created_by, updated_by, reviewed_by)
                             VALUES (?, 'ESCAPE_ROOM', '검수한이름', '서울특별시 검수로 1', '3층', 37.5, 126.9, ?, ?,
                                     FALSE, 'SEMAS', ?, '원천이름', '서울특별시 원천로 1', '2층', 37.5, 126.9, ?, ?,
-                                    NOW(), NOW(), FALSE)""")
+                                    NOW(), NOW(), FALSE, 'SYSTEM', 'SYSTEM', '')""")
                     .setParameter(1, UUID.randomUUID())
                     .setParameter(2, regionCode)
                     .setParameter(3, status.name())

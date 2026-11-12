@@ -171,9 +171,9 @@ class SchedulePlaceAdapterTest {
                                             region_code, status, is_closed, source, source_id, source_name,
                                             source_road_address, source_address_detail, source_latitude,
                                             source_longitude, source_region_code, last_synced_at,
-                                            created_at, updated_at, is_deleted)
+                                            created_at, updated_at, is_deleted, created_by, updated_by, reviewed_by)
                         VALUES (?, ?, ?, '서울특별시 테스트로 1', '정문', 37.5512345, 126.9212345, ?, ?, ?,
-                                'MANUAL', '', '', '', '', 0, 0, ?, NOW(), NOW(), NOW(), ?)""")
+                                'MANUAL', '', '', '', '', 0, 0, ?, NOW(), NOW(), NOW(), ?, 'SYSTEM', 'SYSTEM', '')""")
                 .setParameter(1, id)
                 .setParameter(2, placeType)
                 .setParameter(3, name)

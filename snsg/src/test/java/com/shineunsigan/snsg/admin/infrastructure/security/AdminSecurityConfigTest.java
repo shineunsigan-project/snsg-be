@@ -1,5 +1,6 @@
 package com.shineunsigan.snsg.admin.infrastructure.security;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -8,12 +9,15 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,6 +25,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -56,6 +61,18 @@ import com.shineunsigan.snsg.auth.infrastructure.security.JwtAuthenticationEntry
 import com.shineunsigan.snsg.auth.infrastructure.security.JwtAuthenticationFilter;
 import com.shineunsigan.snsg.auth.infrastructure.security.SecurityConfig;
 import com.shineunsigan.snsg.common.exception.BusinessException;
+import com.shineunsigan.snsg.place.application.PlaceReviewCommandService;
+import com.shineunsigan.snsg.place.application.PlaceReviewQueryService;
+import com.shineunsigan.snsg.place.application.RegionQueryService;
+import com.shineunsigan.snsg.place.application.dto.command.CreateManualPlaceCommand;
+import com.shineunsigan.snsg.place.application.dto.command.ReviewPlaceCommand;
+import com.shineunsigan.snsg.place.application.dto.result.PlaceReviewPageResult;
+import com.shineunsigan.snsg.place.application.dto.result.PlaceReviewResult;
+import com.shineunsigan.snsg.place.domain.constants.PlaceSource;
+import com.shineunsigan.snsg.place.domain.constants.PlaceStatus;
+import com.shineunsigan.snsg.place.domain.constants.PlaceType;
+import com.shineunsigan.snsg.place.presentation.AdminPlaceController;
+import com.shineunsigan.snsg.place.presentation.AdminRegionController;
 import com.shineunsigan.snsg.user.application.UploadProfileImageFacade;
 import com.shineunsigan.snsg.user.application.UserProfileCommandService;
 import com.shineunsigan.snsg.user.application.UserQueryService;
@@ -72,9 +89,10 @@ import jakarta.servlet.http.Cookie;
  * <p>
  * 어느 쪽 필터든 서블릿 필터로도 등록되면, 체인이 끝난 뒤 다른 키로 토큰을 해석하다 실패해 인증을 지운다.
  * 그러면 컨트롤러의 principal이 null이 되므로 "그 id로 불린다"는 단정이 그 회귀를 잡는다.
- * 테스트 코드는 ArchUnit 대상이 아니라 auth·user를 import한다.
+ * 테스트 코드는 ArchUnit 대상이 아니라 auth·user·place를 import한다.
  */
-@WebMvcTest(controllers = {AdminAuthController.class, AdminController.class, UserController.class})
+@WebMvcTest(controllers = {AdminAuthController.class, AdminController.class, UserController.class,
+        AdminPlaceController.class, AdminRegionController.class})
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, JwtAuthenticationEntryPoint.class,
         AdminSecurityConfig.class, AdminAuthenticationEntryPoint.class, AdminAccessDeniedHandler.class,
         AdminCookieFactory.class, AdminSecurityConfigTest.TestConfig.class})
@@ -133,6 +151,15 @@ class AdminSecurityConfigTest {
 
     @MockitoBean
     private UploadProfileImageFacade uploadProfileImageFacade;
+
+    @MockitoBean
+    private PlaceReviewQueryService placeReviewQueryService;
+
+    @MockitoBean
+    private PlaceReviewCommandService placeReviewCommandService;
+
+    @MockitoBean
+    private RegionQueryService regionQueryService;
 
     /** 사용자 포트는 사용자 토큰만, 어드민 포트는 어드민 토큰만 받는다. 서로 다른 키로 서명된 것과 같다. */
     @BeforeEach
@@ -324,5 +351,97 @@ class AdminSecurityConfigTest {
 
         verifyNoInteractions(adminCommandService, suspendAdminFacade);
         verify(adminQueryService, never()).list(any(), any(), any());
+    }
+
+    // 장소 검수·지역 경로: 승인된 어드민(ADMIN·MASTER) 누구나 쓴다
+
+    private static final UUID PLACE_ID = UUID.randomUUID();
+    private static final String PLACE_UPDATE_BODY = """
+            {"placeType": "ESCAPE_ROOM", "status": "APPROVED", "name": "키이스케이프 홍대점",
+             "roadAddress": "서울특별시 마포구 와우산로 1", "addressDetail": "3층",
+             "latitude": 37.5512345, "longitude": 126.9212345, "regionCode": "11440"}""";
+    private static final String PLACE_CREATE_BODY = """
+            {"placeType": "BOARD_GAME_CAFE", "name": "레드버튼 신촌점",
+             "roadAddress": "서울특별시 서대문구 연세로 1", "addressDetail": "",
+             "latitude": 37.5571234, "longitude": 126.9361234, "regionCode": "11410"}""";
+
+    /** 장소 목록·상세·수정·등록과 지역 전체. */
+    private static List<MockHttpServletRequestBuilder> placeRequests() {
+        return List.of(get("/api/admin/v1/places"),
+                get("/api/admin/v1/places/{placeId}", PLACE_ID),
+                put("/api/admin/v1/places/{placeId}", PLACE_ID)
+                        .contentType(MediaType.APPLICATION_JSON).content(PLACE_UPDATE_BODY),
+                post("/api/admin/v1/places").contentType(MediaType.APPLICATION_JSON).content(PLACE_CREATE_BODY),
+                get("/api/admin/v1/regions"));
+    }
+
+    private static PlaceReviewResult placeResult() {
+        LocalDateTime now = LocalDateTime.of(2026, 11, 13, 14, 20);
+        return new PlaceReviewResult(PLACE_ID, PlaceType.ESCAPE_ROOM, PlaceStatus.APPROVED, "키이스케이프 홍대점",
+                "서울특별시 마포구 와우산로 1", "3층", new BigDecimal("37.5512345"), new BigDecimal("126.9212345"), "11440",
+                false, PlaceSource.SEMAS, "MA0101", "키이스케이프 홍대점", "서울특별시 마포구 와우산로 1", "3층",
+                new BigDecimal("37.5512345"), new BigDecimal("126.9212345"), "11440", now, now, "SYSTEM_SCHEDULER",
+                now, ADMIN_ID.toString(), ADMIN_ID.toString(), now);
+    }
+
+    @Test
+    @DisplayName("토큰 없이 장소·지역 경로를 부르면 401 UNAUTHENTICATED이고 서비스가 불리지 않는다")
+    void placeEndpointsWithoutToken() throws Exception {
+        for (MockHttpServletRequestBuilder request : placeRequests()) {
+            mockMvc.perform(request)
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        }
+
+        verifyNoInteractions(placeReviewQueryService, placeReviewCommandService, regionQueryService);
+    }
+
+    @Test
+    @DisplayName("사용자 access 토큰으로 장소·지역 경로를 부르면 401 UNAUTHENTICATED이고 서비스가 불리지 않는다")
+    void placeEndpointsWithUserToken() throws Exception {
+        for (MockHttpServletRequestBuilder request : placeRequests()) {
+            mockMvc.perform(request.header(HttpHeaders.AUTHORIZATION, "Bearer " + USER_TOKEN))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        }
+
+        verifyNoInteractions(placeReviewQueryService, placeReviewCommandService, regionQueryService);
+    }
+
+    @Test
+    @DisplayName("승인된 ADMIN 역할이면 장소·지역 경로가 2xx이고, 수정·등록은 그 adminId를 검수자로 서비스에 넘긴다")
+    void placeEndpointsWithAdminRole() throws Exception {
+        assertPlaceEndpointsPass(AdminRole.ADMIN);
+    }
+
+    @Test
+    @DisplayName("승인된 MASTER 역할도 장소·지역 경로가 2xx이고, 수정·등록은 그 adminId를 검수자로 서비스에 넘긴다")
+    void placeEndpointsWithMasterRole() throws Exception {
+        assertPlaceEndpointsPass(AdminRole.MASTER);
+    }
+
+    private void assertPlaceEndpointsPass(AdminRole role) throws Exception {
+        when(adminQueryService.findApprovedRole(ADMIN_ID)).thenReturn(Optional.of(role));
+        when(placeReviewQueryService.list(any())).thenReturn(new PlaceReviewPageResult(List.of(), null));
+        when(placeReviewQueryService.get(PLACE_ID)).thenReturn(placeResult());
+        when(placeReviewCommandService.review(any())).thenReturn(placeResult());
+        when(placeReviewCommandService.createManual(any())).thenReturn(placeResult());
+        when(regionQueryService.findAll()).thenReturn(List.of());
+
+        for (MockHttpServletRequestBuilder request : placeRequests()) {
+            mockMvc.perform(request.header(HttpHeaders.AUTHORIZATION, "Bearer " + ADMIN_TOKEN))
+                    .andExpect(status().is2xxSuccessful());
+        }
+
+        ArgumentCaptor<ReviewPlaceCommand> review = ArgumentCaptor.forClass(ReviewPlaceCommand.class);
+        ArgumentCaptor<CreateManualPlaceCommand> create = ArgumentCaptor.forClass(CreateManualPlaceCommand.class);
+        verify(placeReviewQueryService).list(any());
+        verify(placeReviewQueryService).get(PLACE_ID);
+        verify(placeReviewCommandService).review(review.capture());
+        verify(placeReviewCommandService).createManual(create.capture());
+        verify(regionQueryService).findAll();
+        assertThat(review.getValue().placeId()).isEqualTo(PLACE_ID);
+        assertThat(review.getValue().reviewerId()).isEqualTo(ADMIN_ID);
+        assertThat(create.getValue().reviewerId()).isEqualTo(ADMIN_ID);
     }
 }
