@@ -8,10 +8,15 @@ paths:
 ## URL
 
 - 클라이언트용: `/api/v1/<resources>`. 리소스는 복수형 kebab-case 명사 (`/api/v1/user-settings`).
-- 어드민(운영 도구)용: `/api/admin/v1/<resources>`. 어드민 보안 체인(`AdminSecurityConfig`, `securityMatcher("/api/admin/**")`)과 어드민 CORS 출처가 이 prefix로 갈린다. 사용자 토큰으로는 이 경로를, 어드민 토큰으로는 사용자 경로를 통과할 수 없다. 다른 도메인의 어드민 API(예: SHI-184 place의 장소 수정)도 이 prefix 아래 두면 admin을 import하지 않고 어드민 인증을 그대로 쓴다.
+- 어드민(운영 도구)용: `/api/admin/v1/<resources>`. 어드민 보안 체인(`AdminSecurityConfig`, `securityMatcher("/api/admin/**")`)과 어드민 CORS 출처가 이 prefix로 갈린다. 사용자 토큰으로는 이 경로를, 어드민 토큰으로는 사용자 경로를 통과할 수 없다. 다른 도메인의 어드민 API도 이 prefix 아래 두면 admin을 import하지 않고 어드민 인증을 그대로 쓴다. 예: place `AdminPlaceController`(`/api/admin/v1/places`)·`AdminRegionController`(`/api/admin/v1/regions`), SHI-184. 의존 규칙은 `.claude/rules/package-structure.md` 의존 방향 절.
+  - **어드민 앱이 쓰는 조회는 사용자 API와 데이터가 같아도 어드민 경로에 따로 둔다.** 어드민 앱 출처는 CORS가 `/api/admin/**`만 허용해(`common/config/CorsConfig`) 사용자 경로를 부를 수 없다. 예: `GET /api/admin/v1/regions`. 사용자 `GET /api/v1/regions`와 달리 비활성 지역까지 주고 `isActive`를 함께 준다.
 - 서비스 간 내부 호출용: `/internal/v1/<resources>`. 외부에 노출하지 않는다.
 - 동사 대신 하위 리소스로 표현한다: `PATCH /api/v1/matchings/{id}/approval`
   - 되돌리는 동작은 같은 하위 리소스의 `DELETE`다. 예: 어드민 이용 중지 `POST /api/admin/v1/admins/{adminId}/suspension`, 해제 `DELETE` 같은 경로. 승인·거절은 `…/approval`·`…/rejection`(`POST`)이다.
+- 수정 방식은 둘이다.
+  - 바꿀 필드만 보내는 부분 수정은 `PATCH`다. 생략한 필드는 그대로 둔다. 예: `PATCH /api/v1/users/me`.
+  - 화면이 바꿀 수 있는 필드를 모두 다시 보내는 전체 수정은 `PUT`이다. 본문의 필드는 모두 필수이고 생략하면 400이다. 빈 값을 허용하는 필드는 문서에 적는다. 바꿀 수 없는 필드는 본문 record에 두지 않는다. FE는 상세의 지금 값으로 폼을 채워 고친 뒤 전체를 보낸다. 예: `PUT /api/admin/v1/places/{placeId}`(`AdminPlaceUpdateRequest`, `addressDetail`만 `''` 허용, 원천 값·폐업 여부는 본문에 없다).
+  - 수정·생성 응답은 결과 리소스를 `data`에 담는다(수정 200, 생성 201). 예: 장소 수정·MANUAL 등록(`POST /api/admin/v1/places`, 201). 일정 개설도 201이다.
 - 요청자 자신의 리소스는 id 대신 `me`로 가리킨다. 대상은 인증 주체로 정해진다. 예: `DELETE /api/v1/users/me`(탈퇴), `DELETE /api/v1/schedules/{scheduleId}/participants/me`(참여 취소).
 - prefix를 두는 이유:
   - `/api`: 이후 생길 수 있는 SSR 페이지, 외부 연동(webhook 등), actuator·문서 경로와 구분하고, 보안·CORS·게이트웨이 라우팅을 prefix 하나로 적용하기 위해
@@ -44,6 +49,7 @@ paths:
 - **어드민 경로**의 인증 주체는 `@AuthenticationPrincipal UUID adminId`다. 어드민 필터(`AdminAuthenticationFilter`)가 principal에 adminId를, 권한에 역할(`ROLE_MASTER`·`ROLE_ADMIN`)을 넣는다.
   - 역할은 토큰에 싣지 않고 **요청마다 DB에서 읽는다.** 토큰이 유효해도 그 어드민이 삭제되지 않았고 상태가 `APPROVED`일 때만 인증을 채우고, 아니면 익명이라 보호 경로는 401 `UNAUTHENTICATED`다. 이용 중지 같은 상태 변경이 access 만료를 기다리지 않고 반영된다.
   - principal이 UUID라 감사 컬럼(`created_by`·`updated_by`)에 adminId 문자열이 남고, 다른 도메인 컨트롤러가 admin을 import하지 않고 받는다.
+  - 감사 컬럼 말고 도메인 컬럼에 어드민을 남겨야 하면 컨트롤러가 받은 adminId를 Command로 넘긴다. 예: `AdminPlaceController` → `places.reviewed_by`.
   - 어드민 공개 경로는 `AdminSecurityConfig`에서 메서드와 정확한 경로로만 연다. 지금은 `POST /api/admin/v1/auth/signup`·`/login`·`/tokens` 셋이다. `DELETE /api/admin/v1/auth/tokens`(로그아웃)는 인증이 필요하다(사용자 재발급·로그아웃과 같은 이유). 선택 인증 어드민 API는 없다.
   - 어드민 경로는 세 층이다: 공개(위 셋), 인증(승인된 어드민 누구나), **MASTER 전용**(`/api/admin/v1/admins` 아래 중 `GET …/admins/me`를 뺀 전부: 목록·승인·거절·이용 중지·해제). MASTER 전용 경로를 ADMIN이 부르면 403 `MASTER_ONLY`(우리 봉투), 토큰이 없거나 승인 상태가 아니면 401 `UNAUTHENTICATED`다. 역할 검사는 컨트롤러·서비스가 아니라 `AdminSecurityConfig`의 매처가 한다(`.claude/rules/package-structure.md` 보안 체인 절).
   - MASTER 전용 API를 더하면 FE 문서(`docs/admin-api-guide.md`)에 MASTER 전용임과 403 `MASTER_ONLY`를 적는다. FE는 `me`의 `role`이 `MASTER`일 때만 메뉴를 그리지만 실제 검사는 BE다.
@@ -90,14 +96,14 @@ paths:
 
 ## 목록 (커서 페이지)
 
-첫 사례는 일정 목록 3종(`ScheduleController`, SHI-172)이다. 이후 목록 API도 이 형식을 따른다. 예: 어드민 목록(`GET /api/admin/v1/admins`, 가입 신청 시각·id 순, 커서 `AdminCursor`, SHI-183).
+첫 사례는 일정 목록 3종(`ScheduleController`, SHI-172)이다. 이후 목록 API도 이 형식을 따른다. 예: 어드민 목록(`GET /api/admin/v1/admins`, 가입 신청 시각·id 순, 커서 `AdminCursor`, SHI-183), 어드민 장소 목록(`GET /api/admin/v1/places`, 만든 시각·id 순, 커서 `PlaceCursor`, 필터는 모두 선택이고 값 하나씩, SHI-184).
 
 - 응답 `data`는 `{items, nextCursor}`다. 다음 페이지가 없으면 `nextCursor`는 `null`, 맞는 것이 없으면 200에 `items = []`, `nextCursor = null`이다.
 - 정렬은 (정렬 키, id) 오름차순이고, 다음 페이지는 keyset(마지막 항목의 (정렬 키, id)보다 뒤)으로 자른다. offset을 쓰지 않는다. 쿼리 작성은 `.claude/rules/package-structure.md` 인프라 규약의 목록 쿼리 절.
 - 커서는 마지막 항목의 (정렬 키, id)를 URL-safe Base64(패딩 없음)로 인코딩한 불투명 문자열이다. 문자가 `[A-Za-z0-9_-]`뿐이라 FE가 인코딩 없이 쿼리에 붙인다. FE는 내용을 해석하지 않는다. 예: `ScheduleCursor`.
   - 해석할 수 없는 커서는 그 도메인 ErrorCode의 `INVALID_CURSOR`(400)다. FE는 커서 없이 처음부터 다시 부른다.
 - 한 건 더(size + 1) 읽어 다음 페이지가 있는지 정한다. 남은 개수가 size와 딱 맞아도 마지막 페이지에서 `nextCursor = null`이 나가, FE가 빈 페이지를 한 번 더 부르지 않는다.
-- `size`는 생략하면 기본값, 상한을 넘으면 상한, 1보다 작으면 1로 **잘라낸다.** 오류로 내지 않는다. 기본값·상한은 그 도메인의 설정 record로 읽는다(`schedule.page-size-default: 20`·`schedule.page-size-max: 50`, `admin.page-size-default: 20`·`admin.page-size-max: 50`).
+- `size`는 생략하면 기본값, 상한을 넘으면 상한, 1보다 작으면 1로 **잘라낸다.** 오류로 내지 않는다. 기본값·상한은 그 도메인의 설정 record로 읽는다(`schedule.page-size-default: 20`·`schedule.page-size-max: 50`, `admin.page-size-default: 20`·`admin.page-size-max: 50`, `place.page-size-default: 20`·`place.page-size-max: 50`).
 - 공개 목록 API에서 여러 값을 받는 필터는 빈 값·중복을 뺀 뒤 개수 상한을 두고, 넘으면 400 `INVALID_REQUEST`다. 값을 아주 많이 보내면 IN 조건의 바인드 파라미터가 DB 한도를 넘어 500이 나므로 요청 단계에서 끊는다. 예: 모집 중 일정 목록의 `categoryIds`·`regionCodes`는 각각 20개.
 
 ## 문서

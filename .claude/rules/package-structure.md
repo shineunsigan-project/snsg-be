@@ -35,6 +35,7 @@
     - 예: 탈퇴는 user의 일이지만 확인할 데이터(남은 일정)는 schedule에 있다. schedule → user가 이미 있어 user가 schedule을 부를 수 없으므로 auth가 조합한다. `WithdrawFacade`(`SchedulePort`로 탈퇴 가능 확인 → `UserPort.withdraw`), `CheckWithdrawalFacade`. 의존은 auth → schedule, auth → user다.
     - 사용자 요청 탈퇴만 확인하고, 카카오 연결 끊기 웹훅 탈퇴(`HandleSocialUnlinkFacade`)는 확인하지 않는다. 그래서 user `WithdrawUserUseCase`의 입구가 둘(`withdraw`, `withdrawBySocialAccount`)이다.
 - **admin(운영 도구 계정·인증)은 다른 도메인과 어느 방향으로도 import하지 않는다.** 일반 사용자는 어드민에 접속할 수도, 어떤 정보도 볼 수 없어야 한다(사용자 합의). 테이블(`admins`)·토큰 키·Redis 키·보안 체인을 user·auth와 모두 따로 둔다. 두 보안 설정에 공통인 것(401 진입점 `AdminAuthenticationEntryPoint` ↔ auth `JwtAuthenticationEntryPoint`, refresh 해시 저장 adapter)은 각자 둔다(도메인 간 중복 허용). 다른 도메인의 어드민 API는 admin을 부르지 않고 `/api/admin/v1/**` 아래에 두기만 한다(`.claude/rules/api.md` URL 절).
+  - 예: place의 `AdminPlaceController`·`AdminRegionController`(SHI-184). 컨트롤러는 그 도메인 presentation에 두고 그 도메인 서비스를 부른다. 인증은 어드민 보안 체인이 맡아 place는 admin을 import하지 않는다. 감사 컬럼(`created_by`·`updated_by`)은 `SecurityAuditorAware`가 principal(adminId)에서 채우고, 도메인 컬럼에 남길 어드민(`places.reviewed_by`)은 컨트롤러가 `@AuthenticationPrincipal UUID adminId`로 받아 Command로 넘긴다. 서비스·domain은 SecurityContext를 읽지 않는다.
 - application·domain과 infrastructure 사이는 반드시 DIP. application·domain은 infrastructure를 import하지 않는다.
   - DB: `domain/repository` 인터페이스 ← `infrastructure/persistence`의 `XxxRepositoryImpl`
   - 그 외 외부 기술(Redis, Kafka, 외부 API, 타 도메인 등): `application/port/out`의 `XxxPort` ← `infrastructure`의 `XxxAdapter`
@@ -159,7 +160,8 @@
 
 - 모든 엔티티는 `common/entity`의 `BaseEntity`를 상속한다. id(UUID v7), `createdAt`, `updatedAt`, `isDeleted`가 딸려온다.
 - 변경 주체를 남겨야 하는 엔티티는 `BaseAuditEntity`를 상속한다. `createdBy`, `updatedBy`가 더해진다.
-  - 판단 기준: 도메인 컬럼으로는 알 수 없는 "누가 바꿨나"가 운영에서 궁금해지면 Audit. 예로 일정을 누가 취소했는지(`schedule_cancellations`, 개설자인지 운영자인지), 탈퇴 기록(`user_withdrawals`)을 누가 만들고(본인 요청이면 사용자 id, 웹훅이면 `SYSTEM`) 누가 비식별했는지(`SYSTEM_SCHEDULER`), 어드민을 누가 승인·거절·중지했는지(`admins.updated_by`, 처리한 MASTER의 adminId).
+  - 판단 기준: 도메인 컬럼으로는 알 수 없는 "누가 바꿨나"가 운영에서 궁금해지면 Audit. 예로 일정을 누가 취소했는지(`schedule_cancellations`, 개설자인지 운영자인지), 탈퇴 기록(`user_withdrawals`)을 누가 만들고(본인 요청이면 사용자 id, 웹훅이면 `SYSTEM`) 누가 비식별했는지(`SYSTEM_SCHEDULER`), 어드민을 누가 승인·거절·중지했는지(`admins.updated_by`, 처리한 MASTER의 adminId), 장소를 누가 등록했는지(`places`, MANUAL이면 adminId, 적재면 `SYSTEM_SCHEDULER`, SHI-184).
+  - 감사 값을 응답에 담아야 하면 `saveAndFlush`로 반영한 뒤 Result를 만든다. `@LastModifiedDate`·`@LastModifiedBy`는 flush 때 채워진다. 예: `PlaceReviewCommandService.review`.
   - 값은 사용자 id 문자열이거나 `Auditor.SYSTEM`, `Auditor.SYSTEM_SCHEDULER`다. 인증이 없는 요청은 `SYSTEM`이 들어간다.
 - id는 UUID v7(`@UuidGenerator(style = VERSION_7)`)이다. 시간순으로 증가해 인덱스가 조각나지 않고, URL로 남의 데이터를 추측할 수 없다. 다른 키 전략이 꼭 필요한 테이블만 `BaseEntity`를 상속하지 않는다.
   - 예: `regions`. 행정구역 코드(`CHAR(5)`)가 PK인 기준 데이터다. 지우지 않으므로 `is_deleted`가 없고, 숨김은 `is_active`가 맡는다. `created_at`·`updated_at`은 엔티티에서 직접 매핑한다.
@@ -172,6 +174,11 @@
   - 원천 응답에는 있지만 적재 대상에서 걸러진 행(업종 필터·값 정리)이 이미 저장돼 있으면 마지막 확인 시각(`last_synced_at`)만 갱신한다. 원천에 남아 있는 가게를 폐업으로 오판하지 않기 위해서다. 예: `PlaceCommandService.reflectPage` → `PlaceRepository.markSynced`.
   - 원천 값은 저장 컬럼의 정밀도·길이에 맞춘 뒤 비교하고 저장한다. 맞추지 않으면 같은 응답으로 다시 적재해도 원천이 바뀐 것으로 판정돼 승인 행마다 경고가 난다. 예: 좌표는 `NUMERIC(10,7)`라 소수 7자리 HALF_UP 반올림, 주소는 200자에서 자른다(`PlaceImportPolicy`).
   - 원천에서 사라진 행의 폐업 처리는 모든 페이지를 받은(완주한) 지역에만 한다. 받다 실패한 지역은 이미 반영한 페이지만 두고 폐업 처리에서 뺀다(`ImportPlacesFacade`, `PlaceCommandService.closeMissing`).
+  - **사람의 검수 기록은 감사 컬럼과 따로 둔다**(`places.reviewed_by`·`reviewed_at`, SHI-184). 적재는 확인한 행마다 `last_synced_at`을 바꿔 dirty checking으로 `updated_by`를 `SYSTEM_SCHEDULER`로 덮으므로, `updated_by`만으로는 마지막 검수자가 다음 적재에서 사라진다.
+    - `@LastModifiedBy`가 아닌 일반 컬럼이고 검수 메서드(`Place.review`·`createManual`)만 바꾼다. 적재(`confirmSource`)·`markSynced`·폐업 처리는 건드리지 않는다.
+    - API로 검수한 적 없는 행은 `reviewed_by = ''`, `reviewed_at = NULL`이다(NULL에 뜻을 둔 컬럼).
+  - 사람이 고칠 때 검수 상태는 결과(`APPROVED`·`REJECTED`)만 고른다. `CANDIDATE`로 되돌리면 다음 적재가 화면 값을 원천 값으로 덮어 사람이 고친 값이 사라진다(`Place.review`, 400 `INVALID_REVIEW_STATUS`). 원천에 없어 사람이 등록한 행(MANUAL)은 등록 즉시 `APPROVED`다.
+  - 사람은 원천 값·폐업 여부·마지막 확인 시각·원천을 바꾸지 않는다. 적재만 바꾼다.
 
 ### 삭제
 
@@ -226,6 +233,10 @@
   - 사용자 단위: `pg_advisory_xact_lock`(`ScheduleRepository.lockUser`). 같은 사용자의 개설·참여를 차례로 세워 겹침 검사가 서로의 결과를 보게 한다.
   - 행 단위: `@Lock(PESSIMISTIC_WRITE)` 조회, 즉 `SELECT … FOR UPDATE`(`ScheduleRepository.findByIdForUpdate`). 같은 일정의 참여·참여 취소·일정 전체 취소를 차례로 세운다.
     - 상태 전이도 같다. 어드민 승인·거절·중지·해제(`AdminCommandService`)는 대상 어드민을 `AdminRepository.findByIdForUpdate`로 처음 읽고 엔티티의 전이 메서드가 출발 상태를 본다. 두 MASTER가 같은 대상을 동시에 처리하면 뒤 요청은 앞 커밋을 기다려 바뀐 상태를 보고 409 `ADMIN_STATUS_CONFLICT`다. 조건부 일괄 UPDATE로 하지 않은 이유: Auditing을 거치지 않아 `updated_by`를 직접 넣어야 하고, 404·403·409를 가르려면 어차피 한 번 더 읽어야 한다.
+    - **배치 적재와 사람의 수정이 같은 행을 고치면 양쪽 모두 잠가 읽는다.** 둘 다 엔티티를 읽어 dirty checking으로 전체 컬럼을 UPDATE하므로, 잠금 없이 겹치면 뒤에 커밋한 쪽이 앞의 변경을 덮는다(어드민 승인이 CANDIDATE로 돌아가거나, 새 원천 값이 옛 값으로 돌아간다). 예(SHI-184): 적재의 기존 행 조회 `PlaceRepository.findAllBySourceIds`·폐업 대상 조회 `findAllCloseTargets`, 어드민 수정 `findByIdForUpdate`가 모두 `PESSIMISTIC_WRITE`다. 뒤에 온 쪽은 앞 커밋을 기다려 그 결과 위에 자기 변경을 쓴다.
+      - 컬럼 단위 일괄 UPDATE(`markSynced`)는 잠금 조회가 필요 없다. 행 잠금을 기다린 뒤 자기 컬럼만 쓴다.
+      - 조건이 있는 잠금 조회는 앞 커밋을 기다린 뒤 PostgreSQL이 WHERE를 다시 평가해, 조건에서 벗어난 행은 결과에서 빠진다. 그래서 결과가 순서에 따라 달라질 수 있다. 예: 폐업 대상은 `CANDIDATE`·`APPROVED`만이라, 어드민이 `REJECTED`로 바꿔 먼저 커밋하면 그 행은 폐업 처리되지 않고 `isClosed`가 그대로다. 폐업 처리가 먼저면 `true`가 된다. 거절된 행은 어느 쪽이든 노출되지 않아 막지 않았고, FE 문서(`docs/admin-api-guide.md` 장소 수정)에 적었다.
+      - 어드민끼리 겹치면 마지막 요청이 남는다. 낙관적 잠금(`@Version`)은 두지 않았다(SHI-184 결정).
 - **둘을 함께 잡으면 순서는 항상 사용자 → 일정이다.** 순서가 섞이면 교착이 난다. 일정 하나만 잡는 흐름(참여 취소, 일정 전체 취소)은 사용자 잠금을 걸지 않는다.
 - **잠금 조회는 그 트랜잭션에서 그 행을 처음 읽는 조회여야 한다.** 먼저 잠금 없이 읽어 영속성 컨텍스트에 올려두면, 잠근 뒤에도 옛 값(확정 인원·모집 상태)을 쓴다.
 - **잠그는 조회에 연관 컬렉션을 fetch join하지 않는다.** PostgreSQL은 outer join의 nullable 쪽에 `FOR UPDATE`를 걸 수 없고, 잠글 대상은 루트 행 하나면 된다. 구성요소는 잠근 뒤 지연 로딩으로 읽는다(READ COMMITTED라 앞 트랜잭션이 커밋한 행을 본다).
@@ -246,10 +257,14 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 - **정렬과 커서 비교는 DB에서만 한다.** Java의 `UUID.compareTo`는 부호 있는 비교라 PostgreSQL의 uuid 순서와 다르다. 읽은 목록을 메모리에서 다시 정렬하거나 커서를 Java로 비교하면 페이지 경계에서 중복·누락이 난다.
   - 페이지·커서가 없고 정원으로 크기가 묶인 목록은 이 규칙에 들지 않는다. 애그리거트 루트가 구성요소를 메모리에서 정렬해 돌려준다. 예: 참여자 명단(`Schedule.confirmedParticipantsInListOrder`, 개설자 먼저 → `createdAt` → 행 id). 이때 id는 순서를 매 요청 같게 하는 보조 키일 뿐이고, DB uuid 순서와 같다고 기대하지 않는다.
 - 삭제 조건(`isDeleted = false`)은 루트와 조인한 구성요소 모두에 명시한다(삭제 절).
+- **키워드 부분 일치는 LIKE 특수문자를 이스케이프해 바인딩한다.** 사용자가 넣은 `%`·`_`가 와일드카드로 먹지 않고 글자 그대로 찾게 한다. 예: `PlaceRepositoryImpl.findAllForReview`(어드민 장소 목록, 필터는 `PlaceSearchCondition`).
+  - 패턴은 Java에서 만든다: 소문자(`Locale.ROOT`)로 바꾼 뒤 `\` → `\\`, `%` → `\%`, `_` → `\_` 순서로 바꾸고 앞뒤에 `%`를 붙인다. `\`를 먼저 바꿔야 한다. 나중에 바꾸면 앞에서 넣은 이스케이프 문자까지 다시 이스케이프된다.
+  - JPQL은 `lower(p.name) like :keyword escape '\'`로 쓴다. 이스케이프 문자를 명시한다.
+  - 빈 값·공백뿐인 키워드는 조건을 걸지 않는다(`PlaceSearchCondition.of`).
 
 ### 일괄 UPDATE (`@Modifying`)
 
-예: `ScheduleJpaRepository`의 `closeRecruitmentStarted`·`completeStartedBy`(일정 상태 전환).
+예: `ScheduleJpaRepository`의 `closeRecruitmentStarted`·`completeStartedBy`(일정 상태 전환), `PlaceJpaRepository.markSynced`(적재 확인 시각, `updated_by = SYSTEM_SCHEDULER`, 검수 기록 `reviewed_*`는 건드리지 않음).
 
 - **JPA Auditing을 거치지 않는다.** 엔티티를 로드하지 않고 SQL을 바로 보내 `@LastModifiedDate`·`@LastModifiedBy`가 돌지 않는다. `updatedAt`·`updatedBy`를 쿼리에 직접 넣는다. `updatedAt`은 조건 판정에 쓴 기준 시각(now), `updatedBy`는 `Auditor` 상수(스케줄러면 `Auditor.SYSTEM_SCHEDULER`)를 파라미터로 넘긴다.
 - **삭제된 행은 바꾸지 않는다**(`isDeleted = false`). 삭제한 행의 `updated_by`는 삭제한 주체를 가리키는데, 덮어쓰면 그 기록이 사라진다.
@@ -271,7 +286,7 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
   - 잠금은 facade가 `port/out`(`PlaceImportLockPort.runExclusively`)으로 잡는다. 스케줄러는 facade를 부르기만 한다. 잠그는 방법은 "동시 요청과 잠금" 절.
 - **엔티티를 읽어 바꾸는(dirty checking) 스케줄러는 실행 동안 SecurityContext의 인증 주체를 `Auditor.SYSTEM_SCHEDULER`로 두고, `finally`에서 `SecurityContextHolder.clearContext()`로 비운다.** JPA Auditing이 SecurityContext에서 `updatedBy`를 읽기 때문이다. 넣지 않으면 `SYSTEM`이 남는다. 일괄 UPDATE는 Auditing을 거치지 않아 쿼리에 직접 넣는다(일괄 UPDATE 절).
   - 넣는 값: `new UsernamePasswordAuthenticationToken(Auditor.SYSTEM_SCHEDULER, null, List.of())`. 3인자 생성자라 인증된 상태가 되어 `SecurityAuditorAware`가 principal을 그대로 쓴다.
-  - 예: `user/infrastructure/scheduler/UserAnonymizationScheduler`.
+  - 예: `user/infrastructure/scheduler/UserAnonymizationScheduler`, `place/infrastructure/scheduler/PlaceImportScheduler`(facade를 거쳐 서비스가 적재 행을 dirty checking으로 바꾼다. 넣지 않으면 적재 행의 `created_by`·`updated_by`가 `SYSTEM`이 된다).
 - **대상마다 따로 처리하고 한 건의 실패가 나머지를 막지 않아야 하면, 스케줄러가 대상 하나마다 서비스 메서드(`@Transactional`)를 따로 부른다.** 서비스 프록시를 거치므로 대상마다 트랜잭션이 나뉜다. 예외는 잡아 로그로 남기고 다음 대상으로 넘어간다. 예: `UserAnonymizationScheduler` → `UserWithdrawalCommandService.anonymize(userId)`.
   - 대상은 keyset 페이지로 대상이 없어질 때까지 읽는다(목록 쿼리 절). 기준 시각은 실행 시작 때 한 번 정해 모든 페이지에 같은 값을 쓴다. 페이지 크기는 설정값이다(`withdrawal.anonymize-page-size: 100`).
   - 한 번에 정해진 수만 처리하지 않는다. 대상이 그보다 많아지면 경고 없이 처리가 밀린다.
