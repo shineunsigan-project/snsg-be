@@ -4,3 +4,8 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+spring:
+  data:
+      redis:
+        password : ${REDIS_PASSWORD}
