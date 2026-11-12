@@ -3,6 +3,7 @@ package com.shineunsigan.snsg.admin.infrastructure.security;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -13,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -28,13 +30,17 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import com.shineunsigan.snsg.admin.application.AdminCommandService;
 import com.shineunsigan.snsg.admin.application.AdminLoginFacade;
 import com.shineunsigan.snsg.admin.application.AdminQueryService;
 import com.shineunsigan.snsg.admin.application.AdminReissueTokenFacade;
 import com.shineunsigan.snsg.admin.application.SignUpAdminFacade;
+import com.shineunsigan.snsg.admin.application.SuspendAdminFacade;
+import com.shineunsigan.snsg.admin.application.dto.result.AdminPageResult;
 import com.shineunsigan.snsg.admin.application.dto.result.AdminResult;
 import com.shineunsigan.snsg.admin.application.dto.result.AdminTokenResult;
 import com.shineunsigan.snsg.admin.application.port.out.AdminTokenPort;
@@ -70,8 +76,8 @@ import jakarta.servlet.http.Cookie;
  */
 @WebMvcTest(controllers = {AdminAuthController.class, AdminController.class, UserController.class})
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, JwtAuthenticationEntryPoint.class,
-        AdminSecurityConfig.class, AdminAuthenticationEntryPoint.class, AdminCookieFactory.class,
-        AdminSecurityConfigTest.TestConfig.class})
+        AdminSecurityConfig.class, AdminAuthenticationEntryPoint.class, AdminAccessDeniedHandler.class,
+        AdminCookieFactory.class, AdminSecurityConfigTest.TestConfig.class})
 class AdminSecurityConfigTest {
 
     private static final String ADMIN_ME = "/api/admin/v1/admins/me";
@@ -80,6 +86,7 @@ class AdminSecurityConfigTest {
     private static final String ADMIN_TOKEN = "admin-access-token";
     private static final UUID USER_ID = UUID.randomUUID();
     private static final UUID ADMIN_ID = UUID.randomUUID();
+    private static final UUID TARGET_ID = UUID.randomUUID();
 
     /** CORS 규칙은 이 테스트의 대상이 아니다. */
     @TestConfiguration
@@ -111,6 +118,12 @@ class AdminSecurityConfigTest {
 
     @MockitoBean
     private AdminReissueTokenFacade adminReissueTokenFacade;
+
+    @MockitoBean
+    private AdminCommandService adminCommandService;
+
+    @MockitoBean
+    private SuspendAdminFacade suspendAdminFacade;
 
     @MockitoBean
     private UserQueryService userQueryService;
@@ -223,5 +236,93 @@ class AdminSecurityConfigTest {
                 .andExpect(jsonPath("$.data.id").value(USER_ID.toString()));
 
         verify(userQueryService).getMyProfile(USER_ID);
+    }
+
+    /** MASTER 전용 경로 다섯. 승인·거절·중지·해제는 TARGET_ID를 대상으로 한다. */
+    private static List<MockHttpServletRequestBuilder> masterOnlyRequests() {
+        return List.of(get("/api/admin/v1/admins"),
+                post("/api/admin/v1/admins/{adminId}/approval", TARGET_ID),
+                post("/api/admin/v1/admins/{adminId}/rejection", TARGET_ID),
+                post("/api/admin/v1/admins/{adminId}/suspension", TARGET_ID),
+                delete("/api/admin/v1/admins/{adminId}/suspension", TARGET_ID));
+    }
+
+    @Test
+    @DisplayName("토큰 없이 MASTER 전용 경로를 부르면 401 UNAUTHENTICATED")
+    void masterOnlyWithoutToken() throws Exception {
+        for (MockHttpServletRequestBuilder request : masterOnlyRequests()) {
+            mockMvc.perform(request)
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        }
+
+        verifyNoInteractions(adminCommandService, suspendAdminFacade);
+        verify(adminQueryService, never()).list(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("사용자 access 토큰으로 MASTER 전용 경로를 부르면 401 UNAUTHENTICATED")
+    void masterOnlyWithUserToken() throws Exception {
+        for (MockHttpServletRequestBuilder request : masterOnlyRequests()) {
+            mockMvc.perform(request.header(HttpHeaders.AUTHORIZATION, "Bearer " + USER_TOKEN))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        }
+
+        verifyNoInteractions(adminCommandService, suspendAdminFacade);
+        verify(adminQueryService, never()).list(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("승인된 ADMIN 역할이 MASTER 전용 경로를 부르면 403 MASTER_ONLY이고 서비스·facade가 불리지 않는다. 내 정보는 200이다")
+    void masterOnlyWithAdminRole() throws Exception {
+        when(adminQueryService.findApprovedRole(ADMIN_ID)).thenReturn(Optional.of(AdminRole.ADMIN));
+        when(adminQueryService.getMe(ADMIN_ID)).thenReturn(new AdminResult(ADMIN_ID, "mintadmin", "김민트",
+                AdminTeam.BACKEND, LocalDate.of(1996, 4, 12), AdminRole.ADMIN));
+
+        for (MockHttpServletRequestBuilder request : masterOnlyRequests()) {
+            mockMvc.perform(request.header(HttpHeaders.AUTHORIZATION, "Bearer " + ADMIN_TOKEN))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.isSuccess").value(false))
+                    .andExpect(jsonPath("$.code").value("MASTER_ONLY"));
+        }
+        mockMvc.perform(get(ADMIN_ME).header(HttpHeaders.AUTHORIZATION, "Bearer " + ADMIN_TOKEN))
+                .andExpect(status().isOk());
+
+        verifyNoInteractions(adminCommandService, suspendAdminFacade);
+        verify(adminQueryService, never()).list(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("승인된 MASTER가 MASTER 전용 경로를 부르면 2xx이고 서비스·facade가 경로의 adminId로 불린다")
+    void masterOnlyWithMasterRole() throws Exception {
+        when(adminQueryService.findApprovedRole(ADMIN_ID)).thenReturn(Optional.of(AdminRole.MASTER));
+        when(adminQueryService.list(any(), any(), any())).thenReturn(new AdminPageResult(List.of(), null));
+
+        for (MockHttpServletRequestBuilder request : masterOnlyRequests()) {
+            mockMvc.perform(request.header(HttpHeaders.AUTHORIZATION, "Bearer " + ADMIN_TOKEN))
+                    .andExpect(status().is2xxSuccessful());
+        }
+
+        verify(adminQueryService).list(null, null, null);
+        verify(adminCommandService).approve(TARGET_ID);
+        verify(adminCommandService).reject(TARGET_ID);
+        verify(suspendAdminFacade).suspend(TARGET_ID);
+        verify(adminCommandService).unsuspend(TARGET_ID);
+    }
+
+    @Test
+    @DisplayName("어드민 토큰이어도 승인 상태가 아니면(거절·이용 중지·승인 대기·없음) MASTER 전용 경로는 401 UNAUTHENTICATED")
+    void masterOnlyWithNotApprovedAdmin() throws Exception {
+        when(adminQueryService.findApprovedRole(ADMIN_ID)).thenReturn(Optional.empty());
+
+        for (MockHttpServletRequestBuilder request : masterOnlyRequests()) {
+            mockMvc.perform(request.header(HttpHeaders.AUTHORIZATION, "Bearer " + ADMIN_TOKEN))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+        }
+
+        verifyNoInteractions(adminCommandService, suspendAdminFacade);
+        verify(adminQueryService, never()).list(any(), any(), any());
     }
 }
