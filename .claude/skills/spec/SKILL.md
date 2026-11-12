@@ -72,6 +72,7 @@ description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md�
 - **테스트를 다시 돌려야 의미가 있는 검증에는 `cleanTest`를 붙인다**(`./gradlew cleanTest test --tests ...`). 코드가 그대로면 Gradle이 test를 UP-TO-DATE로 건너뛰어, "연속 3회 통과"가 실제로는 한 번만 돈 결과가 된다(SHI-156).
 - **기대 결과가 그 명령으로 실제로 나올 수 있는지 확인한다.** 패턴이 기대하지 않은 파일까지 잡거나, 반대로 기대한 파일을 잡지 못하면 구현이 맞아도 FAIL이 나거나 틀려도 PASS가 난다. 파일 하나를 가리킬 때는 경로 끝을 고정한다(`grep -E '/SecurityConfig\.java$'` → 출력 없음, `grep -x` 전체 줄 일치). 부분 일치 `grep SecurityConfig.java`는 `SecurityConfigTest.java`도 잡지 않고, `.`이 아무 문자와 맞아 다른 이름도 잡을 수 있다(SHI-178에서 기대 출력 "`SecurityConfigTest.java`만"이 나올 수 없었다).
   - 생성기가 만드는 파일(`docs/openapi.yaml`)의 형태를 기대 결과로 걸 때는, 같은 형태가 **이미 생성된 결과에 나오는지** 먼저 grep으로 확인한다. 나온 적이 없으면 형태가 아니라 뜻(description의 문구 등)으로 건다. SHI-179에서 "`cancellation`이 nullable"을 걸었으나 springdoc이 `$ref` 필드의 nullable을 출력하지 않아 나올 수 없었다(`.claude/rules/api.md` 문서 절).
+  - `bootRun` 로그 파일을 grep하는 기대 결과는 한글 문구가 아니라 같은 줄의 ASCII 문자열로 건다. Windows에서는 로그가 CP949로 저장돼 한글 패턴이 걸리지 않는다(`.claude/rules/testing.md` "쓰지 않는 테스트"의 bootRun 항목, SHI-181).
 - **변경 경로를 허용 목록으로 검사하는 GOAL에는 `.claude/tasks/SHI-<번호>/task.md`를 넣는다.** task.md도 스테이징돼 diff에 들어간다. 빠뜨리면 검증 단계가 task.md를 범위 밖 변경으로 읽어 오판한다(T-18).
 
 ```markdown

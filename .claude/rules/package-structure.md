@@ -168,6 +168,9 @@
   - 원천 값은 적재할 때마다 갱신한다. 화면 값은 검수 전일 때만 원천 값으로 갱신한다. 사람이 정한 값을 적재가 덮어쓰지 않기 위해서다.
   - 승인된 행의 원천 변경 경고는 새 원천 값이 **지난 원천 값**과 다를 때만 낸다. 화면 값과 비교하면 사람이 고친 행이 적재 때마다 걸린다.
   - 예: `places`(`Place.confirmSource`).
+  - 원천 응답에는 있지만 적재 대상에서 걸러진 행(업종 필터·값 정리)이 이미 저장돼 있으면 마지막 확인 시각(`last_synced_at`)만 갱신한다. 원천에 남아 있는 가게를 폐업으로 오판하지 않기 위해서다. 예: `PlaceCommandService.reflectPage` → `PlaceRepository.markSynced`.
+  - 원천 값은 저장 컬럼의 정밀도·길이에 맞춘 뒤 비교하고 저장한다. 맞추지 않으면 같은 응답으로 다시 적재해도 원천이 바뀐 것으로 판정돼 승인 행마다 경고가 난다. 예: 좌표는 `NUMERIC(10,7)`라 소수 7자리 HALF_UP 반올림, 주소는 200자에서 자른다(`PlaceImportPolicy`).
+  - 원천에서 사라진 행의 폐업 처리는 모든 페이지를 받은(완주한) 지역에만 한다. 받다 실패한 지역은 이미 반영한 페이지만 두고 폐업 처리에서 뺀다(`ImportPlacesFacade`, `PlaceCommandService.closeMissing`).
 
 ### 삭제
 
@@ -225,6 +228,11 @@
 - **잠금 조회는 그 트랜잭션에서 그 행을 처음 읽는 조회여야 한다.** 먼저 잠금 없이 읽어 영속성 컨텍스트에 올려두면, 잠근 뒤에도 옛 값(확정 인원·모집 상태)을 쓴다.
 - **잠그는 조회에 연관 컬렉션을 fetch join하지 않는다.** PostgreSQL은 outer join의 nullable 쪽에 `FOR UPDATE`를 걸 수 없고, 잠글 대상은 루트 행 하나면 된다. 구성요소는 잠근 뒤 지연 로딩으로 읽는다(READ COMMITTED라 앞 트랜잭션이 커밋한 행을 본다).
 - **부분 유니크 인덱스 위반을 오류 코드로 바꾸는 곳은 잠금 없이 경쟁이 실제로 나는 곳뿐이다.** 예: 닉네임(`UserRepositoryImpl.save`가 409 `DUPLICATED_NICKNAME`으로 바꾼다). 잠금으로 직렬화한 경로의 인덱스(`uix_participants_confirmed`)는 앱 경로로는 위반되지 않는 마지막 방어선이라 바꾸지 않는다. 위반되면 잠금 버그이므로 500으로 드러나게 둔다.
+- **배치 실행 전체를 잠글 때는 세션 advisory lock(`pg_try_advisory_lock`)을 쓴다.** 언제 잠그는지는 스케줄러 절. 예: `place/infrastructure/persistence/PostgresPlaceImportLockAdapter`.
+  - `pg_advisory_xact_lock`은 잡은 트랜잭션이 끝나면 풀려, 실행 전체를 트랜잭션 하나로 감싸야 한다. 외부 호출을 트랜잭션 밖에 두는 facade 규칙과 맞지 않는다.
+  - 세션 잠금은 잡은 연결에서 풀어야 한다. `DataSource`에서 연결 하나를 직접 받아 잡고, 작업이 끝나면(예외가 나도) 같은 연결로 풀고 돌려준다. `JdbcTemplate`은 호출마다 다른 연결을 받을 수 있어 쓰지 않는다. 실행 동안 연결 하나를 점유하고, 반영은 다른 연결의 트랜잭션에서 한다. 서버가 죽어 연결이 끊기면 PostgreSQL이 푼다.
+  - 작업이 예외로 끝난 뒤 해제까지 실패하면 작업의 예외를 던지고 해제 실패는 거기에 suppressed로 붙인다. 원인이 해제 실패에 가려지지 않게 한다.
+  - 잠금 키는 다른 advisory lock과 겹치지 않게 고른다. 사용자 잠금(`ScheduleRepository.lockUser`)은 `hashtext`(int 범위) 키라 장소 적재는 int 범위 밖의 bigint 상수(`PostgresPlaceImportLockAdapter.LOCK_KEY`)를 쓴다.
 
 ### 목록 쿼리 (JPQL)
 
@@ -256,6 +264,9 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
   - 정해진 시각에 도는 작업은 `@Scheduled(cron = "${...}")`로 읽는다. 예: `withdrawal.anonymize-cron: "0 0 4 * * *"`(탈퇴 회원 비식별, 매일 04:00). user 도메인이지만 prefix가 `user`가 아닌 이유는 설정 절.
 - 조건부 일괄 UPDATE처럼 여러 서버에서 동시에 돌아도 결과가 같은 작업에는 분산 락(ShedLock 등)을 두지 않는다. READ COMMITTED에서 뒤 UPDATE는 앞 커밋을 기다린 뒤 WHERE를 다시 평가해 이미 바뀐 행을 건너뛴다.
   - 탈퇴 회원 비식별도 두지 않는다. 두 서버가 같은 회원을 처리해도 같은 값을 쓰고, 파일 삭제는 없으면 넘어간다.
+- **결과는 같아도 겹쳐 돌면 비용이 두 배가 되는 작업은 실행 전체를 잠근다.** 호출 한도가 있는 외부 API를 부르는 적재가 그렇다. 잠금을 못 잡은 실행은 아무것도 하지 않고 로그만 남긴다. 운영은 ECS 서비스라 태스크가 둘 이상일 수 있다.
+  - 예: 장소 적재(JOB-04, `place/infrastructure/scheduler/PlaceImportScheduler` → `ImportPlacesFacade`, 공공데이터포털 일 호출 한도). `@Scheduled(cron = "${place.import-cron}")`, 3·6·9·12월 1일 03:00.
+  - 잠금은 facade가 `port/out`(`PlaceImportLockPort.runExclusively`)으로 잡는다. 스케줄러는 facade를 부르기만 한다. 잠그는 방법은 "동시 요청과 잠금" 절.
 - **엔티티를 읽어 바꾸는(dirty checking) 스케줄러는 실행 동안 SecurityContext의 인증 주체를 `Auditor.SYSTEM_SCHEDULER`로 두고, `finally`에서 `SecurityContextHolder.clearContext()`로 비운다.** JPA Auditing이 SecurityContext에서 `updatedBy`를 읽기 때문이다. 넣지 않으면 `SYSTEM`이 남는다. 일괄 UPDATE는 Auditing을 거치지 않아 쿼리에 직접 넣는다(일괄 UPDATE 절).
   - 넣는 값: `new UsernamePasswordAuthenticationToken(Auditor.SYSTEM_SCHEDULER, null, List.of())`. 3인자 생성자라 인증된 상태가 되어 `SecurityAuditorAware`가 principal을 그대로 쓴다.
   - 예: `user/infrastructure/scheduler/UserAnonymizationScheduler`.
@@ -276,12 +287,23 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 - 토큰처럼 탈취되면 피해가 큰 값은 **원문이 아니라 해시**를 저장한다. 덤프·백업이 유출돼도 복원할 수 없다.
 - 운영 Redis는 `maxmemory-policy`를 `noeviction`(또는 `volatile-ttl`)로 둔다. `allkeys-*`면 TTL이 남아 있어도 임의로 지워져, 가입 세션처럼 진행 중인 데이터가 끊긴다.
 
+### 외부 API 연동
+
+예: 상가정보 API(`place/infrastructure/client/SemasPlaceSourceAdapter`).
+
+- 시간 초과는 config 빈이 request factory에 걸어 완성한 `RestClient`를 만들고, adapter는 그 `RestClient`를 주입받는다(`SemasClientConfig.semasRestClient`). adapter 생성자에서 builder에 request factory를 걸지 않는다. 테스트의 목 서버가 덮인다(`.claude/rules/testing.md`).
+- **인증키가 요청 URL에 들어가는 API는 요청 URL과 예외 메시지를 로그·실패 이유에 남기지 않는다.** 예외는 종류(클래스 이름)와 HTTP 상태만 남긴다. 호출하는 facade도 같다(`ImportPlacesFacade.fetch`).
+- 쿼리에 넣는 인증키는 URI 변수(`queryParam("serviceKey", "{serviceKey}")` → `encode()` → `buildAndExpand`)로 넣어 엄격히 인코딩한다. 템플릿 리터럴로 붙이면 `+`가 인코딩되지 않아 서버가 공백으로 읽는다. 공공데이터포털 키는 "일반 인증키(Decoding)" 원문을 설정(`public-data.api-key`)으로 받는다.
+- **호출한 쪽이 실패 종류에 따라 흐름을 가르면, `port/out`은 실패를 예외 대신 결과로 돌려준다.** 예: `PublicPlaceSourcePort.fetchPage` → `PlaceSourcePageResult`(성공 / 데이터 없음 / 실패와 이유). facade는 실패면 같은 페이지를 다시 부르고, 데이터 없음(공공데이터포털 결과 코드 03)은 다시 불러도 같은 답이라 재시도하지 않는다. 포트가 예상하지 못한 예외를 던져도 facade가 실패로 다룬다.
+- 재시도는 새 라이브러리 없이 반복문으로 한다. 최대 시도 횟수는 설정값이다(`place.import-max-attempts`, 첫 시도 포함).
+
 ### 설정 (`@ConfigurationProperties`)
 
 - **prefix를 흔한 OS 환경변수 이름(`user`, `home`, `path`, `lang` 등)과 같게 두지 않는다.** Spring은 OS 환경변수도 속성으로 읽어 `USER`를 `user` 속성으로 잡는다. prefix와 정확히 같은 이름의 값이 있으면 Binder가 그 문자열을 record에 바인딩하려 해 기동이 실패할 수 있다. 리눅스 운영 서버에는 `USER`·`HOME`·`PATH`가 항상 있다. 예: 닉네임 정책은 `user.*`가 아니라 `nickname.*`(`user/application/NicknameProperties`)다. 탈퇴 회원 비식별 배치는 `withdrawal.*`(`user/application/WithdrawalProperties`)다. 페이지 크기·실행 시각은 닉네임 정책이 아니라 `nickname.*`에 두지 않았다.
 - 두 규칙이 같은 기간을 쓰면 설정 하나에서 읽는다. 예: `nickname.protect-after-change`는 바꾸기 전 닉네임 보호 기간이자 닉네임 재변경 제한 기간이다. `nickname.protect-after-withdrawal`은 탈퇴 닉네임 보호 기간이자 탈퇴 원본 보관 기간(`user_withdrawals.anonymize_due_at`)이다.
 - 설정은 그 값으로 계산하는 도메인에 둔다. 예: `schedule.withdrawal-block-after-start`(탈퇴를 막는 기간)는 흐름은 auth가 조합하지만 schedule이 탈퇴 가능 시각을 계산해 돌려주므로 `ScheduleProperties`에 있다.
-- 예외: 애노테이션 속성이 읽는 값은 record를 주입할 자리가 없어 자리표시자(`"${...}"`)로 읽는다. 예: `@Scheduled(fixedDelayString = "${schedule.status-transition-interval}")`, `@Scheduled(cron = "${withdrawal.anonymize-cron}")`. 그 키는 record에 넣지 않고, 넣지 않은 이유를 yaml 주석으로 남긴다(`@ConfigurationProperties`는 모르는 키를 무시한다).
+- 예외: 애노테이션 속성이 읽는 값은 record를 주입할 자리가 없어 자리표시자(`"${...}"`)로 읽는다. 예: `@Scheduled(fixedDelayString = "${schedule.status-transition-interval}")`, `@Scheduled(cron = "${withdrawal.anonymize-cron}")`, `@Scheduled(cron = "${place.import-cron}")`. 그 키는 record에 넣지 않고, 넣지 않은 이유를 yaml 주석으로 남긴다(`@ConfigurationProperties`는 모르는 키를 무시한다).
+- **새 환경변수를 설정에서 읽으면 운영 목록 `snsg/.env.example`에 키를 값 없이 더한다.** 로컬 `snsg/.env`에도 넣어야 테스트 컨텍스트가 뜬다(`.claude/rules/testing.md`). 운영 값은 ECS task definition(`snsg-be-web-task`, 저장소 밖)에 넣는다. `.github/workflows/deploy.yml`은 최신 task definition의 이미지만 바꿔 배포하므로, 기본값 없는 자리표시자(`${DATA_GO_KR_API_KEY}`)가 task definition에 없으면 운영 기동이 멈춘다. task definition에 넣어야 한다는 것을 PR의 background에 적는다. 예: SHI-181의 `DATA_GO_KR_API_KEY`(`public-data.api-key`).
 
 ## 코드 작성
 
