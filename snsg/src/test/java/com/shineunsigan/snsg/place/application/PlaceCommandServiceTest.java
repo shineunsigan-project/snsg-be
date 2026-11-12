@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,7 +52,8 @@ class PlaceCommandServiceTest {
 
     @BeforeEach
     void setUp() {
-        placeCommandService = new PlaceCommandService(placeRepository, new PlaceProperties(new BigDecimal("0.3")));
+        placeCommandService = new PlaceCommandService(placeRepository, new PlaceProperties(new BigDecimal("0.3"),
+                Duration.ofSeconds(10), 3, List.of(), List.of(), Map.of()));
     }
 
     private UpsertPlaceCommand row(String sourceId, String name, String addressDetail) {

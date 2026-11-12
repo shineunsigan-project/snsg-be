@@ -73,6 +73,20 @@ auth:
 
 place:
   close-max-ratio: 0.3
+  # 상가정보 적재 배치 실행 시각(3·6·9·12월 1일 03:00). 분기가 끝나고 두 달 뒤에 받아, 분기 데이터 공개가 늦어져도
+  # 최신 분기를 받도록 여유를 둔다. 04:00은 탈퇴 회원 비식별(withdrawal.anonymize-cron)이 쓴다.
+  # @Scheduled가 자리표시자로 읽어 PlaceProperties에는 두지 않는다.
+  import-cron: "0 0 3 1 3,6,9,12 *"
+  import-timeout: 10s
+  import-max-attempts: 3
+  semas-category-codes: [R10405, R10499]
+  name-keywords: [보드게임, 보드카페, 방탈출]
+  type-keywords:
+    BOARD_GAME_CAFE: [보드]
+    ESCAPE_ROOM: [방탈출, 이스케이프, escape]
+
+public-data:
+  api-key: ${DATA_GO_KR_API_KEY}
 
 schedule:
   capacity-min: 4

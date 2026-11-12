@@ -25,6 +25,7 @@ paths:
 
 - 설정만 추가한 변경. 앱이 뜨는지, DB·Redis에 붙는지는 실행으로 확인하고 결과를 PR의 test 절에 적는다.
   - 스케줄러가 실제로 도는지는 `./gradlew bootRun` 로그의 SQL로 확인한다(local 프로파일이 `org.hibernate.SQL: debug`라 0건 갱신도 찍힌다). `format_sql: true`라 SQL 한 문장이 여러 줄로 찍힌다. grep은 줄을 이어 붙인 뒤 하거나, 한 줄에 같이 찍히는 짧은 문자열로 찾는다. 로그는 세션 스크래치패드에 두고 확인 후 지운다(`.claude/rules/temp-files.md`).
+  - Windows에서 `bootRun` 출력을 파일로 받으면 콘솔 인코딩(CP949)으로 저장돼, 한글 문구로 grep하면 걸리지 않는다(SHI-181). 같은 줄에 찍히는 ASCII 문자열(`regionCode=11440` 등)로 찾는다.
 - 라이브러리 객체를 직접 만들어 검증하는 것(`new ObjectMapper()` 등). 앱이 실제로 쓰는 설정과 달라 통과해도 의미가 없다.
 - DTO 변환 메서드(`XxxResponse.from`)처럼 필드를 그대로 옮기는 코드. 변환 중 계산이나 분기가 들어가면 그때 테스트한다.
 - 커버리지 숫자를 목표로 삼지 않는다. 숫자를 채우려고 쓰는 테스트가 위 항목들이다.
@@ -49,6 +50,7 @@ paths:
   - 커밋한 행은 `@AfterEach`에서 그 테스트만 쓰는 id(무작위 개설자 id) 기준으로 지운다. DB를 모든 워크트리가 공유하므로 테이블 전체를 지우지 않는다.
     - FK가 있으므로 구성요소 테이블부터 지운다(`schedule_cancellations` → `schedule_participants` → `schedules`). 일정에 구성요소 테이블이 늘면 정리 쿼리에도 먼저 더한다.
   - 새 동시성 테스트는 이 중첩 클래스에 메서드로 더한다. DB 슬라이스 구성(`@Import` 조합)이 늘면 컨텍스트와 연결 풀이 늘어난다(위 DB 연결 수 항목).
+  - 세션 advisory lock(배치 실행 잠금)은 스레드 없이 연결 둘로 본다. 테스트 트랜잭션을 끄고(`NOT_SUPPORTED`), 테스트가 `DataSource`에서 따로 받은 연결로 같은 키를 잡은 채 adapter가 잠금을 못 얻는지, 풀면 얻는지, 작업이 예외를 던진 뒤 다른 연결이 잡을 수 있는지 본다. 해제 실패 분기는 `Connection`을 Mockito로 대신한다. 예: `PostgresPlaceImportLockAdapterTest`.
   - 간헐 실패를 sleep·재시도로 덮지 않는다. 잠금이 트랜잭션 안에 있는지, 판정보다 먼저인지, 그 행을 처음 읽는 조회에 걸렸는지부터 본다. 통과는 `cleanTest`로 여러 번 돌려 확인한다(SHI-171은 3회).
 - `@EnableJpaAuditing`은 `SnsgApplication`이 아니라 `common/config/JpaAuditingConfig`에 둔다. 메인 클래스에 붙이면 `@WebMvcTest`가 `jpaAuditingHandler`를 만들려다 "JPA metamodel must not be empty"로 실패한다.
 - 감사 필드를 검증하는 JPA 슬라이스 테스트는 `@Import`에 `JpaAuditingConfig`를 함께 넣는다.
@@ -63,8 +65,10 @@ paths:
   - 기준 시각을 과거 고정 값(예: `2020-01-01T12:00`)으로 넘기고 테스트 행의 시각을 그 근처에 둔다. 실제 개설 데이터(미래 시작)는 조건에 걸리지 않는다.
   - 바뀐 건수로 단정하지 않는다. 넣은 행의 id로 native SELECT해서 상태와 감사 컬럼(`updated_by`·`updated_at`·`created_by`·`created_at`)을 단정한다. 일괄 UPDATE 뒤 영속성 컨텍스트의 엔티티는 옛 값이라 엔티티로 다시 읽지 않는다.
   - 경계(기준 시각과 같음 → 바뀜, 1분 뒤 → 그대로), 대상이 아닌 행(취소·삭제·이미 목표 상태)의 감사 값 보존, 더 늦은 기준 시각으로 한 번 더 불러도 `updated_at`이 첫 값으로 남는지(멱등)를 본다.
-- 결과가 경고 로그로만 드러나는 분기는 `OutputCaptureExtension`(`org.springframework.boot.test.system`)으로 로그를 받아 단정한다. Mockito와 함께 쓸 때는 `@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})`. 예: `PlaceCommandServiceTest`.
+- 결과가 경고 로그로만 드러나는 분기는 `OutputCaptureExtension`(`org.springframework.boot.test.system`)으로 로그를 받아 단정한다. Mockito와 함께 쓸 때는 `@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})`. 예: `PlaceCommandServiceTest`, `ImportPlacesFacadeTest`(미완주 경고에 지역 코드와 이유가 있는지, 같은 응답으로 다시 적재하면 원천 변경 경고가 없는지).
 - 외부 API adapter는 슬라이스 없이 `MockRestServiceServer.bindTo(RestClient.Builder)`로 테스트한다.
+  - `bindTo`는 builder의 request factory를 목으로 바꾼다. 그 뒤에 request factory를 다시 걸면 목이 덮여 실제 네트워크로 나간다. 그래서 시간 초과를 거는 adapter는 완성된 `RestClient`를 주입받게 하고(`.claude/rules/package-structure.md` 외부 API 연동 절), 테스트는 `bindTo(builder)` 뒤 `builder.build()`를 넘긴다. 예: `SemasPlaceSourceAdapterTest`. 시간 초과 동작 자체는 라이브러리 동작이라 테스트하지 않는다.
+- 서버가 `LocalDateTime.now()`로 저장한 시각을 테스트가 잰 시각과 비교할 때는 테스트 쪽 값을 `truncatedTo(ChronoUnit.MICROS)`로 자른다. PostgreSQL `timestamp`는 마이크로초까지라, 같은 마이크로초 안에서 더 늦게 잰 값도 저장되면 더 작아 보인다. 예: `ImportPlacesFacadeTest.Stored`.
 - 파일 저장소 adapter는 Spring 없이 JUnit `@TempDir` 아래 디렉터리를 설정 record로 넘겨 실제 파일로 테스트한다. 예: `LocalFileStorageAdapterTest`(형식 밖 경로로 디렉터리 안팎의 파일이 지워지지 않는지).
 - Redis adapter는 `@SpringBootTest`로 `.env`가 가리키는 로컬 Redis(Docker 컨테이너 `snsg-redis`)에 붙어 실제로 테스트한다. Testcontainers 의존성은 저장소에 없다. 예: `RedisRefreshTokenStoreAdapterTest`, `RedisSignUpSessionAdapterTest`.
   - Redis가 꺼져 있으면 건너뛰지 않고 실패한다. 실패하면 코드보다 컨테이너가 떠 있는지 먼저 본다.

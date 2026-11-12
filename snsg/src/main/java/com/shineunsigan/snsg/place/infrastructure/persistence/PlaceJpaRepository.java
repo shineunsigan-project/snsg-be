@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -60,4 +61,13 @@ interface PlaceJpaRepository extends JpaRepository<Place, UUID> {
     @Query("select p.sourceRegionCode, count(p) " + OPEN_IN_SOURCE_REGIONS + " group by p.sourceRegionCode")
     List<Object[]> countOpenBySourceRegion(@Param("source") PlaceSource source,
             @Param("regionCodes") Collection<String> regionCodes);
+
+    /** JPA Auditing을 거치지 않으므로 updatedAt을 직접 넣는다. places에는 감사 주체 컬럼이 없다. */
+    @Modifying
+    @Query("""
+            update Place p set p.lastSyncedAt = :syncedAt, p.updatedAt = :syncedAt
+            where p.source = :source and p.sourceId in :sourceIds and p.isDeleted = false
+            """)
+    void markSynced(@Param("source") PlaceSource source, @Param("sourceIds") Collection<String> sourceIds,
+            @Param("syncedAt") LocalDateTime syncedAt);
 }
