@@ -98,6 +98,8 @@ place:
   type-keywords:
     BOARD_GAME_CAFE: [보드]
     ESCAPE_ROOM: [방탈출, 이스케이프, escape]
+  page-size-default: 20
+  page-size-max: 50
 
 public-data:
   api-key: ${DATA_GO_KR_API_KEY}

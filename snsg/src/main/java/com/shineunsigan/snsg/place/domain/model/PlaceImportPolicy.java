@@ -25,11 +25,11 @@ public class PlaceImportPolicy {
     private static final int NAME_MAX_LENGTH = 100;
     private static final int ADDRESS_MAX_LENGTH = 200;
     /** places 좌표 컬럼이 NUMERIC(10,7)이다. 더 긴 소수를 그대로 비교하면 다음 적재 때 원천이 바뀐 것으로 판정된다. */
-    private static final int COORDINATE_SCALE = 7;
-    private static final BigDecimal LATITUDE_MIN = new BigDecimal("33");
-    private static final BigDecimal LATITUDE_MAX = new BigDecimal("39");
-    private static final BigDecimal LONGITUDE_MIN = new BigDecimal("124");
-    private static final BigDecimal LONGITUDE_MAX = new BigDecimal("132");
+    static final int COORDINATE_SCALE = 7;
+    static final BigDecimal LATITUDE_MIN = new BigDecimal("33");
+    static final BigDecimal LATITUDE_MAX = new BigDecimal("39");
+    static final BigDecimal LONGITUDE_MIN = new BigDecimal("124");
+    static final BigDecimal LONGITUDE_MAX = new BigDecimal("132");
     private static final Pattern ABOVE_GROUND_FLOOR = Pattern.compile("\\d{1,3}");
     private static final Pattern UNDERGROUND_FLOOR = Pattern.compile("B(\\d{1,3})");
     private static final String UNDERGROUND = "지";
