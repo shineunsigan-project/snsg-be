@@ -49,6 +49,8 @@ file-storage:
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
+  # 어드민 경로(/api/admin/**)만 허용하는 출처. 사용자 앱 출처와 섞지 않는다. 비어 있으면 브라우저 호출을 모두 거부한다.
+  admin-allowed-origins: ${ADMIN_CORS_ALLOWED_ORIGINS:}
 
 terms:
   privacy-policy-version: 2026-10-01
@@ -70,6 +72,16 @@ auth:
   access-token-validity: 30m
   refresh-token-validity: 14d
   signup-session-ttl: 15m
+
+# 어드민 토큰 서명 키. JWT_SECRET과 다른 값이어야 한다.
+admin-jwt:
+  secret: ${ADMIN_JWT_SECRET}
+
+admin:
+  access-token-validity: 30m
+  refresh-token-validity: 12h
+  login-max-failures: 5
+  login-lock-duration: 15m
 
 place:
   close-max-ratio: 0.3
@@ -103,3 +115,12 @@ schedule:
 
 scheduling:
   enabled: true
+
+# 서버가 내주는 문서에 어드민 경로가 나오지 않게 한다. 그룹 없는 스펙(/v3/api-docs, /v3/api-docs.yaml)을 거른다.
+springdoc:
+  paths-to-exclude: /api/admin/**
+
+# 어드민 스펙 그룹. 어느 프로파일에서도 켜지 않는다. docs/openapi-admin.yaml을 만드는 OpenApiSpecTest만 켠다.
+# @ConditionalOnProperty가 읽는 값이라 설정 record에 두지 않는다.
+openapi:
+  admin-group-enabled: false

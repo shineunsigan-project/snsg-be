@@ -4,6 +4,7 @@
 
 - **엔드포인트별 요청·응답·에러 코드**: `docs/openapi.yaml`. 코드에서 생성한다.
 - **여러 호출에 걸친 흐름과 공통 규칙**: 이 문서. OpenAPI로는 표현할 수 없는 것만 적는다.
+- **어드민(운영 도구) API**: 이 문서와 `docs/openapi.yaml`에는 없다. `docs/admin-api-guide.md`와 `docs/openapi-admin.yaml`을 본다.
 
 `docs/openapi.yaml`은 `OpenApiSpecTest`가 코드와 대조한다. 코드와 다르면 빌드가 실패하므로 **스펙이 코드보다 뒤처지지 않는다.** 이 문서는 빌드가 잡아주지 않으니 사람이 챙긴다.
 
