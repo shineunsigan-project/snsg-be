@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,6 +15,8 @@ import org.springframework.data.repository.query.Param;
 import com.shineunsigan.snsg.place.domain.constants.PlaceSource;
 import com.shineunsigan.snsg.place.domain.constants.PlaceType;
 import com.shineunsigan.snsg.place.domain.model.Place;
+
+import jakarta.persistence.LockModeType;
 
 interface PlaceJpaRepository extends JpaRepository<Place, UUID> {
 
@@ -51,9 +54,22 @@ interface PlaceJpaRepository extends JpaRepository<Place, UUID> {
     List<Place> findAllExposedInRegions(@Param("placeType") PlaceType placeType,
             @Param("regionCodes") Collection<String> regionCodes);
 
+    /** 내장 findById는 삭제된 행도 주므로 이름을 달리한다. */
+    @Query("select p from Place p where p.id = :id and p.isDeleted = false")
+    Optional<Place> findNotDeletedById(@Param("id") UUID id);
+
+    /** 장소 행 하나만 잠근다. 장소에는 연관이 없다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Place p where p.id = :id and p.isDeleted = false")
+    Optional<Place> findByIdForUpdate(@Param("id") UUID id);
+
+    /** 적재가 갱신할 기존 행을 잠근다. 어드민 수정과 겹쳐도 서로의 변경을 덮지 않는다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from Place p where p.sourceId in :sourceIds and p.isDeleted = false")
     List<Place> findAllBySourceIds(@Param("sourceIds") Collection<String> sourceIds);
 
+    /** 폐업 처리할 행을 잠근다. 어드민 수정과 겹쳐도 서로의 변경을 덮지 않는다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p " + OPEN_IN_SOURCE_REGIONS + " and p.lastSyncedAt < :before")
     List<Place> findAllCloseTargets(@Param("source") PlaceSource source,
             @Param("regionCodes") Collection<String> regionCodes, @Param("before") LocalDateTime before);
@@ -62,12 +78,15 @@ interface PlaceJpaRepository extends JpaRepository<Place, UUID> {
     List<Object[]> countOpenBySourceRegion(@Param("source") PlaceSource source,
             @Param("regionCodes") Collection<String> regionCodes);
 
-    /** JPA Auditing을 거치지 않으므로 updatedAt을 직접 넣는다. places에는 감사 주체 컬럼이 없다. */
+    /**
+     * JPA Auditing을 거치지 않으므로 updatedAt·updatedBy를 직접 넣는다. 검수자·검수 시각(reviewed*)은 건드리지 않는다.
+     * 컬럼 단위 UPDATE라 어드민 수정이 행을 잠그고 있으면 커밋을 기다렸다가 그 결과 위에 이 값들만 쓴다.
+     */
     @Modifying
     @Query("""
-            update Place p set p.lastSyncedAt = :syncedAt, p.updatedAt = :syncedAt
+            update Place p set p.lastSyncedAt = :syncedAt, p.updatedAt = :syncedAt, p.updatedBy = :updatedBy
             where p.source = :source and p.sourceId in :sourceIds and p.isDeleted = false
             """)
     void markSynced(@Param("source") PlaceSource source, @Param("sourceIds") Collection<String> sourceIds,
-            @Param("syncedAt") LocalDateTime syncedAt);
+            @Param("syncedAt") LocalDateTime syncedAt, @Param("updatedBy") String updatedBy);
 }

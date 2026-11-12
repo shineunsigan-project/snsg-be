@@ -1,6 +1,6 @@
 # SNSG 어드민 API 가이드
 
-운영 도구(어드민 앱)를 만드는 데 필요한 것을 모았다. 이 문서와 어드민 스펙만 보고 로그인·가입·재발급·로그아웃·내 정보 화면을 만들 수 있게 하는 게 목표다.
+운영 도구(어드민 앱)를 만드는 데 필요한 것을 모았다. 이 문서와 어드민 스펙만 보고 로그인·가입·재발급·로그아웃·내 정보·가입 승인 관리·장소 검수 화면을 만들 수 있게 하는 게 목표다.
 
 - **엔드포인트별 요청·응답·에러 코드**: `docs/openapi-admin.yaml`. 코드에서 생성하고 `OpenApiSpecTest`가 코드와 대조한다.
 - **어드민 API 스펙은 서버 swagger에 나오지 않고 저장소 `docs/openapi-admin.yaml`로만 본다.** 일반 사용자가 어드민 정보를 볼 수 없도록 서버의 swagger-ui와 스펙 경로(`/v3/api-docs` 등)에는 어드민 경로가 없다. Swagger Editor·Postman 등에 이 파일을 넣어 본다.
@@ -255,6 +255,226 @@ MASTER가 가입 신청을 승인·거절하고, 승인된 어드민의 이용�
 
 비밀번호와 누가 처리했는지는 응답에 없다.
 
+## 장소 검수
+
+공공데이터(상가정보)에서 분기마다 적재한 장소를 어드민이 검수·수정하고, 공공데이터에 없는 장소를 직접 등록한다. 사용자 앱의 일정 개설에서 고르는 장소가 여기서 정해진다.
+
+- **승인된 어드민이면 역할과 관계없이(ADMIN·MASTER) 모두 쓴다.** MASTER 전용이 아니다.
+- 모두 access token이 필요하다. 토큰이 없거나 사용자 앱 토큰이거나 승인 상태가 아닌 계정이면 401 `UNAUTHENTICATED`다.
+
+| 메서드·경로 | 하는 일 | 성공 |
+| --- | --- | --- |
+| `GET /api/admin/v1/places?regionCode=&status=&placeType=&source=&closed=&keyword=&cursor=&size=` | 장소 목록 | 200, `data`는 `{ items, nextCursor }` |
+| `GET /api/admin/v1/places/{placeId}` | 장소 상세 | 200, `data`는 장소 하나 |
+| `PUT /api/admin/v1/places/{placeId}` | 장소 수정(검수) | 200, `data`는 수정된 장소 |
+| `POST /api/admin/v1/places` | MANUAL 장소 등록 | **201**, `data`는 등록된 장소 |
+| `GET /api/admin/v1/regions` | 지역 전체(비활성 포함) | 200, `data`는 지역 배열 |
+
+`placeId`는 목록 항목의 `id`다.
+
+### 장소가 사용자에게 보이는 조건
+
+아래를 **모두** 만족할 때만 사용자 앱(장소 후보·일정 개설)에 나온다.
+
+1. `status`가 `APPROVED`
+2. `isClosed`가 `false`
+3. `placeType`이 `UNCLASSIFIED`가 아님(승인할 때 이미 막힌다)
+4. `regionCode`의 지역이 활성(`GET /api/admin/v1/regions`의 `isActive`가 `true`)
+
+- **폐업 장소를 승인해도 다시 확인되기 전까지 노출되지 않는다.** `isClosed`는 적재만 바꾼다. 다음 적재에서 원천에 다시 나오면 `false`로 돌아가 그때 노출된다. 어드민은 `isClosed`를 바꿀 수 없다.
+- **노출을 중단하면(거절로 바꾸면) 새 일정 개설에서 그 장소를 고를 수 없다.** 이미 열린 일정은 영향이 없다. 일정은 개설할 때 장소의 이름·주소·좌표를 사본으로 저장하므로, 장소를 고치거나 거절해도 열린 일정의 장소 표시는 그대로다.
+
+### 상태와 값
+
+| `status` | 뜻 | 화면 표시 |
+| --- | --- | --- |
+| `CANDIDATE` | 검수 대기. 적재가 새로 찾은 장소 | 검수 대기 |
+| `APPROVED` | 승인. 위 조건을 만족하면 노출 | 승인 |
+| `REJECTED` | 거절. 노출하지 않는다. 적재가 다시 후보로 돌리지 않는다(영구 제외) | 거절 |
+
+| `placeType` | 화면 이름 |
+| --- | --- |
+| `BOARD_GAME_CAFE` | 보드게임 카페 |
+| `ESCAPE_ROOM` | 방탈출 |
+| `PARK` | 공원 |
+| `UNCLASSIFIED` | 유형 미정. 적재가 유형을 정하지 못한 후보. 승인할 수 없다(거절은 된다) |
+
+| `source` | 뜻 |
+| --- | --- |
+| `SEMAS` | 소상공인 상가정보 적재 |
+| `PARK_STANDARD` | 공원 표준데이터 적재(아직 적재하지 않는다) |
+| `MANUAL` | 어드민이 직접 등록. 적재가 바꾸거나 폐업 처리하지 않는다 |
+
+**화면 값과 원천 값.** 장소에는 사용자에게 보이는 **화면 값**(`name`, `roadAddress`, `addressDetail`, `latitude`, `longitude`, `regionCode`)과 마지막 적재에서 받은 **원천 값**(`sourceName`, `sourceRoadAddress`, `sourceAddressDetail`, `sourceLatitude`, `sourceLongitude`, `sourceRegionCode`)이 따로 있다.
+
+- 원천 값은 적재가 확인할 때마다 원천 응답으로 바뀐다. 어드민은 바꿀 수 없다.
+- 화면 값은 검수 대기(`CANDIDATE`)일 때만 적재가 원천 값으로 덮는다. **한 번 승인·거절하면 적재가 화면 값을 덮지 않는다.** 어드민이 고친 이름·주소가 그대로 남는다.
+- 화면에서 두 값을 나란히 보여주면, 승인 뒤 원천의 이름·주소가 바뀌었는지(이전·상호 변경) 비교할 수 있다. 원천 변경 경고는 API로 주지 않는다.
+
+### 감사 값
+
+| 필드 | 뜻 |
+| --- | --- |
+| `createdBy` | 행을 만든 주체. 어드민 id(MANUAL 등록), `SYSTEM_SCHEDULER`(적재가 찾은 후보), `SYSTEM`(그 밖. 이 기능 전에 마이그레이션으로 넣은 장소 등) |
+| `updatedBy` | 마지막으로 바꾼 주체. 같은 값 종류. **적재가 확인할 때마다 `SYSTEM_SCHEDULER`로 덮는다.** 그래서 누가 검수했는지는 이 값으로 보지 않는다 |
+| `reviewedBy` | 마지막으로 수정·등록한 어드민 id. **적재는 바꾸지 않는다.** API로 검수한 적 없으면 빈 문자열 |
+| `reviewedAt` | 마지막으로 수정·등록한 일시. 적재는 바꾸지 않는다. API로 검수한 적 없으면 `null` |
+
+- 어드민 id는 이름으로 풀어주지 않는다. 화면에 이름을 보이려면 MASTER의 어드민 목록(`GET /api/admin/v1/admins`)의 `id`와 맞춰 본다(MASTER만 부를 수 있다). ADMIN 화면에서는 id를 그대로 보이거나 감춘다.
+- 이 기능 전에 DB로 검수한 장소는 `reviewedBy`가 빈 문자열, `reviewedAt`이 `null`이다.
+
+### 목록
+
+`GET /api/admin/v1/places`
+
+| 파라미터 | 필수 | 뜻 |
+| --- | --- | --- |
+| `regionCode` | 아니오 | 이 **화면** 지역 코드의 장소만. 없는 코드면 빈 결과(오류 아님). 생략하거나 비우면 모든 지역 |
+| `status` | 아니오 | `CANDIDATE`·`APPROVED`·`REJECTED` 중 하나 |
+| `placeType` | 아니오 | `BOARD_GAME_CAFE`·`ESCAPE_ROOM`·`PARK`·`UNCLASSIFIED` 중 하나 |
+| `source` | 아니오 | `SEMAS`·`PARK_STANDARD`·`MANUAL` 중 하나 |
+| `closed` | 아니오 | `true`면 폐업 장소만, `false`면 폐업이 아닌 장소만 |
+| `keyword` | 아니오 | 장소명·도로명 주소·원천 이름·원천 도로명 주소 중 하나에 이 글자가 들어 있는 장소. 영문 대소문자는 가리지 않는다. `%`·`_`도 글자 그대로 찾는다(와일드카드 아님). 앞뒤 공백은 뺀다. 비었거나 공백뿐이면 걸지 않는다 |
+| `cursor` | 아니오 | 이전 응답의 `nextCursor`를 그대로. 해석할 수 없으면 400 `INVALID_CURSOR` |
+| `size` | 아니오 | 한 페이지 개수. 생략하면 20, 50보다 크면 50, 1보다 작으면 1로 맞춘다(오류가 아니다) |
+
+- 필터는 모두 선택이고 **값 하나씩만** 받는다. 여러 필터를 주면 모두 맞는 장소만 준다(AND).
+- 노출 여부와 상관없이 모든 장소를 준다(검수 대기·거절·폐업·MANUAL·비활성 지역 포함).
+- `status`·`placeType`·`source`에 목록 밖 값을 보내거나 `closed`가 `true`·`false`가 아니면 400 `INVALID_REQUEST`다(`errors` 없음).
+- 정렬은 만든 일시(`createdAt`)가 빠른 순, 같으면 `id` 순이다.
+- 더 있으면 `nextCursor`를 준다. 다음 페이지는 **같은 필터에** `cursor=nextCursor`를 붙여 부른다. 필터를 바꾸면 `cursor` 없이 처음부터 부른다. 마지막 페이지면 `nextCursor`는 `null`이다.
+- 맞는 장소가 없으면 200에 `items = []`, `nextCursor = null`이다.
+
+자주 쓰는 조합
+
+| 화면 | 쿼리 |
+| --- | --- |
+| 검수 대기 | `status=CANDIDATE` |
+| 유형을 정해야 하는 후보 | `status=CANDIDATE&placeType=UNCLASSIFIED` |
+| 폐업된 승인 장소 | `status=APPROVED&closed=true` |
+| 직접 등록한 장소 | `source=MANUAL` |
+| 주소로 찾기 | `keyword=와우산로` |
+
+응답 예시. 첫 항목은 적재한 장소를 어드민이 승인한 것, 둘째는 MANUAL로 등록한 것이다.
+
+```json
+{ "isSuccess": true,
+  "data": {
+    "items": [
+      { "id": "01a1a2b3-0000-7000-8000-000000000001", "placeType": "ESCAPE_ROOM", "status": "APPROVED",
+        "name": "키이스케이프 홍대점", "roadAddress": "서울특별시 마포구 와우산로 1", "addressDetail": "3층",
+        "latitude": 37.5512345, "longitude": 126.9212345, "regionCode": "11440",
+        "isClosed": false, "source": "SEMAS", "sourceId": "MA010120220800001234",
+        "sourceName": "키이스케이프", "sourceRoadAddress": "서울특별시 마포구 와우산로 1", "sourceAddressDetail": "3층",
+        "sourceLatitude": 37.5512345, "sourceLongitude": 126.9212345, "sourceRegionCode": "11440",
+        "lastSyncedAt": "2026-12-01T03:12:45",
+        "createdAt": "2026-11-02T10:15:30", "createdBy": "SYSTEM_SCHEDULER",
+        "updatedAt": "2026-12-01T03:12:45", "updatedBy": "SYSTEM_SCHEDULER",
+        "reviewedBy": "0192f3a4-5b6c-7d8e-9f01-23456789abcd", "reviewedAt": "2026-11-13T14:20:00" },
+      { "id": "01a1a2b3-0000-7000-8000-000000000002", "placeType": "BOARD_GAME_CAFE", "status": "APPROVED",
+        "name": "레드버튼 신촌점", "roadAddress": "서울특별시 서대문구 연세로 1", "addressDetail": "2층",
+        "latitude": 37.5571234, "longitude": 126.9361234, "regionCode": "11410",
+        "isClosed": false, "source": "MANUAL", "sourceId": "",
+        "sourceName": "", "sourceRoadAddress": "", "sourceAddressDetail": "",
+        "sourceLatitude": 0, "sourceLongitude": 0, "sourceRegionCode": "",
+        "lastSyncedAt": "2026-11-13T14:25:00",
+        "createdAt": "2026-11-13T14:25:00", "createdBy": "0192f3a4-5b6c-7d8e-9f01-23456789abcd",
+        "updatedAt": "2026-11-13T14:25:00", "updatedBy": "0192f3a4-5b6c-7d8e-9f01-23456789abcd",
+        "reviewedBy": "0192f3a4-5b6c-7d8e-9f01-23456789abcd", "reviewedAt": "2026-11-13T14:25:00" }
+    ],
+    "nextCursor": null } }
+```
+
+| 필드 | 뜻 |
+| --- | --- |
+| `id` | 장소 id. 상세·수정 경로의 `placeId` |
+| `placeType`, `status` | 위 표 |
+| `name`, `roadAddress`, `addressDetail` | 화면 값. 사용자에게 보이는 장소명·도로명 주소·상세주소(층 등. 없으면 빈 문자열) |
+| `latitude`, `longitude` | 화면 값. 좌표(소수 7자리까지). 지도 핀 위치 |
+| `regionCode` | 화면 값. 지역 코드(시군구 5자리). 지역 이름은 `GET /api/admin/v1/regions`의 `code`와 맞춰 그린다 |
+| `isClosed` | 폐업 여부. 적재가 원천에서 찾지 못하면 `true`, 다시 찾으면 `false` |
+| `source`, `sourceId` | 원천과 원천의 식별자(상가업소번호). MANUAL이면 `sourceId`는 빈 문자열 |
+| `sourceName` ~ `sourceRegionCode` | 원천 값. MANUAL이면 문자열은 빈 문자열, 좌표는 `0` |
+| `lastSyncedAt` | 원천에서 마지막으로 확인한 일시. MANUAL이면 등록 일시 |
+| `createdAt`, `createdBy`, `updatedAt`, `updatedBy`, `reviewedBy`, `reviewedAt` | 위 감사 값 표. `reviewedAt`만 `null`이 될 수 있다 |
+
+일시는 모두 한국 시간, 오프셋 없는 ISO-8601이다.
+
+### 상세
+
+`GET /api/admin/v1/places/{placeId}`. 목록 항목과 같은 필드다. 수정 화면을 열 때 지금 값을 다시 받아 채운다. 없는 장소면 404 `PLACE_NOT_FOUND`.
+
+### 수정(검수)
+
+`PUT /api/admin/v1/places/{placeId}`. 유형·검수 상태·화면 값을 **모두** 보낸다. 부분 수정은 없다. 수정 화면은 상세의 지금 값으로 채운 뒤 바꾼 칸만 고쳐 전체를 보낸다.
+
+```json
+{ "placeType": "ESCAPE_ROOM", "status": "APPROVED", "name": "키이스케이프 홍대점",
+  "roadAddress": "서울특별시 마포구 와우산로 1", "addressDetail": "3층",
+  "latitude": 37.5512345, "longitude": 126.9212345, "regionCode": "11440" }
+```
+
+| 필드 | 필수 | 규칙 | 틀렸을 때 |
+| --- | --- | --- | --- |
+| `placeType` | 예 | 위 유형 중 하나. `UNCLASSIFIED`는 `REJECTED`와만 함께 보낼 수 있다 | 빠짐: `errors` "장소 유형을 골라주세요." / `UNCLASSIFIED`로 승인: 400 `UNCLASSIFIED_NOT_APPROVABLE` |
+| `status` | 예 | `APPROVED` 또는 `REJECTED`만 | 빠짐: `errors` / `CANDIDATE`: 400 `INVALID_REVIEW_STATUS` |
+| `name` | 예 | 앞뒤 공백을 뺀 길이로 1~100자 | `errors` "장소명은 1~100자로 적어주세요." |
+| `roadAddress` | 예 | 앞뒤 공백을 뺀 길이로 1~200자 | `errors` "도로명 주소는 1~200자로 적어주세요." |
+| `addressDetail` | 예 | 앞뒤 공백을 뺀 길이로 0~100자. 없으면 빈 문자열 `""`(생략·`null` 불가) | `errors` "상세주소는 100자 이내로 적어주세요." |
+| `latitude` | 예 | 33~39(경계 포함). 소수 8자리부터는 7자리로 반올림해 저장 | `errors` "위도는 33~39 사이로 적어주세요." |
+| `longitude` | 예 | 124~132(경계 포함). 소수 8자리부터는 7자리로 반올림해 저장 | `errors` "경도는 124~132 사이로 적어주세요." |
+| `regionCode` | 예 | `GET /api/admin/v1/regions`의 `code`. **비활성 지역도 된다**(노출만 되지 않는다) | 빈 값: `errors` / 목록에 없는 코드: 400 `INVALID_REGION` |
+
+- 이름·주소는 앞뒤 공백을 뺀 값으로 저장된다.
+- **원천 값(`source*`), 폐업 여부(`isClosed`), 마지막 확인 일시(`lastSyncedAt`), 원천(`source`)은 바꿀 수 없다.** 보내도 받지 않는다. 폐업한 장소도 고칠 수 있다.
+- 성공하면 `reviewedBy`가 요청한 어드민 id, `reviewedAt`이 지금, `updatedBy`도 요청한 어드민 id가 된다(다음 적재 확인 때 `updatedBy`만 `SYSTEM_SCHEDULER`로 바뀐다).
+- 같은 요청을 다시 보내도 결과는 같다(`reviewedAt`·`updatedAt`만 바뀐다).
+- **다른 어드민과 같은 장소를 동시에 고치면 나중에 처리된 요청이 남는다.** 충돌을 알려주지 않는다. 앞 사람의 수정은 덮인다.
+- 분기 적재가 도는 중에 같은 장소를 고쳐도 서로 덮지 않는다. 한쪽이 먼저 끝난 뒤 다른 쪽이 그 결과 위에 자기 변경을 쓴다. 어드민의 검수 결과(유형·상태·화면 값)는 항상 남고, 적재가 확인한 원천 값도 남는다.
+  - 예외: 폐업 처리는 검수 대기·승인 장소만 대상으로 한다. 어드민이 `REJECTED`로 바꾸는 것과 폐업 처리가 겹치면 최종 `isClosed`는 처리 순서에 따라 다르다. 거절이 먼저 끝나면 그 장소는 폐업 대상에서 빠져 `isClosed`가 그대로이고, 폐업 처리가 먼저 끝나면 `true`가 된다. 거절된 장소는 어느 쪽이든 노출되지 않으므로 화면에 미치는 영향은 없다.
+- 여러 조건에 걸리면 `PLACE_NOT_FOUND`(404) → `INVALID_REGION` → `INVALID_REVIEW_STATUS` → `UNCLASSIFIED_NOT_APPROVABLE` 순서로 앞의 것이 온다. 필드 형식 오류(`errors`)는 이보다 먼저다.
+
+### MANUAL 등록
+
+`POST /api/admin/v1/places`. 공공데이터에 없는 장소를 직접 등록한다. 본문은 수정에서 `status`를 뺀 것이고 필드 규칙도 같다.
+
+```json
+{ "placeType": "BOARD_GAME_CAFE", "name": "레드버튼 신촌점",
+  "roadAddress": "서울특별시 서대문구 연세로 1", "addressDetail": "2층",
+  "latitude": 37.5571234, "longitude": 126.9361234, "regionCode": "11410" }
+```
+
+- **등록하면 바로 승인(`APPROVED`)이다.** 지역이 활성이면 바로 사용자에게 노출된다. 그래서 `placeType`에 `UNCLASSIFIED`를 보내면 400 `UNCLASSIFIED_NOT_APPROVABLE`이다.
+- `source`는 `MANUAL`, `isClosed`는 `false`, `sourceId`와 원천 문자열은 빈 문자열, 원천 좌표는 `0`, `lastSyncedAt`은 등록 일시다. `createdBy`·`updatedBy`·`reviewedBy`가 요청한 어드민 id다.
+- 적재는 MANUAL 장소를 바꾸거나 폐업 처리하지 않는다. 운영을 멈추면 수정으로 `REJECTED`로 바꾼다. 삭제 API는 없다.
+- **같은 요청을 두 번 보내면 장소가 두 개 생긴다.** 응답이 올 때까지 버튼을 막는다. 잘못 만든 장소는 `REJECTED`로 바꾼다.
+- 여러 조건에 걸리면 `INVALID_REGION` → `UNCLASSIFIED_NOT_APPROVABLE` 순서로 앞의 것이 온다.
+
+### 지역 전체
+
+`GET /api/admin/v1/regions`. 장소 목록의 지역 필터, 수정·등록의 지역 선택, `regionCode`를 지역 이름으로 바꿀 때 쓴다. 어드민 앱은 사용자 지역 목록(`GET /api/v1/regions`)을 부를 수 없으므로(출처가 다르다) 이것을 쓴다.
+
+```json
+{ "isSuccess": true,
+  "data": [
+    { "code": "11440", "sidoName": "서울특별시", "sigunguName": "마포구", "isActive": true },
+    { "code": "11410", "sidoName": "서울특별시", "sigunguName": "서대문구", "isActive": true } ] }
+```
+
+- 서비스하지 않는(비활성) 지역까지 **모두** 준다. 노출 순서(display_order)대로다. `isActive`가 `false`인 지역의 장소는 승인해도 노출되지 않는다. 화면에서 "서비스 안 함"으로 구분해 보인다.
+- `code`는 5자리 문자열이다(숫자로 바꾸지 않는다).
+
+### 폐업한 승인 장소를 새 후보로 옮기기
+
+가게가 이전하거나 원천의 상가업소번호가 바뀌면, 적재는 기존 승인 장소를 폐업(`isClosed = true`)으로 돌리고 같은 가게를 새 검수 대기 후보로 만든다. 전용 API는 없고 목록과 수정 두 번으로 처리한다. 자동으로 옮기지 않는다.
+
+1. 폐업된 승인 장소를 찾는다: `GET /api/admin/v1/places?status=APPROVED&closed=true`
+2. 그 장소의 도로명 주소나 이름으로 새 후보를 찾는다: `GET /api/admin/v1/places?status=CANDIDATE&keyword={도로명 주소 일부}`. `keyword`는 원천 이름·원천 도로명 주소에도 걸리므로 후보의 원천 값으로도 찾힌다.
+3. 새 후보에 `PUT`으로 기존 장소의 검수 결과(유형·`APPROVED`·고친 이름·주소·좌표·지역)를 옮긴다.
+4. 기존 장소는 `PUT`으로 `REJECTED`로 바꾼다. 이미 열린 일정은 장소 사본을 갖고 있어 영향이 없다.
+
+MANUAL로 등록한 장소가 나중에 적재로 새 후보로 잡히면, 같은 장소가 둘이 된다. 둘 중 하나를 `REJECTED`로 바꾼다.
+
 ## 에러 코드
 
 | HTTP | code | 언제 | 화면에서 할 일 |
@@ -274,6 +494,13 @@ MASTER가 가입 신청을 승인·거절하고, 승인된 어드민의 이용�
 | 404 | `ADMIN_NOT_FOUND` | 승인·거절·이용 중지·해제: 대상이 없거나 삭제됨 | 목록을 다시 불러 그린다 |
 | 403 | `MASTER_NOT_MODIFIABLE` | 승인·거절·이용 중지·해제: 대상이 MASTER(자기 자신 포함) | `message`를 보여준다. MASTER 행에는 버튼을 그리지 않는다 |
 | 409 | `ADMIN_STATUS_CONFLICT` | 승인·거절·이용 중지·해제: 대상의 지금 상태에서 할 수 없는 동작(이미 처리됨, 다른 MASTER가 먼저 처리함 포함) | 목록을 다시 불러 지금 상태를 그린다 |
+| 400 | `INVALID_REQUEST` | 장소 수정·등록: 필드 형식 오류(`errors` 있음) | `errors[].message`를 그 입력칸 아래에 보여준다 |
+| 400 | `INVALID_REQUEST` | 장소: 본문 없음·잘못된 JSON·목록 밖 `placeType`·`status`·숫자가 아닌 좌표, 경로의 `placeId`가 UUID가 아님, 목록의 `status`·`placeType`·`source`가 목록 밖·`closed`가 `true`·`false`가 아님·`size`가 숫자가 아님(`errors` 없음) | 정상 화면 흐름에서는 나지 않는다. `message`를 보여준다 |
+| 400 | `INVALID_CURSOR` | 장소 목록: 해석할 수 없는 `cursor` | `cursor` 없이 처음부터 다시 부른다 |
+| 400 | `INVALID_REGION` | 장소 수정·등록: `regionCode`가 지역 전체 목록에 없음 | 지역을 다시 고르게 한다. 지역 목록을 다시 불러 그린다 |
+| 400 | `INVALID_REVIEW_STATUS` | 장소 수정: `status`가 `CANDIDATE` | 승인·거절 중에서 고르게 한다. 화면에서 검수 대기를 선택지로 두지 않는다 |
+| 400 | `UNCLASSIFIED_NOT_APPROVABLE` | 장소 수정: `UNCLASSIFIED`로 승인. 등록: `placeType`이 `UNCLASSIFIED` | 유형을 고르게 한다 |
+| 404 | `PLACE_NOT_FOUND` | 장소 상세·수정: 없는 장소 | 목록을 다시 불러 그린다 |
 | 500 | `INTERNAL_ERROR` | 서버 오류 | 잠시 후 다시 시도 안내 |
 
 예시
@@ -291,6 +518,12 @@ MASTER가 가입 신청을 승인·거절하고, 승인된 어드민의 이용�
 { "isSuccess": false, "code": "MASTER_NOT_MODIFIABLE", "message": "MASTER 계정은 승인·거절·이용 중지할 수 없어요." }
 { "isSuccess": false, "code": "ADMIN_STATUS_CONFLICT", "message": "지금 상태에서는 할 수 없어요. 목록을 새로 불러 상태를 확인해주세요." }
 { "isSuccess": false, "code": "INVALID_ADMIN_REFRESH_TOKEN", "message": "다시 로그인해야 합니다." }
+{ "isSuccess": false, "code": "INVALID_REQUEST", "message": "요청 형식이 올바르지 않습니다.",
+  "errors": [ { "field": "name", "message": "장소명은 1~100자로 적어주세요." } ] }
+{ "isSuccess": false, "code": "INVALID_REGION", "message": "선택할 수 없는 지역이에요. 지역을 다시 골라주세요." }
+{ "isSuccess": false, "code": "INVALID_REVIEW_STATUS", "message": "검수 상태는 승인 또는 거절만 고를 수 있어요." }
+{ "isSuccess": false, "code": "UNCLASSIFIED_NOT_APPROVABLE", "message": "유형을 정하지 않은 장소는 승인할 수 없어요. 유형을 골라주세요." }
+{ "isSuccess": false, "code": "PLACE_NOT_FOUND", "message": "찾을 수 없는 장소예요." }
 { "isSuccess": false, "code": "UNAUTHENTICATED", "message": "로그인이 필요합니다." }
 ```
 
@@ -308,8 +541,11 @@ MASTER가 가입 신청을 승인·거절하고, 승인된 어드민의 이용�
 | 가입 승인 관리 [거절] | `POST /api/admin/v1/admins/{adminId}/rejection` | 되돌릴 수 없으므로 확인 팝업을 띄운 뒤 부른다. 이후 처리는 [승인]과 같다 | [승인]과 같다 |
 | 가입 승인 관리 [이용 중지] | `POST /api/admin/v1/admins/{adminId}/suspension` | 확인 팝업 뒤 부른다. 이후 처리는 [승인]과 같다. 500이면 목록을 다시 불러 상태를 확인한다 | [승인]과 같다 |
 | 가입 승인 관리 [이용 중지 해제] | `DELETE /api/admin/v1/admins/{adminId}/suspension` | 이후 처리는 [승인]과 같다 | [승인]과 같다 |
-
-장소 수정 같은 데이터 수정 API는 그 뒤에 `/api/admin/v1` 아래에 생긴다. 생기면 이 문서와 `docs/openapi-admin.yaml`에 추가한다.
+| 장소 검수 (진입) | `GET /api/admin/v1/regions`, `GET /api/admin/v1/places?…` | 지역 목록으로 지역 필터와 지역 이름을 그린다. 장소 행마다 상태·유형·폐업·화면 값과 원천 값을 그린다. `nextCursor`가 있으면 더 보기에서 같은 필터에 `cursor`를 붙여 부른다 | 된다(조회만 한다) |
+| 장소 검수 (필터 변경) | `GET /api/admin/v1/places?…` | `cursor` 없이 처음부터 부른다. 400 `INVALID_CURSOR`면 `cursor` 없이 다시 부른다 | 된다(조회만 한다) |
+| 장소 수정 화면 열기 | `GET /api/admin/v1/places/{placeId}` | 지금 값으로 폼을 채운다. 404 `PLACE_NOT_FOUND`면 목록을 다시 부른다 | 된다(조회만 한다) |
+| 장소 수정 [저장]·[승인]·[거절] | `PUT /api/admin/v1/places/{placeId}` | 200이면 응답의 장소로 행을 바꿔 그린다. 400은 `errors`가 있으면 필드별 문구, 없으면 에러 표대로. 404면 목록을 다시 부른다 | 된다(같은 결과). 다른 어드민과 동시에 고치면 나중 요청이 남는다 |
+| 장소 등록 [등록] | `POST /api/admin/v1/places` | 201이면 목록을 다시 부르거나 응답의 장소를 목록에 더한다. 400은 수정과 같다 | **안 된다.** 두 번 보내면 장소가 둘 생긴다. 응답 전까지 버튼을 막는다 |
 
 ## 로컬 개발
 

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,11 +26,13 @@ import com.shineunsigan.snsg.place.domain.constants.PlaceSource;
 import com.shineunsigan.snsg.place.domain.constants.PlaceStatus;
 import com.shineunsigan.snsg.place.domain.constants.PlaceType;
 import com.shineunsigan.snsg.place.domain.model.Place;
+import com.shineunsigan.snsg.place.domain.model.PlaceCursor;
+import com.shineunsigan.snsg.place.domain.model.PlaceSearchCondition;
 
 import jakarta.persistence.EntityManager;
 
 /**
- * 노출 조건·정렬, 폐업 처리 대상 선택, DB 제약을 실제 PostgreSQL에서 검증한다.
+ * 노출 조건·정렬, 폐업 처리 대상 선택, 어드민 목록(필터·키워드·커서), DB 제약을 실제 PostgreSQL에서 검증한다.
  * <p>
  * 마이그레이션의 초기 장소(활성 지역 11440·11410·11200)와 섞이지 않도록 테스트용 지역 99001(활성)·99003(활성)·
  * 99002(비활성)을 넣고, 장소도 그 지역에만 넣는다. 목록 단정은 테스트 지역 행으로 거른 결과에 한다.
@@ -262,6 +265,131 @@ class PlaceRepositoryImplTest {
         assertThat(count.longValue()).isEqualTo(2);
     }
 
+    // 어드민 목록. 공유 DB의 다른 행과 섞이지 않게 테스트마다 다른 키워드를 이름에 넣고 그 키워드로 함께 거른다.
+
+    private static String token() {
+        return "tok" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+    }
+
+    private List<UUID> findForReview(String regionCode, PlaceStatus status, PlaceType placeType, PlaceSource source,
+            Boolean closed, String keyword) {
+        return placeRepository.findAllForReview(
+                        PlaceSearchCondition.of(regionCode, status, placeType, source, closed, keyword), null, 100)
+                .stream().map(Place::getId).toList();
+    }
+
+    private List<UUID> findByKeyword(String keyword) {
+        return findForReview(null, null, null, null, null, keyword);
+    }
+
+    @Test
+    @DisplayName("어드민 목록은 노출 여부와 상관없이 삭제되지 않은 장소를 모두 준다")
+    void findAllForReviewIncludesNotExposed() {
+        String token = token();
+        List<UUID> expected = List.of(
+                insert(row().name(token).status(PlaceStatus.CANDIDATE)),
+                insert(row().name(token).status(PlaceStatus.REJECTED)),
+                insert(row().name(token).closed(true)),
+                insert(row().name(token).region(INACTIVE)),
+                insert(row().name(token).placeType(PlaceType.UNCLASSIFIED).status(PlaceStatus.CANDIDATE)),
+                insert(row().name(token).source(PlaceSource.MANUAL).sourceId("")));
+        insert(row().name(token).deleted(true));
+
+        assertThat(findByKeyword(token)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    @DisplayName("필터마다 그 조건에 맞는 행만 걸린다. 지역은 원천 지역이 아니라 화면 지역 기준이다")
+    void eachFilterSelectsOnlyMatchingRows() {
+        String token = token();
+        UUID base = insert(row().name(token));
+        UUID candidate = insert(row().name(token).status(PlaceStatus.CANDIDATE));
+        UUID boardGame = insert(row().name(token).placeType(PlaceType.BOARD_GAME_CAFE));
+        UUID park = insert(row().name(token).source(PlaceSource.PARK_STANDARD));
+        UUID closed = insert(row().name(token).closed(true));
+        UUID otherRegion = insert(row().name(token).region(ACTIVE_FIRST).sourceRegion(ACTIVE));
+
+        assertThat(findForReview(ACTIVE, null, null, null, null, token))
+                .containsExactlyInAnyOrder(base, candidate, boardGame, park, closed);
+        assertThat(findForReview(null, PlaceStatus.CANDIDATE, null, null, null, token))
+                .containsExactly(candidate);
+        assertThat(findForReview(null, null, PlaceType.BOARD_GAME_CAFE, null, null, token))
+                .containsExactly(boardGame);
+        assertThat(findForReview(null, null, null, PlaceSource.PARK_STANDARD, null, token))
+                .containsExactly(park);
+        assertThat(findForReview(null, null, null, null, true, token))
+                .containsExactly(closed);
+        assertThat(findForReview(null, null, null, null, false, token))
+                .containsExactlyInAnyOrder(base, candidate, boardGame, park, otherRegion);
+        assertThat(findForReview(ACTIVE_FIRST, PlaceStatus.APPROVED, PlaceType.ESCAPE_ROOM, PlaceSource.SEMAS, false,
+                token)).containsExactly(otherRegion);
+    }
+
+    @Test
+    @DisplayName("없는 지역 코드로 거르면 오류 없이 빈 결과다")
+    void unknownRegionIsEmpty() {
+        String token = token();
+        insert(row().name(token));
+
+        assertThat(findForReview("99999", null, null, null, null, token)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("키워드는 이름·도로명 주소·원천 이름·원천 도로명 주소 중 하나에 대소문자 무시 부분 일치한다")
+    void keywordMatchesDisplayAndSourceFields() {
+        String token = token();
+        UUID byName = insert(row().name("가게 " + token.toUpperCase() + " 홍대점"));
+        UUID byRoadAddress = insert(row().roadAddress("서울특별시 " + token + "로 1"));
+        UUID bySourceName = insert(row().sourceName("원천 " + token));
+        UUID bySourceRoadAddress = insert(row().sourceRoadAddress("서울특별시 원천" + token + "길 2"));
+
+        assertThat(findByKeyword(token))
+                .containsExactlyInAnyOrder(byName, byRoadAddress, bySourceName, bySourceRoadAddress);
+        assertThat(findByKeyword("원천" + token + "길")).containsExactly(bySourceRoadAddress);
+    }
+
+    @Test
+    @DisplayName("키워드의 %와 _는 와일드카드가 아니라 글자 그대로 찾는다")
+    void keywordTreatsLikeWildcardsLiterally() {
+        String token = token();
+        UUID percent = insert(row().name(token + "100%할인"));
+        insert(row().name(token + "100원할인"));
+        UUID underscore = insert(row().name(token + "a_b"));
+        insert(row().name(token + "axb"));
+
+        assertThat(findByKeyword(token + "100%")).containsExactly(percent);
+        assertThat(findByKeyword(token + "a_b")).containsExactly(underscore);
+    }
+
+    @Test
+    @DisplayName("커서로 다음 페이지를 이어 읽으면 (생성 시각, id) 순으로 중복·누락 없이 모두 읽힌다")
+    void cursorPagesHaveNoDuplicatesOrGaps() {
+        String token = token();
+        LocalDateTime base = LocalDateTime.of(2020, 1, 1, 12, 0);
+        for (LocalDateTime createdAt : List.of(base, base, base, base.plusMinutes(1), base.plusMinutes(1),
+                base.plusMinutes(2), base.minusMinutes(1))) {
+            insert(row().name(token).createdAt(createdAt));
+        }
+        PlaceSearchCondition condition = PlaceSearchCondition.of(null, null, null, null, null, token);
+        List<Place> all = placeRepository.findAllForReview(condition, null, 100);
+
+        List<UUID> paged = new ArrayList<>();
+        PlaceCursor after = null;
+        List<Place> page;
+        do {
+            page = placeRepository.findAllForReview(condition, after, 3);
+            page.forEach(place -> paged.add(place.getId()));
+            if (!page.isEmpty()) {
+                Place last = page.get(page.size() - 1);
+                after = new PlaceCursor(last.getCreatedAt(), last.getId());
+            }
+        } while (page.size() == 3);
+
+        assertThat(all).hasSize(7).extracting(Place::getCreatedAt).isSorted();
+        assertThat(paged).doesNotHaveDuplicates()
+                .containsExactlyElementsOf(all.stream().map(Place::getId).toList());
+    }
+
     private long countInactiveRegions(List<String> codes) {
         return ((Number) entityManager.createNativeQuery(
                         "SELECT COUNT(*) FROM regions WHERE code IN (:codes) AND is_active = FALSE")
@@ -294,9 +422,9 @@ class PlaceRepositoryImplTest {
                                             region_code, status, is_closed, source, source_id, source_name,
                                             source_road_address, source_address_detail, source_latitude,
                                             source_longitude, source_region_code, last_synced_at,
-                                            created_at, updated_at, is_deleted)
-                        VALUES (?, ?, ?, ?, ?, 37.5, 126.9, ?, ?, ?, ?, ?, '원천이름', '서울특별시 원천로 1', '2층',
-                                37.5, 126.9, ?, ?, NOW(), NOW(), ?)""")
+                                            created_at, updated_at, is_deleted, created_by, updated_by, reviewed_by)
+                        VALUES (?, ?, ?, ?, ?, 37.5, 126.9, ?, ?, ?, ?, ?, ?, ?, '2층',
+                                37.5, 126.9, ?, ?, ?, NOW(), ?, 'SYSTEM', 'SYSTEM', '')""")
                 .setParameter(1, id)
                 .setParameter(2, row.placeType.name())
                 .setParameter(3, row.name)
@@ -307,9 +435,12 @@ class PlaceRepositoryImplTest {
                 .setParameter(8, row.closed)
                 .setParameter(9, row.source.name())
                 .setParameter(10, row.sourceId)
-                .setParameter(11, row.sourceRegion == null ? row.region : row.sourceRegion)
-                .setParameter(12, row.syncedAt)
-                .setParameter(13, row.deleted)
+                .setParameter(11, row.sourceName)
+                .setParameter(12, row.sourceRoadAddress)
+                .setParameter(13, row.sourceRegion == null ? row.region : row.sourceRegion)
+                .setParameter(14, row.syncedAt)
+                .setParameter(15, row.createdAt)
+                .setParameter(16, row.deleted)
                 .executeUpdate();
         return id;
     }
@@ -323,6 +454,9 @@ class PlaceRepositoryImplTest {
         private String name = "테스트장소";
         private String roadAddress = "서울특별시 테스트로 1";
         private String addressDetail = "";
+        private String sourceName = "원천이름";
+        private String sourceRoadAddress = "서울특별시 원천로 1";
+        private LocalDateTime createdAt = LocalDateTime.now();
         private String region = ACTIVE;
         private String sourceRegion;
         private boolean closed;
@@ -365,6 +499,21 @@ class PlaceRepositoryImplTest {
 
         PlaceRow addressDetail(String addressDetail) {
             this.addressDetail = addressDetail;
+            return this;
+        }
+
+        PlaceRow sourceName(String sourceName) {
+            this.sourceName = sourceName;
+            return this;
+        }
+
+        PlaceRow sourceRoadAddress(String sourceRoadAddress) {
+            this.sourceRoadAddress = sourceRoadAddress;
+            return this;
+        }
+
+        PlaceRow createdAt(LocalDateTime createdAt) {
+            this.createdAt = createdAt;
             return this;
         }
 

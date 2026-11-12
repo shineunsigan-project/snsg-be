@@ -736,10 +736,10 @@ class ScheduleCommandServiceTest {
                                                 region_code, status, is_closed, source, source_id, source_name,
                                                 source_road_address, source_address_detail, source_latitude,
                                                 source_longitude, source_region_code, last_synced_at,
-                                                created_at, updated_at, is_deleted)
+                                                created_at, updated_at, is_deleted, created_by, updated_by, reviewed_by)
                             VALUES (?, 'BOARD_GAME_CAFE', '테스트보드게임카페', '서울특별시 테스트로 1', '3층',
                                     37.5512345, 126.9212345, ?, 'APPROVED', FALSE, 'MANUAL', '', '', '', '', 0, 0, ?,
-                                    NOW(), NOW(), NOW(), FALSE)""")
+                                    NOW(), NOW(), NOW(), FALSE, 'SYSTEM', 'SYSTEM', '')""")
                     .setParameter(1, id)
                     .setParameter(2, REGION)
                     .setParameter(3, REGION)

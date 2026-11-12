@@ -53,7 +53,7 @@ class PlaceCommandServiceTest {
     @BeforeEach
     void setUp() {
         placeCommandService = new PlaceCommandService(placeRepository, new PlaceProperties(new BigDecimal("0.3"),
-                Duration.ofSeconds(10), 3, List.of(), List.of(), Map.of()));
+                Duration.ofSeconds(10), 3, List.of(), List.of(), Map.of(), 20, 50));
     }
 
     private UpsertPlaceCommand row(String sourceId, String name, String addressDetail) {
