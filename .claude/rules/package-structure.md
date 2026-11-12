@@ -159,7 +159,7 @@
 
 - 모든 엔티티는 `common/entity`의 `BaseEntity`를 상속한다. id(UUID v7), `createdAt`, `updatedAt`, `isDeleted`가 딸려온다.
 - 변경 주체를 남겨야 하는 엔티티는 `BaseAuditEntity`를 상속한다. `createdBy`, `updatedBy`가 더해진다.
-  - 판단 기준: 도메인 컬럼으로는 알 수 없는 "누가 바꿨나"가 운영에서 궁금해지면 Audit. 예로 일정을 누가 취소했는지(`schedule_cancellations`, 개설자인지 운영자인지), 탈퇴 기록(`user_withdrawals`)을 누가 만들고(본인 요청이면 사용자 id, 웹훅이면 `SYSTEM`) 누가 비식별했는지(`SYSTEM_SCHEDULER`).
+  - 판단 기준: 도메인 컬럼으로는 알 수 없는 "누가 바꿨나"가 운영에서 궁금해지면 Audit. 예로 일정을 누가 취소했는지(`schedule_cancellations`, 개설자인지 운영자인지), 탈퇴 기록(`user_withdrawals`)을 누가 만들고(본인 요청이면 사용자 id, 웹훅이면 `SYSTEM`) 누가 비식별했는지(`SYSTEM_SCHEDULER`), 어드민을 누가 승인·거절·중지했는지(`admins.updated_by`, 처리한 MASTER의 adminId).
   - 값은 사용자 id 문자열이거나 `Auditor.SYSTEM`, `Auditor.SYSTEM_SCHEDULER`다. 인증이 없는 요청은 `SYSTEM`이 들어간다.
 - id는 UUID v7(`@UuidGenerator(style = VERSION_7)`)이다. 시간순으로 증가해 인덱스가 조각나지 않고, URL로 남의 데이터를 추측할 수 없다. 다른 키 전략이 꼭 필요한 테이블만 `BaseEntity`를 상속하지 않는다.
   - 예: `regions`. 행정구역 코드(`CHAR(5)`)가 PK인 기준 데이터다. 지우지 않으므로 `is_deleted`가 없고, 숨김은 `is_active`가 맡는다. `created_at`·`updated_at`은 엔티티에서 직접 매핑한다.
@@ -225,6 +225,7 @@
 - 동시에 오면 결과가 어긋나는 판정(정원, 시간 겹침)은 Command 서비스의 트랜잭션 안에서 **잠근 뒤 판정한다.** 잠금은 repository 메서드로 둔다.
   - 사용자 단위: `pg_advisory_xact_lock`(`ScheduleRepository.lockUser`). 같은 사용자의 개설·참여를 차례로 세워 겹침 검사가 서로의 결과를 보게 한다.
   - 행 단위: `@Lock(PESSIMISTIC_WRITE)` 조회, 즉 `SELECT … FOR UPDATE`(`ScheduleRepository.findByIdForUpdate`). 같은 일정의 참여·참여 취소·일정 전체 취소를 차례로 세운다.
+    - 상태 전이도 같다. 어드민 승인·거절·중지·해제(`AdminCommandService`)는 대상 어드민을 `AdminRepository.findByIdForUpdate`로 처음 읽고 엔티티의 전이 메서드가 출발 상태를 본다. 두 MASTER가 같은 대상을 동시에 처리하면 뒤 요청은 앞 커밋을 기다려 바뀐 상태를 보고 409 `ADMIN_STATUS_CONFLICT`다. 조건부 일괄 UPDATE로 하지 않은 이유: Auditing을 거치지 않아 `updated_by`를 직접 넣어야 하고, 404·403·409를 가르려면 어차피 한 번 더 읽어야 한다.
 - **둘을 함께 잡으면 순서는 항상 사용자 → 일정이다.** 순서가 섞이면 교착이 난다. 일정 하나만 잡는 흐름(참여 취소, 일정 전체 취소)은 사용자 잠금을 걸지 않는다.
 - **잠금 조회는 그 트랜잭션에서 그 행을 처음 읽는 조회여야 한다.** 먼저 잠금 없이 읽어 영속성 컨텍스트에 올려두면, 잠근 뒤에도 옛 값(확정 인원·모집 상태)을 쓴다.
 - **잠그는 조회에 연관 컬렉션을 fetch join하지 않는다.** PostgreSQL은 outer join의 nullable 쪽에 `FOR UPDATE`를 걸 수 없고, 잠글 대상은 루트 행 하나면 된다. 구성요소는 잠근 뒤 지연 로딩으로 읽는다(READ COMMITTED라 앞 트랜잭션이 커밋한 행을 본다).
@@ -237,7 +238,7 @@
 
 ### 목록 쿼리 (JPQL)
 
-API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여기는 쿼리 작성 방법이다. 예: `ScheduleRepositoryImpl`의 `findRecruiting`·`findParticipating`·`findHosted`.
+API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여기는 쿼리 작성 방법이다. 예: `ScheduleRepositoryImpl`의 `findRecruiting`·`findParticipating`·`findHosted`, `AdminRepositoryImpl.findAll`(선택 상태 필터, (`createdAt`, id) keyset, 커서 `AdminCursor`).
 
 - **선택 조건이 있는 쿼리는 고정 JPQL 조각을 조건이 있을 때만 이어 붙이고, 값은 모두 파라미터로 바인딩한다.** 값을 문자열에 넣지 않는다. `(:ids is null or s.x in :ids)`처럼 한 쿼리에 넣지 않는다. 컬렉션 파라미터에 null을 바인딩하게 된다.
   - 빈 목록 조건(빈 값만 보낸 필터)은 쿼리를 돌리지 않고 빈 결과를 준다. `in ()`을 만들지 않는다.
@@ -287,7 +288,17 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 - **토큰 필터를 `@Component`(빈)로 두면 Spring Boot가 서블릿 필터로도 모든 URL에 자동 등록한다.** 체인이 하나일 때는 체인 안에서 먼저 돌아 `OncePerRequestFilter`가 두 번째 실행을 건너뛰어 드러나지 않는다. 체인이 둘이면 다른 체인의 필터가 체인이 끝난 뒤 서블릿 단계에서 돌고, 다른 키로 토큰을 해석하다 실패해 `clearContext()`를 불러 **컨트롤러의 `@AuthenticationPrincipal`이 null이 된다.** `@WebMvcTest`의 MockMvc도 Filter 빈을 등록하므로 슬라이스 테스트로 재현된다(`.claude/rules/testing.md` 보안 테스트 항목).
   - 사용자 필터(`JwtAuthenticationFilter`, 빈)는 `SecurityConfig`의 `FilterRegistrationBean.setEnabled(false)`로 자동 등록을 끈다.
   - 어드민 필터(`AdminAuthenticationFilter`)는 빈이 아니다. `AdminSecurityConfig`가 `new`로 만들어 체인에만 넣는다. 새 체인·필터를 더하면 이 방식을 따른다.
-- **어드민 상태는 요청마다 DB에서 확인한다.** 필터가 `AdminQueryService.findApprovedRole`(삭제되지 않았고 `APPROVED`인 어드민의 역할)을 불러 있을 때만 인증을 채운다. 역할을 토큰에 싣지 않는다. 재발급(`AdminReissueTokenFacade`)도 승인 상태가 아니면 그 어드민의 세션을 모두 지운다. 새 상태(거절·이용 중지)를 더해도 `APPROVED`만 통과하므로 자동으로 막힌다.
+- **어드민 상태는 요청마다 DB에서 확인한다.** 필터가 `AdminQueryService.findApprovedRole`(삭제되지 않았고 `APPROVED`인 어드민의 역할)을 불러 있을 때만 인증을 채운다. 역할을 토큰에 싣지 않는다. 재발급(`AdminReissueTokenFacade`)도 승인 상태가 아니면 그 어드민의 세션을 모두 지운다. `APPROVED`만 통과하므로 승인 대기·거절·이용 중지는 다음 요청부터 401이고, 상태를 더해도 필터를 고치지 않는다.
+- **역할 검사는 보안 체인의 매처로 한다**(`hasRole`). 메서드 보안(`@PreAuthorize`)과 서비스 안의 역할 확인은 쓰지 않는다. 역할은 필터가 요청마다 DB에서 읽은 값이라 토큰과 어긋나지 않는다.
+  - 어드민 체인의 매처 순서: 공개 셋(`POST signup·login·tokens`) → `GET /api/admin/v1/admins/me` `authenticated()` → `/api/admin/v1/admins`·`/api/admin/v1/admins/**` `hasRole("MASTER")` → `anyRequest().authenticated()`. 처음 맞는 매처가 이기므로 `me`를 MASTER 경로보다 먼저 둬야 ADMIN도 내 정보를 본다. `me`는 GET만 연다. MASTER 전용 경로가 더 생기면 같은 방식으로 `hasRole` 매처를 더한다.
+  - 역할이 모자라면 `AdminAccessDeniedHandler`(`exceptionHandling.accessDeniedHandler`)가 403 `MASTER_ONLY`를 우리 봉투로 쓴다. 없으면 Spring 기본 403(우리 봉투가 아님)이 나간다. 401 진입점과 같은 방식이다. `@Component`라 보안 슬라이스 테스트의 `@Import`에 넣어야 한다(`.claude/rules/testing.md`).
+- **어드민 상태는 넷이다**(`PENDING`·`APPROVED`·`REJECTED`·`SUSPENDED`). 전이는 승인(`PENDING`→`APPROVED`), 거절(`PENDING`→`REJECTED`), 이용 중지(`APPROVED`→`SUSPENDED`), 해제(`SUSPENDED`→`APPROVED`)뿐이고 `Admin`의 전이 메서드가 지킨다. 그 밖의 출발 상태는 409 `ADMIN_STATUS_CONFLICT`다(같은 동작 반복 포함).
+  - 거절은 행을 지우지 않고 `REJECTED`로 남긴다. 아이디 부분 유니크 인덱스에 남아 **거절된 아이디는 다시 쓸 수 없다.** 거절 이력과 처리한 MASTER(`updated_by`)가 남고, 로그인에서 거절을 알려줄 수 있다. `REJECTED`는 끝 상태다.
+  - **MASTER는 어떤 상태 변경의 대상도 아니다**(자기 자신 포함, 403 `MASTER_NOT_MODIFIABLE`). MASTER는 DB로만 생기므로 관리도 DB로 한다. API로 열면 MASTER 하나가 다른 MASTER를 모두 중지하거나, 마지막 MASTER가 자기를 중지해 아무도 승인할 수 없게 된다.
+  - 판정 순서는 대상 조회(404 `ADMIN_NOT_FOUND`) → MASTER인지(403) → 전이 가능한지(409)다.
+- **이용 중지는 즉시 반영된다.** access token은 필터의 상태 확인으로 다음 요청부터 401이다. refresh 세션은 `SuspendAdminFacade`가 서비스의 중지(트랜잭션, 커밋) 뒤 `AdminRefreshTokenStorePort.deleteAll`로 모두 지운다. Redis는 이벤트 발행 포트가 아닌 `port/out`이라 facade다. 중지가 예외로 끝나면 지우지 않는다.
+  - 재발급도 상태를 보므로 지우지 않아도 막히지만, 해제했을 때 중지 전 세션(최대 12시간)이 되살아나지 않게 지운다. 해제된 어드민은 다시 로그인한다. 커밋 뒤 삭제가 실패하면 응답은 500이지만 중지는 반영돼 있고, 재발급의 상태 확인이 안전망이다.
+  - 받아들인 틈: 중지 뒤 access 수명(30분) 안에 해제하면, 중지 전에 받은 access token이 해제 뒤 다시 통한다. 막으려면 토큰 발급 시각과 상태 변경 시각을 비교해야 해 컬럼·토큰 형식이 늘어난다(사용자 합의).
 - **어드민 세션은 절대 만료다(로그인 후 `admin.refresh-token-validity`).** 재발급은 회전하되 만료를 늘리지 않는다(사용자 refresh는 재발급마다 수명 전체로 다시 발급한다).
   - 세션 만료 시각은 refresh JWT의 `exp`에 싣는다. 로그인 때 `AdminTokenIssuer`가 지금 + 수명(초 단위로 자름, JWT exp가 초 단위라 재발급 때 읽은 값과 같아진다)으로 정하고, 재발급은 refresh에서 읽은 만료를 그대로 넘긴다. `AdminTokenPort`·`AdminRefreshTokenStorePort`는 만료 시각을 인자로 받는다.
   - Redis 세션 키 TTL은 남은 시간, 세션 집합 TTL은 저장할 때마다 수명 전체(남은 시간이 가장 긴 세션보다 먼저 사라지지 않게), 쿠키 Max-Age는 남은 시간을 초 단위로 올림한 값이다.
@@ -296,9 +307,9 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 - **로그인 실패 잠금**(`AdminLoginFacade`, `RedisLoginAttemptAdapter`): 같은 아이디로 `admin.login-max-failures`번 연속 실패하면 `admin.login-lock-duration` 동안 잠근다.
   - 아이디는 **입력 문자열 그대로** 묶는다. 계정 존재 여부와 상관없이 센다. 없는 아이디도 똑같이 잠겨 잠금 응답으로 존재가 드러나지 않는다.
   - 아이디 없음과 비밀번호 틀림은 같은 401 `INVALID_ADMIN_CREDENTIALS`다. 아이디가 없어도 **더미 해시와 한 번 대조해** 응답 시간으로도 존재가 드러나지 않게 한다(`BCryptPasswordHashAdapter`가 기동 때 더미 해시를 만든다).
-  - 잠긴 동안은 계정 조회·해시 대조·실패 기록을 하지 않는다. 비밀번호가 맞으면(승인 대기로 403이 나가는 경우도) 횟수를 지운다. 승인 대기 여부는 비밀번호가 맞은 뒤에만 알려준다.
+  - 잠긴 동안은 계정 조회·해시 대조·실패 기록을 하지 않는다. 비밀번호가 맞으면(승인 대기·거절·이용 중지로 403이 나가는 경우도) 횟수를 지운다. 상태(403 `ADMIN_PENDING_APPROVAL`·`ADMIN_REJECTED`·`ADMIN_SUSPENDED`)는 비밀번호가 맞은 뒤에만 알려준다. 정당한 사용자는 원인을 알아야 MASTER에게 문의할 수 있고, 비밀번호를 모르면 존재·상태 어느 것도 알 수 없다.
 - **비밀번호는 BCrypt 해시로 저장한다**(`PasswordHashPort` ← `infrastructure/crypto/BCryptPasswordHashAdapter`). 해시가 필요한 흐름(가입·로그인)은 facade다. BCrypt는 입력의 앞 72바이트만 쓴다. 가입 규칙은 공백 없는 ASCII 최대 64자라 넘지 않고, 로그인 입력이 UTF-8 72바이트를 넘으면 대조 없이 불일치로 본다(`Admin.isComparablePassword`, 500이 아니라 401). `$2a$`·`$2b$`·`$2y$`(htpasswd, README의 MASTER 절차)를 모두 받는다.
-- MASTER는 API로 만들지 않고 운영자가 DB에 직접 넣는다(절차는 `README.md`). 다른 어드민은 가입 신청(`ADMIN`·`PENDING`) 후 MASTER가 승인한다(SHI-183).
+- MASTER는 API로 만들지 않고 운영자가 DB에 직접 넣는다(절차는 `README.md`). 다른 어드민은 가입 신청(`ADMIN`·`PENDING`) 후 MASTER가 승인·거절하고, 승인된 어드민은 MASTER가 이용 중지·해제한다(SHI-183, 사용자 합의).
 
 ### Redis
 
