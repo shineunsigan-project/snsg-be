@@ -19,7 +19,7 @@ import lombok.RequiredArgsConstructor;
  * <p>
  * 재발급은 refresh token이 가리키는 세션의 토큰만 바꾼다(회전). 세션 만료(로그인 후 12시간)는 늘리지 않고 이어받는다.
  * 어드민이 승인 상태인지 매번 다시 본다.
- * 승인 상태가 아니면(없음·삭제·승인 대기) 그 어드민의 세션을 모두 지운다.
+ * 승인 상태가 아니면(없음·삭제·승인 대기·거절·이용 중지) 그 어드민의 세션을 모두 지운다.
  */
 @Service
 @RequiredArgsConstructor

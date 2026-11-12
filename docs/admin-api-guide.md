@@ -140,7 +140,10 @@
   - 잠긴 동안 다시 시도해도 잠금 시간은 늘어나지 않는다. 다섯 번째 실패 시각부터 15분 뒤 풀린다.
   - 로그인에 성공하면 실패 횟수가 0으로 돌아간다. 실패 사이가 15분 넘게 벌어져도 횟수가 사라진다.
   - 없는 아이디도 똑같이 잠긴다. 남은 횟수는 알려주지 않는다.
-- 비밀번호는 맞았지만 승인 대기면 403 `ADMIN_PENDING_APPROVAL`이다. 승인 대기 안내를 보여준다.
+- 비밀번호는 맞았지만 계정이 승인 상태가 아니면 상태별로 403이다. **비밀번호가 맞을 때만** 알려준다. 비밀번호가 틀리면 상태와 관계없이 401 `INVALID_ADMIN_CREDENTIALS`다.
+  - 승인 대기: 403 `ADMIN_PENDING_APPROVAL`. 승인 대기 안내를 보여준다.
+  - 가입 거절: 403 `ADMIN_REJECTED`. `message`를 보여준다. 이 아이디로는 다시 로그인·가입할 수 없다.
+  - 이용 중지: 403 `ADMIN_SUSPENDED`. `message`를 보여준다. MASTER가 해제하면 다시 로그인할 수 있다.
 - 로그인할 때마다 새 기기 세션이 생긴다. 다른 기기의 로그인은 끊기지 않는다.
 
 ## 로그아웃
@@ -164,6 +167,94 @@
 - `role`: `MASTER`(가입 승인 등 MASTER 전용 메뉴를 볼 수 있다) 또는 `ADMIN`(일반 어드민). MASTER 전용 메뉴는 `role`이 `MASTER`일 때만 그린다. 실제 권한 검사는 BE가 한다.
 - 비밀번호와 계정 상태는 응답에 없다. 이 API가 200이면 승인된 계정이다.
 
+## 가입 승인 관리 (MASTER 전용)
+
+MASTER가 가입 신청을 승인·거절하고, 승인된 어드민의 이용을 중지·해제한다. 모두 access token이 필요하다.
+
+- **MASTER 메뉴는 내 정보의 `role`이 `MASTER`일 때만 그린다.** 다만 실제 검사는 BE가 한다. `ADMIN`이 아래 API를 부르면 403 `MASTER_ONLY`다.
+- 토큰이 없거나 승인 상태가 아닌 계정이면 다른 API와 같이 401 `UNAUTHENTICATED`다.
+
+| 메서드·경로 | 하는 일 | 성공 |
+| --- | --- | --- |
+| `GET /api/admin/v1/admins?status=&cursor=&size=` | 어드민 목록 | 200, `data`는 `{ items, nextCursor }` |
+| `POST /api/admin/v1/admins/{adminId}/approval` | 가입 승인 | 200 `{"isSuccess":true}`, `data` 없음 |
+| `POST /api/admin/v1/admins/{adminId}/rejection` | 가입 거절 | 200 `{"isSuccess":true}`, `data` 없음 |
+| `POST /api/admin/v1/admins/{adminId}/suspension` | 이용 중지 | 200 `{"isSuccess":true}`, `data` 없음 |
+| `DELETE /api/admin/v1/admins/{adminId}/suspension` | 이용 중지 해제 | 200 `{"isSuccess":true}`, `data` 없음 |
+
+요청 본문은 모두 없다. `adminId`는 목록 항목의 `id`다.
+
+### 상태
+
+| `status` | 뜻 | 화면 표시 | 그릴 버튼 |
+| --- | --- | --- | --- |
+| `PENDING` | 가입 신청 후 승인 대기 | 승인 대기 | [승인] [거절] |
+| `APPROVED` | 승인됨. 로그인해 쓸 수 있다 | 승인됨 | [이용 중지] |
+| `REJECTED` | 가입 거절됨 | 거절됨 | 없음 |
+| `SUSPENDED` | 이용 중지됨 | 이용 중지 | [이용 중지 해제] |
+
+`role`이 `MASTER`인 행에는 버튼을 그리지 않는다(아래 "MASTER는 대상이 될 수 없다").
+
+### 상태 전이
+
+| 동작 | 지금 상태 | 바뀐 상태 |
+| --- | --- | --- |
+| 승인 | `PENDING` | `APPROVED` |
+| 거절 | `PENDING` | `REJECTED` |
+| 이용 중지 | `APPROVED` | `SUSPENDED` |
+| 이용 중지 해제 | `SUSPENDED` | `APPROVED` |
+
+- 표에 없는 상태에서 부르면(같은 동작을 다시 보낸 경우, 다른 MASTER가 먼저 처리한 경우 포함) 409 `ADMIN_STATUS_CONFLICT`이고 아무것도 바뀌지 않는다. 목록을 다시 불러 지금 상태를 그린다.
+- **거절은 되돌릴 수 없다.** 거절된 아이디는 다시 쓸 수 없다. 같은 사람이 다시 신청하려면 다른 아이디로 가입한다. 거절된 사람이 로그인하면 비밀번호가 맞을 때만 403 `ADMIN_REJECTED`를 받는다.
+- **이용 중지하면 그 어드민은 다음 요청부터 401 `UNAUTHENTICATED`다.** 그 어드민의 로그인 세션도 모두 지워져 재발급(`POST /api/admin/v1/auth/tokens`)도 401 `INVALID_ADMIN_REFRESH_TOKEN`이다. 로그인하면 비밀번호가 맞을 때만 403 `ADMIN_SUSPENDED`를 받는다.
+- **이용 중지를 해제해도 이전 로그인은 살아나지 않는다.** 해제된 어드민은 다시 로그인한다.
+- 이용 중지가 500으로 끝나면 중지는 이미 반영됐을 수 있다. 목록을 다시 불러 상태를 확인한다.
+- 여러 조건에 걸리면 `ADMIN_NOT_FOUND`(404) → `MASTER_NOT_MODIFIABLE`(403) → `ADMIN_STATUS_CONFLICT`(409) 순서로 앞의 것이 온다.
+
+### MASTER는 대상이 될 수 없다
+
+대상의 `role`이 `MASTER`면 승인·거절·이용 중지·해제 모두 403 `MASTER_NOT_MODIFIABLE`이다. **요청한 MASTER 자신도 MASTER이므로 자기 자신을 중지·거절할 수 없다.** MASTER 계정은 BE가 DB로만 만들고 관리한다. 필요하면 BE에 요청한다.
+
+### 목록
+
+`GET /api/admin/v1/admins` (access token 포함)
+
+| 파라미터 | 필수 | 뜻 |
+| --- | --- | --- |
+| `status` | 아니오 | `PENDING`·`APPROVED`·`REJECTED`·`SUSPENDED` 중 하나. 이 상태만 준다. 생략하면 모든 상태. 그 밖의 값은 400 `INVALID_REQUEST` |
+| `cursor` | 아니오 | 이전 응답의 `nextCursor`를 그대로 보낸다. 생략하면 첫 페이지. 해석할 수 없으면 400 `INVALID_CURSOR` |
+| `size` | 아니오 | 한 페이지 개수. 생략하면 20, 50보다 크면 50, 1보다 작으면 1로 맞춘다(오류가 아니다) |
+
+- 삭제되지 않은 모든 어드민을 준다. **MASTER와 나 자신도 나온다.** `role`로 구분한다.
+- 정렬은 가입 신청 일시(`createdAt`)가 빠른 순, 같으면 `id` 순이다.
+- 더 있으면 `nextCursor`를 준다. 다음 페이지는 같은 `status`에 `cursor=nextCursor`를 붙여 부른다. `status`를 바꾸면 `cursor` 없이 처음부터 부른다. 마지막 페이지면 `nextCursor`는 `null`이다.
+- 맞는 어드민이 없으면 200에 `items = []`, `nextCursor = null`이다.
+- `nextCursor`는 해석하지 않는 문자열이다(영문·숫자·`_`·`-`만 쓴다). 인코딩 없이 쿼리에 붙인다.
+
+```json
+{ "isSuccess": true,
+  "data": {
+    "items": [
+      { "id": "0192f3a4-5b6c-7d8e-9f01-23456789abcd", "loginId": "mintadmin", "name": "김민트",
+        "team": "BACKEND", "birthDate": "1996-04-12", "role": "ADMIN", "status": "PENDING",
+        "createdAt": "2026-11-13T10:15:30" }
+    ],
+    "nextCursor": null } }
+```
+
+| 필드 | 뜻 |
+| --- | --- |
+| `id` | 어드민 식별자. 승인·거절·이용 중지·해제 경로의 `adminId` |
+| `loginId` | 로그인 아이디 |
+| `name` | 실명 |
+| `team` | 소속팀. 값과 이름은 가입의 `team` 표와 같다 |
+| `birthDate` | 생년월일(`yyyy-MM-dd`) |
+| `role` | `MASTER` 또는 `ADMIN` |
+| `status` | 위 상태 표 |
+| `createdAt` | 가입 신청 일시. 한국 시간, 오프셋 없는 ISO-8601 |
+
+비밀번호와 누가 처리했는지는 응답에 없다.
+
 ## 에러 코드
 
 | HTTP | code | 언제 | 화면에서 할 일 |
@@ -173,8 +264,16 @@
 | 401 | `INVALID_ADMIN_CREDENTIALS` | 로그인: 아이디가 없거나 비밀번호가 틀림(형식이 틀린 값 포함) | "아이디 또는 비밀번호가 올바르지 않아요." 안내 |
 | 401 | `ADMIN_LOGIN_LOCKED` | 로그인: 같은 아이디로 5회 연속 실패해 15분 동안 잠김 | 잠시(15분) 후 다시 시도하라고 안내. 입력은 막지 않아도 된다 |
 | 403 | `ADMIN_PENDING_APPROVAL` | 로그인: 비밀번호는 맞지만 MASTER 승인 대기 | 승인 대기 안내 |
-| 401 | `INVALID_ADMIN_REFRESH_TOKEN` | 재발급: 쿠키 없음·만료·위조·회전됨·로그아웃됨·계정이 승인 상태가 아님 | 토큰을 버리고 로그인 화면으로 |
-| 401 | `UNAUTHENTICATED` | 인증이 필요한 어드민 API에 access token이 없거나 만료·무효, 사용자 앱 토큰을 보냄, 계정이 승인 상태가 아님. 없는 어드민 경로도 토큰이 없으면 이 코드다 | 재발급 후 한 번 다시 부른다. 재발급도 401이면 로그인 화면으로 |
+| 403 | `ADMIN_REJECTED` | 로그인: 비밀번호는 맞지만 가입이 거절됨 | `message`를 보여준다. 이 아이디로는 다시 가입할 수 없다 |
+| 403 | `ADMIN_SUSPENDED` | 로그인: 비밀번호는 맞지만 이용 중지됨 | `message`를 보여준다 |
+| 401 | `INVALID_ADMIN_REFRESH_TOKEN` | 재발급: 쿠키 없음·만료·위조·회전됨·로그아웃됨·계정이 승인 상태가 아님(이용 중지 포함) | 토큰을 버리고 로그인 화면으로 |
+| 401 | `UNAUTHENTICATED` | 인증이 필요한 어드민 API에 access token이 없거나 만료·무효, 사용자 앱 토큰을 보냄, 계정이 승인 상태가 아님(이용 중지 포함). 없는 어드민 경로도 토큰이 없으면 이 코드다 | 재발급 후 한 번 다시 부른다. 재발급도 401이면 로그인 화면으로 |
+| 403 | `MASTER_ONLY` | MASTER 전용 API(가입 승인 관리)를 `ADMIN`이 부름 | "MASTER만 할 수 있어요" 안내. MASTER 메뉴는 `role`이 `MASTER`일 때만 그린다 |
+| 400 | `INVALID_REQUEST` | 가입 승인 관리: 경로의 `adminId`가 UUID가 아님, 목록의 `status`가 네 값 밖, `size`가 숫자가 아님(`errors` 없음) | 정상 화면 흐름에서는 나지 않는다. `message`를 보여준다 |
+| 400 | `INVALID_CURSOR` | 목록: 해석할 수 없는 `cursor` | `cursor` 없이 처음부터 다시 부른다 |
+| 404 | `ADMIN_NOT_FOUND` | 승인·거절·이용 중지·해제: 대상이 없거나 삭제됨 | 목록을 다시 불러 그린다 |
+| 403 | `MASTER_NOT_MODIFIABLE` | 승인·거절·이용 중지·해제: 대상이 MASTER(자기 자신 포함) | `message`를 보여준다. MASTER 행에는 버튼을 그리지 않는다 |
+| 409 | `ADMIN_STATUS_CONFLICT` | 승인·거절·이용 중지·해제: 대상의 지금 상태에서 할 수 없는 동작(이미 처리됨, 다른 MASTER가 먼저 처리함 포함) | 목록을 다시 불러 지금 상태를 그린다 |
 | 500 | `INTERNAL_ERROR` | 서버 오류 | 잠시 후 다시 시도 안내 |
 
 예시
@@ -184,6 +283,13 @@
 { "isSuccess": false, "code": "INVALID_ADMIN_CREDENTIALS", "message": "아이디 또는 비밀번호가 올바르지 않아요." }
 { "isSuccess": false, "code": "ADMIN_LOGIN_LOCKED", "message": "로그인에 여러 번 실패해 잠시 잠겼어요. 잠시 후 다시 시도해주세요." }
 { "isSuccess": false, "code": "ADMIN_PENDING_APPROVAL", "message": "가입 승인을 기다리고 있어요. 승인된 뒤 로그인할 수 있어요." }
+{ "isSuccess": false, "code": "ADMIN_REJECTED", "message": "가입이 거절됐어요. 자세한 내용은 MASTER에게 문의해주세요." }
+{ "isSuccess": false, "code": "ADMIN_SUSPENDED", "message": "이용이 중지된 계정이에요. 자세한 내용은 MASTER에게 문의해주세요." }
+{ "isSuccess": false, "code": "MASTER_ONLY", "message": "MASTER만 할 수 있어요." }
+{ "isSuccess": false, "code": "INVALID_CURSOR", "message": "목록을 처음부터 다시 불러주세요." }
+{ "isSuccess": false, "code": "ADMIN_NOT_FOUND", "message": "찾을 수 없는 어드민이에요." }
+{ "isSuccess": false, "code": "MASTER_NOT_MODIFIABLE", "message": "MASTER 계정은 승인·거절·이용 중지할 수 없어요." }
+{ "isSuccess": false, "code": "ADMIN_STATUS_CONFLICT", "message": "지금 상태에서는 할 수 없어요. 목록을 새로 불러 상태를 확인해주세요." }
 { "isSuccess": false, "code": "INVALID_ADMIN_REFRESH_TOKEN", "message": "다시 로그인해야 합니다." }
 { "isSuccess": false, "code": "UNAUTHENTICATED", "message": "로그인이 필요합니다." }
 ```
@@ -193,19 +299,24 @@
 | 화면 | 호출 | 응답에 따른 처리 | 다시 보내도 되나 |
 | --- | --- | --- | --- |
 | 앱 진입(로그인·가입 외 모든 화면의 공통 레이아웃) | `POST /api/admin/v1/auth/tokens` (credentials 포함) | 200이면 access token을 메모리에 두고 내 정보를 부른다. 401이면 로그인 화면으로. 응답 전에는 아무것도 그리지 않는다 | 동시에 두 번 보내지 않는다(한 번에 하나) |
-| 로그인 (제출) | `POST /api/admin/v1/auth/login` (credentials 포함) | 200이면 access token 저장 후 내 정보 → 첫 화면. 401 `INVALID_ADMIN_CREDENTIALS`·`ADMIN_LOGIN_LOCKED`, 403 `ADMIN_PENDING_APPROVAL`은 위 에러 표대로 안내 | 된다. 다만 실패도 잠금 횟수에 들어가므로 응답 전까지 버튼을 막는다 |
+| 로그인 (제출) | `POST /api/admin/v1/auth/login` (credentials 포함) | 200이면 access token 저장 후 내 정보 → 첫 화면. 401 `INVALID_ADMIN_CREDENTIALS`·`ADMIN_LOGIN_LOCKED`, 403 `ADMIN_PENDING_APPROVAL`·`ADMIN_REJECTED`·`ADMIN_SUSPENDED`는 위 에러 표대로 안내 | 된다. 다만 실패도 잠금 횟수에 들어가므로 응답 전까지 버튼을 막는다 |
 | 가입 신청 (제출) | `POST /api/admin/v1/auth/signup` | 201이면 승인 대기 안내 후 로그인 화면. 400이면 필드별 문구. 409면 다른 아이디 안내 | 성공한 요청을 다시 보내면 409 `DUPLICATED_LOGIN_ID`다. 응답 전까지 버튼을 막는다 |
 | 공통 헤더 (진입·재발급 뒤) | `GET /api/admin/v1/admins/me` | 이름·소속팀을 그리고 `role`이 `MASTER`면 MASTER 전용 메뉴를 보인다. 401이면 재발급 후 한 번 다시 | 된다(조회만 한다) |
 | 로그아웃 | `DELETE /api/admin/v1/auth/tokens` (access token + credentials 포함) | 응답과 무관하게 토큰을 버리고 로그인 화면 | 된다 |
+| 가입 승인 관리 (MASTER, 진입·탭 전환) | `GET /api/admin/v1/admins?status=…` | 행마다 상태와 버튼을 그린다(가입 승인 관리 절의 상태 표). `nextCursor`가 있으면 더 보기에서 `cursor`를 붙여 부른다. 403 `MASTER_ONLY`면 MASTER 메뉴를 숨긴다 | 된다(조회만 한다) |
+| 가입 승인 관리 [승인] | `POST /api/admin/v1/admins/{adminId}/approval` | 성공이든 실패든 목록을 다시 부른다. 409 `ADMIN_STATUS_CONFLICT`·404 `ADMIN_NOT_FOUND`면 목록을 다시 불러 지금 상태를 그린다 | 성공한 요청을 다시 보내면 409 `ADMIN_STATUS_CONFLICT`다. 응답 전까지 버튼을 막고, 409면 목록을 다시 부른다 |
+| 가입 승인 관리 [거절] | `POST /api/admin/v1/admins/{adminId}/rejection` | 되돌릴 수 없으므로 확인 팝업을 띄운 뒤 부른다. 이후 처리는 [승인]과 같다 | [승인]과 같다 |
+| 가입 승인 관리 [이용 중지] | `POST /api/admin/v1/admins/{adminId}/suspension` | 확인 팝업 뒤 부른다. 이후 처리는 [승인]과 같다. 500이면 목록을 다시 불러 상태를 확인한다 | [승인]과 같다 |
+| 가입 승인 관리 [이용 중지 해제] | `DELETE /api/admin/v1/admins/{adminId}/suspension` | 이후 처리는 [승인]과 같다 | [승인]과 같다 |
 
-**아직 없는 것**: 가입 승인·거절·이용 중지(MASTER 전용)와 승인 대기 목록 API는 다음 작업에서 생긴다. 생기면 이 문서와 `docs/openapi-admin.yaml`에 추가한다. 장소 수정 같은 데이터 수정 API도 그 뒤에 `/api/admin/v1` 아래에 생긴다.
+장소 수정 같은 데이터 수정 API는 그 뒤에 `/api/admin/v1` 아래에 생긴다. 생기면 이 문서와 `docs/openapi-admin.yaml`에 추가한다.
 
 ## 로컬 개발
 
 1. BE: `cd snsg && ./gradlew bootRun` → `http://localhost:8080`
 2. 어드민 앱 로컬 주소는 **`http://localhost:3001`** 로 가정하고 CORS에 등록해 두었다. 사용자 앱(`http://localhost:3000`)과 다른 포트다. 다른 주소를 쓰면 BE에 알려달라. 등록되지 않은 출처에서는 어드민 API를 부를 수 없다(403).
 3. 사용자 앱 출처(`http://localhost:3000`)에서는 어드민 API를 부를 수 없다. 반대로 어드민 앱 출처에서는 사용자 API를 부를 수 없다.
-4. 승인된 계정이 필요하면 BE에 요청한다. 승인 API가 아직 없어 BE가 DB에서 직접 승인한다. 가입 신청은 화면에서 해도 된다.
+4. 가입 신청은 화면에서 하고, MASTER 계정으로 로그인해 가입 승인 관리에서 승인한다. MASTER 계정은 BE에 요청한다(MASTER는 BE가 DB로만 만든다).
 5. 쿠키 속성(`Secure; SameSite=None`)은 사용자 앱과 같다. 로컬에서 사용자 앱의 쿠키가 동작하는 방식 그대로 동작한다.
 
 ### 서버에 알려줘야 하는 값

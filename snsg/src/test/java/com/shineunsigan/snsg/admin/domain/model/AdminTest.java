@@ -4,13 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.lang.reflect.Field;
 import java.time.LocalDate;
+import java.util.EnumSet;
+import java.util.stream.Stream;
 
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.shineunsigan.snsg.admin.domain.constants.AdminRole;
@@ -127,6 +132,99 @@ class AdminTest {
             assertThatCode(() -> Admin.validatePassword("mint1234")).doesNotThrowAnyException();
             assertThatCode(() -> Admin.validatePassword("a1" + "x".repeat(62))).doesNotThrowAnyException();
             assertThatCode(() -> Admin.validatePassword("mint!@#$1~")).doesNotThrowAnyException();
+        }
+    }
+
+    @Nested
+    @DisplayName("상태 전이")
+    class StatusTransition {
+
+        /** 동작 이름, 허용된 출발 상태, 도착 상태. */
+        static Stream<Arguments> transitions() {
+            return Stream.of(
+                    Arguments.of("approve", AdminStatus.PENDING, AdminStatus.APPROVED),
+                    Arguments.of("reject", AdminStatus.PENDING, AdminStatus.REJECTED),
+                    Arguments.of("suspend", AdminStatus.APPROVED, AdminStatus.SUSPENDED),
+                    Arguments.of("unsuspend", AdminStatus.SUSPENDED, AdminStatus.APPROVED));
+        }
+
+        @ParameterizedTest(name = "{0}: {1} → {2}")
+        @MethodSource("transitions")
+        @DisplayName("허용된 출발 상태에서 부르면 도착 상태가 된다")
+        void allowed(String action, AdminStatus from, AdminStatus to) {
+            Admin admin = adminIn(from);
+
+            act(admin, action);
+
+            assertThat(admin.getStatus()).isEqualTo(to);
+        }
+
+        /** 나머지 세 상태에는 같은 동작을 다시 부른 경우(승인 후 승인, 중지 후 중지 등)가 들어 있다. */
+        @ParameterizedTest(name = "{0}: {1}이 아닌 세 상태")
+        @MethodSource("transitions")
+        @DisplayName("허용된 출발 상태가 아닌 나머지 세 상태에서 부르면 ADMIN_STATUS_CONFLICT이고 상태는 그대로다")
+        void conflict(String action, AdminStatus from, AdminStatus to) {
+            EnumSet<AdminStatus> others = EnumSet.complementOf(EnumSet.of(from));
+            assertThat(others).hasSize(3);
+            for (AdminStatus other : others) {
+                Admin admin = adminIn(other);
+
+                assertError(() -> act(admin, action), AdminErrorCode.ADMIN_STATUS_CONFLICT);
+                assertThat(admin.getStatus()).isEqualTo(other);
+            }
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("transitions")
+        @DisplayName("대상이 MASTER면 어느 상태에서든 MASTER_NOT_MODIFIABLE이고 상태는 그대로다")
+        void master(String action, AdminStatus from, AdminStatus to) throws Exception {
+            for (AdminStatus status : AdminStatus.values()) {
+                Admin admin = adminIn(status);
+                makeMaster(admin);
+
+                assertError(() -> act(admin, action), AdminErrorCode.MASTER_NOT_MODIFIABLE);
+                assertThat(admin.getStatus()).isEqualTo(status);
+            }
+        }
+
+        @Test
+        @DisplayName("승인 상태만 승인된 것으로 본다. 거절·이용 중지는 승인되지 않은 것이다(인증·재발급이 막힌다)")
+        void approvedOnlyInApproved() {
+            assertThat(adminIn(AdminStatus.APPROVED).isApproved()).isTrue();
+            assertThat(adminIn(AdminStatus.REJECTED).isApproved()).isFalse();
+            assertThat(adminIn(AdminStatus.SUSPENDED).isApproved()).isFalse();
+        }
+
+        /** 가입 신청부터 허용된 전이만 거쳐 그 상태의 ADMIN을 만든다. */
+        private Admin adminIn(AdminStatus status) {
+            Admin admin = signUp(LOGIN_ID, NAME, AdminTeam.BACKEND, BIRTH_DATE);
+            switch (status) {
+                case PENDING -> { }
+                case APPROVED -> admin.approve();
+                case REJECTED -> admin.reject();
+                case SUSPENDED -> {
+                    admin.approve();
+                    admin.suspend();
+                }
+            }
+            return admin;
+        }
+
+        /** MASTER는 API로 만들지 않고 DB에 넣으므로 만드는 메서드가 없다. 테스트에서만 역할을 바꾼다. */
+        private void makeMaster(Admin admin) throws ReflectiveOperationException {
+            Field role = Admin.class.getDeclaredField("role");
+            role.setAccessible(true);
+            role.set(admin, AdminRole.MASTER);
+        }
+
+        private void act(Admin admin, String action) {
+            switch (action) {
+                case "approve" -> admin.approve();
+                case "reject" -> admin.reject();
+                case "suspend" -> admin.suspend();
+                case "unsuspend" -> admin.unsuspend();
+                default -> throw new IllegalArgumentException(action);
+            }
         }
     }
 

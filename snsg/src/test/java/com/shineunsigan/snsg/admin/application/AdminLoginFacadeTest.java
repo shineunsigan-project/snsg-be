@@ -23,6 +23,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -33,6 +36,7 @@ import com.shineunsigan.snsg.admin.application.port.out.AdminRefreshTokenStorePo
 import com.shineunsigan.snsg.admin.application.port.out.AdminTokenPort;
 import com.shineunsigan.snsg.admin.application.port.out.LoginAttemptPort;
 import com.shineunsigan.snsg.admin.application.port.out.PasswordHashPort;
+import com.shineunsigan.snsg.admin.domain.constants.AdminStatus;
 import com.shineunsigan.snsg.admin.domain.exception.AdminErrorCode;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.common.exception.ErrorCode;
@@ -69,7 +73,7 @@ class AdminLoginFacadeTest {
     @BeforeEach
     void setUp() {
         AdminProperties properties = new AdminProperties(Duration.ofMinutes(30), SESSION_VALIDITY, MAX_FAILURES,
-                LOCK_DURATION);
+                LOCK_DURATION, 20, 50);
         facade = new AdminLoginFacade(loginAttemptPort, passwordHashPort, adminQueryService,
                 new AdminTokenIssuer(adminTokenPort, adminRefreshTokenStorePort, properties), properties);
     }
@@ -77,7 +81,7 @@ class AdminLoginFacadeTest {
     @Test
     @DisplayName("맞는 아이디·비밀번호이고 승인됐으면 새 세션(로그인 시각 + refresh 수명에 만료)으로 발급하고 실패 횟수를 초기화한다")
     void login() {
-        givenAdmin(true);
+        givenAdmin(AdminStatus.APPROVED);
         when(passwordHashPort.matches(PASSWORD, HASH)).thenReturn(true);
         when(adminTokenPort.issueAccessToken(eq(ADMIN_ID), any())).thenReturn("access");
         when(adminTokenPort.issueRefreshToken(eq(ADMIN_ID), anyString(), any())).thenReturn("refresh");
@@ -112,7 +116,7 @@ class AdminLoginFacadeTest {
     @Test
     @DisplayName("비밀번호가 틀리면 INVALID_ADMIN_CREDENTIALS이고 실패를 기록한다")
     void wrongPassword() {
-        givenAdmin(true);
+        givenAdmin(AdminStatus.APPROVED);
 
         assertError(() -> facade.login(new AdminLoginCommand(LOGIN_ID, "wrong1234")),
                 AdminErrorCode.INVALID_ADMIN_CREDENTIALS);
@@ -125,7 +129,7 @@ class AdminLoginFacadeTest {
     @Test
     @DisplayName("비밀번호가 맞고 승인 대기면 ADMIN_PENDING_APPROVAL. 토큰을 발급하지 않고 실패 횟수는 초기화한다")
     void pendingApproval() {
-        givenAdmin(false);
+        givenAdmin(AdminStatus.PENDING);
         when(passwordHashPort.matches(PASSWORD, HASH)).thenReturn(true);
 
         assertError(() -> facade.login(new AdminLoginCommand(LOGIN_ID, PASSWORD)),
@@ -135,10 +139,38 @@ class AdminLoginFacadeTest {
         verifyNoInteractions(adminTokenPort, adminRefreshTokenStorePort);
     }
 
+    @ParameterizedTest
+    @CsvSource({"REJECTED, ADMIN_REJECTED", "SUSPENDED, ADMIN_SUSPENDED", "PENDING, ADMIN_PENDING_APPROVAL"})
+    @DisplayName("비밀번호가 맞고 거절·이용 중지·승인 대기면 상태별 403 코드. 토큰을 발급하지 않고 실패 횟수는 초기화한다")
+    void notApprovedStatus(AdminStatus status, AdminErrorCode expected) {
+        givenAdmin(status);
+        when(passwordHashPort.matches(PASSWORD, HASH)).thenReturn(true);
+
+        assertError(() -> facade.login(new AdminLoginCommand(LOGIN_ID, PASSWORD)), expected);
+
+        verify(loginAttemptPort).reset(LOGIN_ID);
+        verify(loginAttemptPort, never()).recordFailure(anyString(), anyInt(), any());
+        verifyNoInteractions(adminTokenPort, adminRefreshTokenStorePort);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = AdminStatus.class, names = {"PENDING", "REJECTED", "SUSPENDED"})
+    @DisplayName("비밀번호가 틀리면 상태와 관계없이 INVALID_ADMIN_CREDENTIALS이고 실패를 기록한다(상태가 드러나지 않는다)")
+    void wrongPasswordHidesStatus(AdminStatus status) {
+        givenAdmin(status);
+
+        assertError(() -> facade.login(new AdminLoginCommand(LOGIN_ID, "wrong1234")),
+                AdminErrorCode.INVALID_ADMIN_CREDENTIALS);
+
+        verify(loginAttemptPort).recordFailure(LOGIN_ID, MAX_FAILURES, LOCK_DURATION);
+        verify(loginAttemptPort, never()).reset(anyString());
+        verifyNoInteractions(adminTokenPort, adminRefreshTokenStorePort);
+    }
+
     @Test
     @DisplayName("이번 실패로 설정 횟수에 이르면 ADMIN_LOGIN_LOCKED")
     void lockedOnLastFailure() {
-        givenAdmin(true);
+        givenAdmin(AdminStatus.APPROVED);
         when(loginAttemptPort.recordFailure(LOGIN_ID, MAX_FAILURES, LOCK_DURATION)).thenReturn(true);
 
         assertError(() -> facade.login(new AdminLoginCommand(LOGIN_ID, "wrong1234")),
@@ -161,7 +193,7 @@ class AdminLoginFacadeTest {
     @Test
     @DisplayName("UTF-8 72바이트를 넘는 비밀번호(한글 64자)는 대조하지 않고 INVALID_ADMIN_CREDENTIALS. 예외가 새지 않는다")
     void passwordOverHashLimit() {
-        givenAdmin(true);
+        givenAdmin(AdminStatus.APPROVED);
 
         assertError(() -> facade.login(new AdminLoginCommand(LOGIN_ID, "가".repeat(64))),
                 AdminErrorCode.INVALID_ADMIN_CREDENTIALS);
@@ -170,9 +202,9 @@ class AdminLoginFacadeTest {
         verify(loginAttemptPort).recordFailure(LOGIN_ID, MAX_FAILURES, LOCK_DURATION);
     }
 
-    private void givenAdmin(boolean approved) {
+    private void givenAdmin(AdminStatus status) {
         when(adminQueryService.findCredential(LOGIN_ID))
-                .thenReturn(Optional.of(new AdminCredentialResult(ADMIN_ID, HASH, approved)));
+                .thenReturn(Optional.of(new AdminCredentialResult(ADMIN_ID, HASH, status)));
     }
 
     private void assertError(ThrowingCallable callable, ErrorCode errorCode) {

@@ -57,7 +57,7 @@ class AdminReissueTokenFacadeTest {
     void setUp() {
         facade = new AdminReissueTokenFacade(adminTokenPort, adminRefreshTokenStorePort, adminQueryService,
                 new AdminTokenIssuer(adminTokenPort, adminRefreshTokenStorePort,
-                        new AdminProperties(ACCESS_VALIDITY, Duration.ofHours(12), 5, Duration.ofMinutes(15))));
+                        new AdminProperties(ACCESS_VALIDITY, Duration.ofHours(12), 5, Duration.ofMinutes(15), 20, 50)));
     }
 
     @Nested
