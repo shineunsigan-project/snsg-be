@@ -34,6 +34,7 @@
   - 한 흐름이 두 도메인에 걸치는데 어느 쪽이 상대를 부르면 순환이 되면, 자기 데이터가 없는 도메인이 흐름을 조합한다.
     - 예: 탈퇴는 user의 일이지만 확인할 데이터(남은 일정)는 schedule에 있다. schedule → user가 이미 있어 user가 schedule을 부를 수 없으므로 auth가 조합한다. `WithdrawFacade`(`SchedulePort`로 탈퇴 가능 확인 → `UserPort.withdraw`), `CheckWithdrawalFacade`. 의존은 auth → schedule, auth → user다.
     - 사용자 요청 탈퇴만 확인하고, 카카오 연결 끊기 웹훅 탈퇴(`HandleSocialUnlinkFacade`)는 확인하지 않는다. 그래서 user `WithdrawUserUseCase`의 입구가 둘(`withdraw`, `withdrawBySocialAccount`)이다.
+- **admin(운영 도구 계정·인증)은 다른 도메인과 어느 방향으로도 import하지 않는다.** 일반 사용자는 어드민에 접속할 수도, 어떤 정보도 볼 수 없어야 한다(사용자 합의). 테이블(`admins`)·토큰 키·Redis 키·보안 체인을 user·auth와 모두 따로 둔다. 두 보안 설정에 공통인 것(401 진입점 `AdminAuthenticationEntryPoint` ↔ auth `JwtAuthenticationEntryPoint`, refresh 해시 저장 adapter)은 각자 둔다(도메인 간 중복 허용). 다른 도메인의 어드민 API는 admin을 부르지 않고 `/api/admin/v1/**` 아래에 두기만 한다(`.claude/rules/api.md` URL 절).
 - application·domain과 infrastructure 사이는 반드시 DIP. application·domain은 infrastructure를 import하지 않는다.
   - DB: `domain/repository` 인터페이스 ← `infrastructure/persistence`의 `XxxRepositoryImpl`
   - 그 외 외부 기술(Redis, Kafka, 외부 API, 타 도메인 등): `application/port/out`의 `XxxPort` ← `infrastructure`의 `XxxAdapter`
@@ -227,7 +228,7 @@
 - **둘을 함께 잡으면 순서는 항상 사용자 → 일정이다.** 순서가 섞이면 교착이 난다. 일정 하나만 잡는 흐름(참여 취소, 일정 전체 취소)은 사용자 잠금을 걸지 않는다.
 - **잠금 조회는 그 트랜잭션에서 그 행을 처음 읽는 조회여야 한다.** 먼저 잠금 없이 읽어 영속성 컨텍스트에 올려두면, 잠근 뒤에도 옛 값(확정 인원·모집 상태)을 쓴다.
 - **잠그는 조회에 연관 컬렉션을 fetch join하지 않는다.** PostgreSQL은 outer join의 nullable 쪽에 `FOR UPDATE`를 걸 수 없고, 잠글 대상은 루트 행 하나면 된다. 구성요소는 잠근 뒤 지연 로딩으로 읽는다(READ COMMITTED라 앞 트랜잭션이 커밋한 행을 본다).
-- **부분 유니크 인덱스 위반을 오류 코드로 바꾸는 곳은 잠금 없이 경쟁이 실제로 나는 곳뿐이다.** 예: 닉네임(`UserRepositoryImpl.save`가 409 `DUPLICATED_NICKNAME`으로 바꾼다). 잠금으로 직렬화한 경로의 인덱스(`uix_participants_confirmed`)는 앱 경로로는 위반되지 않는 마지막 방어선이라 바꾸지 않는다. 위반되면 잠금 버그이므로 500으로 드러나게 둔다.
+- **부분 유니크 인덱스 위반을 오류 코드로 바꾸는 곳은 잠금 없이 경쟁이 실제로 나는 곳뿐이다.** 예: 닉네임(`UserRepositoryImpl.save`가 409 `DUPLICATED_NICKNAME`으로 바꾼다), 어드민 아이디(`AdminRepositoryImpl.save`가 `uix_admins_login_id` 위반을 409 `DUPLICATED_LOGIN_ID`로 바꾼다). 잠금으로 직렬화한 경로의 인덱스(`uix_participants_confirmed`)는 앱 경로로는 위반되지 않는 마지막 방어선이라 바꾸지 않는다. 위반되면 잠금 버그이므로 500으로 드러나게 둔다.
 - **배치 실행 전체를 잠글 때는 세션 advisory lock(`pg_try_advisory_lock`)을 쓴다.** 언제 잠그는지는 스케줄러 절. 예: `place/infrastructure/persistence/PostgresPlaceImportLockAdapter`.
   - `pg_advisory_xact_lock`은 잡은 트랜잭션이 끝나면 풀려, 실행 전체를 트랜잭션 하나로 감싸야 한다. 외부 호출을 트랜잭션 밖에 두는 facade 규칙과 맞지 않는다.
   - 세션 잠금은 잡은 연결에서 풀어야 한다. `DataSource`에서 연결 하나를 직접 받아 잡고, 작업이 끝나면(예외가 나도) 같은 연결로 풀고 돌려준다. `JdbcTemplate`은 호출마다 다른 연결을 받을 수 있어 쓰지 않는다. 실행 동안 연결 하나를 점유하고, 반영은 다른 연결의 트랜잭션에서 한다. 서버가 죽어 연결이 끊기면 PostgreSQL이 푼다.
@@ -277,9 +278,32 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
   - 이미 처리된 대상으로 다시 불려도 아무것도 바꾸지 않게 서비스 메서드를 쓴다(멱등).
 - 켜고 끄는 스위치는 `common/config/SchedulingConfig` 하나다(`@EnableScheduling` + `@ConditionalOnProperty(scheduling.enabled=true)`). `application.yaml`에서 켜고(모든 프로파일), 테스트에서는 끈다(`.claude/rules/testing.md`). 도메인 스케줄러를 더할 때 따로 켜지 않는다. common에 둔 이유는 common 절.
 
+### 보안 체인 (Spring Security)
+
+사용자 인증(auth)과 어드민 인증(admin)은 `SecurityFilterChain`이 따로다(SHI-182).
+
+- 어드민 체인 `admin/infrastructure/security/AdminSecurityConfig`: `securityMatcher("/api/admin/**")` + `@Order(Ordered.HIGHEST_PRECEDENCE)`로 먼저 고른다. 사용자 체인 `auth/infrastructure/security/SecurityConfig`는 matcher 없이 나머지 전부를 받는다. 요청 하나에는 체인 하나만 돈다.
+- 체인마다 자기 토큰 필터·401 진입점만 넣는다. 사용자 토큰은 어드민 경로에서, 어드민 토큰은 사용자 경로에서 401 `UNAUTHENTICATED`다.
+- **토큰 필터를 `@Component`(빈)로 두면 Spring Boot가 서블릿 필터로도 모든 URL에 자동 등록한다.** 체인이 하나일 때는 체인 안에서 먼저 돌아 `OncePerRequestFilter`가 두 번째 실행을 건너뛰어 드러나지 않는다. 체인이 둘이면 다른 체인의 필터가 체인이 끝난 뒤 서블릿 단계에서 돌고, 다른 키로 토큰을 해석하다 실패해 `clearContext()`를 불러 **컨트롤러의 `@AuthenticationPrincipal`이 null이 된다.** `@WebMvcTest`의 MockMvc도 Filter 빈을 등록하므로 슬라이스 테스트로 재현된다(`.claude/rules/testing.md` 보안 테스트 항목).
+  - 사용자 필터(`JwtAuthenticationFilter`, 빈)는 `SecurityConfig`의 `FilterRegistrationBean.setEnabled(false)`로 자동 등록을 끈다.
+  - 어드민 필터(`AdminAuthenticationFilter`)는 빈이 아니다. `AdminSecurityConfig`가 `new`로 만들어 체인에만 넣는다. 새 체인·필터를 더하면 이 방식을 따른다.
+- **어드민 상태는 요청마다 DB에서 확인한다.** 필터가 `AdminQueryService.findApprovedRole`(삭제되지 않았고 `APPROVED`인 어드민의 역할)을 불러 있을 때만 인증을 채운다. 역할을 토큰에 싣지 않는다. 재발급(`AdminReissueTokenFacade`)도 승인 상태가 아니면 그 어드민의 세션을 모두 지운다. 새 상태(거절·이용 중지)를 더해도 `APPROVED`만 통과하므로 자동으로 막힌다.
+- **어드민 세션은 절대 만료다(로그인 후 `admin.refresh-token-validity`).** 재발급은 회전하되 만료를 늘리지 않는다(사용자 refresh는 재발급마다 수명 전체로 다시 발급한다).
+  - 세션 만료 시각은 refresh JWT의 `exp`에 싣는다. 로그인 때 `AdminTokenIssuer`가 지금 + 수명(초 단위로 자름, JWT exp가 초 단위라 재발급 때 읽은 값과 같아진다)으로 정하고, 재발급은 refresh에서 읽은 만료를 그대로 넘긴다. `AdminTokenPort`·`AdminRefreshTokenStorePort`는 만료 시각을 인자로 받는다.
+  - Redis 세션 키 TTL은 남은 시간, 세션 집합 TTL은 저장할 때마다 수명 전체(남은 시간이 가장 긴 세션보다 먼저 사라지지 않게), 쿠키 Max-Age는 남은 시간을 초 단위로 올림한 값이다.
+  - access 만료는 `min(지금 + access 수명, 세션 만료)`다. 세션이 끝난 뒤 access로 더 쓰는 시간을 없앤다.
+  - 재발급은 해석한 세션 만료가 지났으면 발급하지 않는다(`INVALID_ADMIN_REFRESH_TOKEN`).
+- **로그인 실패 잠금**(`AdminLoginFacade`, `RedisLoginAttemptAdapter`): 같은 아이디로 `admin.login-max-failures`번 연속 실패하면 `admin.login-lock-duration` 동안 잠근다.
+  - 아이디는 **입력 문자열 그대로** 묶는다. 계정 존재 여부와 상관없이 센다. 없는 아이디도 똑같이 잠겨 잠금 응답으로 존재가 드러나지 않는다.
+  - 아이디 없음과 비밀번호 틀림은 같은 401 `INVALID_ADMIN_CREDENTIALS`다. 아이디가 없어도 **더미 해시와 한 번 대조해** 응답 시간으로도 존재가 드러나지 않게 한다(`BCryptPasswordHashAdapter`가 기동 때 더미 해시를 만든다).
+  - 잠긴 동안은 계정 조회·해시 대조·실패 기록을 하지 않는다. 비밀번호가 맞으면(승인 대기로 403이 나가는 경우도) 횟수를 지운다. 승인 대기 여부는 비밀번호가 맞은 뒤에만 알려준다.
+- **비밀번호는 BCrypt 해시로 저장한다**(`PasswordHashPort` ← `infrastructure/crypto/BCryptPasswordHashAdapter`). 해시가 필요한 흐름(가입·로그인)은 facade다. BCrypt는 입력의 앞 72바이트만 쓴다. 가입 규칙은 공백 없는 ASCII 최대 64자라 넘지 않고, 로그인 입력이 UTF-8 72바이트를 넘으면 대조 없이 불일치로 본다(`Admin.isComparablePassword`, 500이 아니라 401). `$2a$`·`$2b$`·`$2y$`(htpasswd, README의 MASTER 절차)를 모두 받는다.
+- MASTER는 API로 만들지 않고 운영자가 DB에 직접 넣는다(절차는 `README.md`). 다른 어드민은 가입 신청(`ADMIN`·`PENDING`) 후 MASTER가 승인한다(SHI-183).
+
 ### Redis
 
 - 키는 `용도:식별자` 형태로 쓴다. 식별자가 여럿이면 `:`로 잇는다. 예: `refresh:{userId}:{sessionId}`, `sessions:{userId}`, `signup:{token}`.
+- 도메인끼리 키 접두사가 겹치지 않게 한다. admin은 `admin-`을 붙인다: `admin-refresh:{adminId}:{sessionId}`, `admin-sessions:{adminId}`, `admin-login-fail:{loginId}`(INCR, TTL 잠금 시간), `admin-login-lock:{loginId}`. 잠금 시작(잠금 키 SET + 횟수 키 DEL)과 실패 기록(INCR + EXPIRE)은 MULTI/EXEC로 묶는다.
 - **TTL을 반드시 건다.** 만료를 Redis가 지우므로 정리 작업을 따로 만들지 않는다. 같은 값이 토큰 만료 등 다른 곳에도 쓰이면 **한 설정값에서 가져와** 두 곳이 어긋나지 않게 한다.
   - SET처럼 여러 번 덧붙이는 키는 덧붙일 때마다 TTL을 다시 건다. 예: `sessions:{userId}`는 세션을 저장할 때마다 refresh 만료와 같은 TTL로 늘린다.
   - **여러 키를 함께 만들며 TTL을 걸어야 하면 MULTI/EXEC(`SessionCallback`)로 묶는다.** 명령을 따로 보내면 중간에 실패할 때 TTL 없는 키가 남는다(SADD 뒤 EXPIRE 전). 예: `RedisRefreshTokenStoreAdapter.save`(SET + SADD + EXPIRE).
@@ -300,10 +324,13 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 ### 설정 (`@ConfigurationProperties`)
 
 - **prefix를 흔한 OS 환경변수 이름(`user`, `home`, `path`, `lang` 등)과 같게 두지 않는다.** Spring은 OS 환경변수도 속성으로 읽어 `USER`를 `user` 속성으로 잡는다. prefix와 정확히 같은 이름의 값이 있으면 Binder가 그 문자열을 record에 바인딩하려 해 기동이 실패할 수 있다. 리눅스 운영 서버에는 `USER`·`HOME`·`PATH`가 항상 있다. 예: 닉네임 정책은 `user.*`가 아니라 `nickname.*`(`user/application/NicknameProperties`)다. 탈퇴 회원 비식별 배치는 `withdrawal.*`(`user/application/WithdrawalProperties`)다. 페이지 크기·실행 시각은 닉네임 정책이 아니라 `nickname.*`에 두지 않았다.
+  - 환경변수 이름도 relaxed binding으로 속성이 된다. `ADMIN_JWT_SECRET`은 `admin.jwt.secret`으로도 잡히므로 `admin.*` record(`AdminProperties`)에 `jwt` 필드를 두지 않는다(두면 그 값이 바인딩된다). 서명 키는 `admin-jwt.secret`(`admin/infrastructure/jwt/AdminJwtProperties`)에 따로 둔다.
 - 두 규칙이 같은 기간을 쓰면 설정 하나에서 읽는다. 예: `nickname.protect-after-change`는 바꾸기 전 닉네임 보호 기간이자 닉네임 재변경 제한 기간이다. `nickname.protect-after-withdrawal`은 탈퇴 닉네임 보호 기간이자 탈퇴 원본 보관 기간(`user_withdrawals.anonymize_due_at`)이다.
 - 설정은 그 값으로 계산하는 도메인에 둔다. 예: `schedule.withdrawal-block-after-start`(탈퇴를 막는 기간)는 흐름은 auth가 조합하지만 schedule이 탈퇴 가능 시각을 계산해 돌려주므로 `ScheduleProperties`에 있다.
-- 예외: 애노테이션 속성이 읽는 값은 record를 주입할 자리가 없어 자리표시자(`"${...}"`)로 읽는다. 예: `@Scheduled(fixedDelayString = "${schedule.status-transition-interval}")`, `@Scheduled(cron = "${withdrawal.anonymize-cron}")`, `@Scheduled(cron = "${place.import-cron}")`. 그 키는 record에 넣지 않고, 넣지 않은 이유를 yaml 주석으로 남긴다(`@ConfigurationProperties`는 모르는 키를 무시한다).
-- **새 환경변수를 설정에서 읽으면 운영 목록 `snsg/.env.example`에 키를 값 없이 더한다.** 로컬 `snsg/.env`에도 넣어야 테스트 컨텍스트가 뜬다(`.claude/rules/testing.md`). 운영 값은 ECS task definition(`snsg-be-web-task`, 저장소 밖)에 넣는다. `.github/workflows/deploy.yml`은 최신 task definition의 이미지만 바꿔 배포하므로, 기본값 없는 자리표시자(`${DATA_GO_KR_API_KEY}`)가 task definition에 없으면 운영 기동이 멈춘다. task definition에 넣어야 한다는 것을 PR의 background에 적는다. 예: SHI-181의 `DATA_GO_KR_API_KEY`(`public-data.api-key`).
+- 예외: 애노테이션 속성이 읽는 값은 record를 주입할 자리가 없어 자리표시자(`"${...}"`)로 읽는다. 예: `@Scheduled(fixedDelayString = "${schedule.status-transition-interval}")`, `@Scheduled(cron = "${withdrawal.anonymize-cron}")`, `@Scheduled(cron = "${place.import-cron}")`, `@ConditionalOnProperty(name = "openapi.admin-group-enabled")`. 그 키는 record에 넣지 않고, 넣지 않은 이유를 yaml 주석으로 남긴다(`@ConfigurationProperties`는 모르는 키를 무시한다).
+- **새 환경변수를 설정에서 읽으면 운영 목록 `snsg/.env.example`에 키를 값 없이 더한다.** 로컬 `snsg/.env`에도 넣어야 테스트 컨텍스트가 뜬다(`.claude/rules/testing.md`). 운영 값은 ECS task definition(`snsg-be-web-task`, 저장소 밖)에 넣는다. `.github/workflows/deploy.yml`은 최신 task definition의 이미지만 바꿔 배포하므로, 기본값 없는 자리표시자(`${DATA_GO_KR_API_KEY}`)가 task definition에 없으면 운영 기동이 멈춘다. task definition에 넣어야 한다는 것을 PR의 background에 적는다. 예: SHI-181의 `DATA_GO_KR_API_KEY`(`public-data.api-key`), SHI-182의 `ADMIN_JWT_SECRET`(`admin-jwt.secret`, 기본값 없음)·`ADMIN_CORS_ALLOWED_ORIGINS`(`cors.admin-allowed-origins`, 기본값 빈 목록).
+  - `ADMIN_CORS_ALLOWED_ORIGINS`는 빠졌을 때 열리지 않고 닫히게 두었다. 없으면 어드민 경로의 브라우저 호출을 모두 거부한다(`CorsProperties`, SHI-182 결정). 사용자 쪽 `CORS_ALLOWED_ORIGINS`의 기본값(`*`)과 다르다.
+  - 머지 전 워크트리에만 넣은 값을 다른 워크트리·메인 디렉터리 `.env`에 옮기는 절차는 `.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의".
 
 ## 코드 작성
 
@@ -334,3 +361,5 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 판단 기록:
 
 - `common/config/SchedulingConfig`(SHI-173): 스케줄링 스위치(`scheduling.enabled`)다. schedule(상태 전환)·user(탈퇴 비식별, SHI-175) 스케줄러가 쓰고, 기능 명세의 place(장소 적재) 스케줄러도 같은 스위치를 쓴다. 한 도메인에 두면 다른 도메인이 그 도메인 설정에 기댄다. 비즈니스 로직이 없고 도메인을 import하지 않는다. 메인 클래스에 `@EnableScheduling`을 두지 않는 것은 `JpaAuditingConfig`와 같이 설정으로 끌 수 있어야 해서다. 대가: common/config가 하나 늘어난다. 주기·작업 내용은 각 도메인에 둔다.
+- `common/config/CorsConfig`·`CorsProperties`의 어드민 출처 분리(SHI-182): `/api/admin/**`는 `cors.admin-allowed-origins`만, `/api/v1/**`는 `cors.allowed-origins`만 허용한다. refresh 쿠키가 `SameSite=None`이라 사용자 앱 출처가 어드민 경로를 credentials로 부를 수 있으면 사용자 앱의 XSS 한 번으로 어드민 세션이 재발급될 수 있다. 두 보안 체인이 같은 `CorsConfigurationSource` 빈을 주입받으므로 common에 그대로 두고 경로 문자열로 나눴다(도메인 import 없음). 두 패턴은 겹치지 않게 등록한다. `UrlBasedCorsConfigurationSource`는 처음 맞는 패턴 하나만 쓴다. 대가: 전에는 `/api/**` 전체였으므로, 두 prefix 밖의 새 경로(예: `/api/v2/**`)를 만들면 CorsConfig에 패턴을 더해야 한다.
+- `common/config/OpenApiConfig`의 그룹 분리(SHI-182): 사용자·어드민 그룹을 경로 문자열로 나눈다. 규칙은 `.claude/rules/api.md` 스펙 그룹과 공개 범위 절.

@@ -39,6 +39,11 @@
 ## 워크트리를 쓸 때 주의
 
 - 워크트리마다 `snsg/.env`를 복사해야 빌드·테스트가 돈다. gitignore 대상이라 따라오지 않는다.
+- **작업이 새 환경변수를 더하면 그 값은 머지 전까지 그 워크트리의 `snsg/.env`에만 있다.** 새 워크트리는 메인 디렉터리의 `snsg/.env`를 복사하므로, 머지 뒤 메인 `.env`에 그 값이 없으면 develop을 받은 모든 워크트리에서 테스트 컨텍스트가 뜨지 않는다(기본값 없는 자리표시자 해석 실패). 예: SHI-182의 `ADMIN_JWT_SECRET`.
+  - 머지할 때 사용자에게 메인 `snsg/.env`(그리고 develop을 받을 다른 워크트리의 `.env`)에 그 키를 더해야 한다고 알리고, PR의 background에도 적는다. 작업 중 AI는 메인 디렉터리와 다른 워크트리의 `.env`를 고치지 않는다(SHI-182 task.md 비목표).
+  - 비밀값(서명 키 등)은 각자 로컬에서 난수로 만들어 파일에 바로 덧붙이고 화면·로그·채팅에 찍지 않는다. 예: Bash `printf 'ADMIN_JWT_SECRET=%s\n' "$(openssl rand -base64 48)" >> snsg/.env`. 다른 비밀값(`JWT_SECRET` 등)과 같은 값을 쓰지 않는다.
+  - 기본값이 있는 키(`ADMIN_CORS_ALLOWED_ORIGINS`)는 없어도 컨텍스트가 뜨지만, 로컬에서 그 기능을 쓰려면 함께 넣는다.
+  - 운영 값은 `.claude/rules/package-structure.md` 설정 절(ECS task definition).
 - **DB·Redis·8080 포트는 모든 워크트리가 공유한다.** 두 워크트리에서 앱을 동시에 띄울 수 없고, 한쪽에서 돌린 테스트가 다른 쪽 데이터를 지운다.
   - 테스트는 한 번에 한 워크트리에서만 돌리도록 조율한다.
   - 워크트리를 오가며 마이그레이션이 서로 다르면 로컬 스키마를 지우고 다시 적용해도 된다. 번호 규칙은 `.claude/rules/package-structure.md` 마이그레이션 절.

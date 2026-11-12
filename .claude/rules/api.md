@@ -8,6 +8,7 @@ paths:
 ## URL
 
 - 클라이언트용: `/api/v1/<resources>`. 리소스는 복수형 kebab-case 명사 (`/api/v1/user-settings`).
+- 어드민(운영 도구)용: `/api/admin/v1/<resources>`. 어드민 보안 체인(`AdminSecurityConfig`, `securityMatcher("/api/admin/**")`)과 어드민 CORS 출처가 이 prefix로 갈린다. 사용자 토큰으로는 이 경로를, 어드민 토큰으로는 사용자 경로를 통과할 수 없다. 다른 도메인의 어드민 API(예: SHI-184 place의 장소 수정)도 이 prefix 아래 두면 admin을 import하지 않고 어드민 인증을 그대로 쓴다.
 - 서비스 간 내부 호출용: `/internal/v1/<resources>`. 외부에 노출하지 않는다.
 - 동사 대신 하위 리소스로 표현한다: `PATCH /api/v1/matchings/{id}/approval`
 - 요청자 자신의 리소스는 id 대신 `me`로 가리킨다. 대상은 인증 주체로 정해진다. 예: `DELETE /api/v1/users/me`(탈퇴), `DELETE /api/v1/schedules/{scheduleId}/participants/me`(참여 취소).
@@ -39,7 +40,11 @@ paths:
     - 하위 경로도 같다. `GET /api/v1/schedules`(모집 중 목록)는 공개이고 `GET /api/v1/schedules/participating`·`/hosted`는 인증이 필요하다. 그래서 `/api/v1/schedules` 정확한 경로 하나만 연다. 일정 상세(`GET /api/v1/schedules/{scheduleId}`)를 열 때 `/api/v1/schedules/*` 패턴을 쓰면 두 목록도 함께 열린다. `SecurityConfigTest`가 두 목록의 401을 단정하므로 그대로 두면 테스트가 깨진다.
     - 경로 변수 패턴(`/api/v1/schedules/{scheduleId}`)은 같은 prefix의 고정 경로(`/participating`·`/hosted`)와도 맞는다. 인증이 필요한 고정 경로를 정확히 지정해 `authenticated()`로 먼저 두고, 그 뒤에 경로 변수 패턴을 `permitAll()`로 연다. 매처는 위에서부터 처음 맞는 것이 적용되므로 순서가 바뀌면 두 목록이 열린다. 순서가 중요하다는 주석을 남긴다. `{scheduleId}` 한 단계 패턴은 하위 경로(`/participants` 등)에 걸리지 않는다.
   - 공개 경로는 API를 만들 때 하나씩 추가한다. 아직 없는 경로를 미리 적어두지 않는다.
-- 인증 필터는 공개 경로를 포함한 **모든 요청**에서 돈다. 필터는 토큰이 있을 때만 해석해 principal을 채우고, 없거나 틀리면 그냥 통과시킨다. 인가 판단은 `authorizeHttpRequests`가, 401 응답 생성은 `AuthenticationEntryPoint`가 한다.
+- **어드민 경로**의 인증 주체는 `@AuthenticationPrincipal UUID adminId`다. 어드민 필터(`AdminAuthenticationFilter`)가 principal에 adminId를, 권한에 역할(`ROLE_MASTER`·`ROLE_ADMIN`)을 넣는다.
+  - 역할은 토큰에 싣지 않고 **요청마다 DB에서 읽는다.** 토큰이 유효해도 그 어드민이 삭제되지 않았고 상태가 `APPROVED`일 때만 인증을 채우고, 아니면 익명이라 보호 경로는 401 `UNAUTHENTICATED`다. 이용 중지 같은 상태 변경이 access 만료를 기다리지 않고 반영된다.
+  - principal이 UUID라 감사 컬럼(`created_by`·`updated_by`)에 adminId 문자열이 남고, 다른 도메인 컨트롤러가 admin을 import하지 않고 받는다.
+  - 어드민 공개 경로는 `AdminSecurityConfig`에서 메서드와 정확한 경로로만 연다. 지금은 `POST /api/admin/v1/auth/signup`·`/login`·`/tokens` 셋이다. `DELETE /api/admin/v1/auth/tokens`(로그아웃)는 인증이 필요하다(사용자 재발급·로그아웃과 같은 이유). 선택 인증 어드민 API는 없다.
+- 인증 필터는 공개 경로를 포함해 **자기 보안 체인의 모든 요청**에서 돈다(사용자 필터는 `/api/admin/**`를 뺀 모든 요청, 어드민 필터는 `/api/admin/**`). 필터는 토큰이 있을 때만 해석해 principal을 채우고, 없거나 틀리면 그냥 통과시킨다. 인가 판단은 `authorizeHttpRequests`가, 401 응답 생성은 `AuthenticationEntryPoint`가 한다.
   - 공개 경로에서도 principal이 채워져야 한다. 일정 상세처럼 비로그인도 보지만 보는 사람에 따라 응답이 달라지는 API가 있다(참여자면 "참여 취소", 아니면 "참여하기").
   - principal을 UUID로 두는 이유: 전용 타입을 auth에 두면 다른 도메인 컨트롤러가 auth를 import하게 된다. 역할 등 담을 정보가 늘면 principal 타입을 `common`에 둔다.
 
@@ -59,6 +64,10 @@ paths:
   - 리다이렉트로 토큰을 넘길 때 **쿼리 파라미터에 담지 않는다.** 브라우저 히스토리·서버 로그·Referer에 남는다.
 - **검증 실패는 한 코드로 묶는다.** 만료·위조·형식 오류를 구분해 알려주면 공격자에게 힌트가 된다. sid가 없는 이전 형식 refresh, 세션 불일치(교체됨·로그아웃됨·만료됨)도 같은 `INVALID_REFRESH_TOKEN`이다. 클라이언트는 어느 쪽이든 재발급을 시도하면 된다.
 - 소셜 로그인은 **BE가 인가코드를 받아 토큰으로 교환**한다. 클라이언트 시크릿을 FE에 두지 않는다.
+- 어드민 토큰은 위 규칙(subject만, sid로 종류 구분, 세션별 해시 보관·회전, 검증 실패 한 코드 `INVALID_ADMIN_REFRESH_TOKEN`)을 그대로 따르고 다음이 다르다.
+  - 서명 키가 따로다(`ADMIN_JWT_SECRET`, `JWT_SECRET`과 다른 값). 한쪽 토큰은 다른 쪽에서 서명 검증부터 실패한다.
+  - 쿠키는 `adminRefreshToken`, `Path=/api/admin/v1/auth`(`AdminCookieFactory`). 사용자 쿠키와 이름·경로가 다르다.
+  - **세션은 로그인 시각부터 `admin.refresh-token-validity`(12시간)에 끝난다(절대 만료).** 재발급은 회전하되 만료를 늘리지 않는다. 사용자 refresh는 재발급마다 14일로 다시 발급된다(슬라이딩). access 만료도 세션 만료를 넘지 않는다(30분과 남은 시간 중 짧은 쪽). 구현은 `.claude/rules/package-structure.md` 보안 체인 절.
 
 ## 응답과 예외
 
@@ -92,6 +101,17 @@ paths:
 
 FE는 작업할 때마다 이 저장소를 받아가 `docs/`를 본다. FE에 API를 전하는 것은 `docs/openapi.yaml`과 `docs/api-guide.md`이므로, 두 문서만 보고 화면을 만들 수 있어야 한다(이슈 관리 규칙은 `docs/linear-convention.md`로 따로 전한다). 문서에 없는 것은 FE가 추측하게 되고, 추측은 틀린다.
 
+어드민 API는 따로 전한다: `docs/openapi-admin.yaml`과 `docs/admin-api-guide.md`. 사용자 문서(`docs/openapi.yaml`·`docs/api-guide.md`)에는 어드민 경로를 적지 않는다(`api-guide.md`에 어드민 문서 위치 안내 한 줄만 있다). 어드민 가이드에는 "어드민은 사용자 앱과 **반드시 별도 앱**(별도 Next.js 앱·별도 도메인)", "로그인 전에는 로그인·가입 말고 어떤 화면도 그리지 않는다"를 필수 요구로 둔다(사용자 합의, SHI-182). 아래 "빠짐없이 적는 것"은 어드민 문서에도 같다.
+
+### 스펙 그룹과 공개 범위
+
+- 스펙은 springdoc 그룹 둘이다(`OpenApiConfig`). `user` 그룹은 `/api/admin/**`를 뺀다. `admin` 그룹은 `openapi.admin-group-enabled=true`일 때만 생기고, **어느 프로파일에서도 켜지 않는다.** `OpenApiSpecTest`만 켠다.
+- **서버가 내주는 문서(그룹 없는 `/v3/api-docs`·`/v3/api-docs.yaml`, swagger-ui, `user` 그룹)에는 어드민 경로·스키마가 나오지 않는다.** 일반 사용자는 어드민의 어떤 정보도 볼 수 없어야 한다(사용자 합의). dev도 swagger가 공개라 같다.
+  - 그룹 없는 스펙은 `application.yaml`의 `springdoc.paths-to-exclude: /api/admin/**`가 거른다. 이 전역 값은 그룹에도 적용되므로 `OpenApiSpecTest`는 비워서 띄운다.
+  - 그룹이 없을 때 `/v3/api-docs/admin`은 springdoc 예외로 500이 된다. `SecurityConfig`가 문서 경로 공개보다 먼저 `.requestMatchers("/v3/api-docs/admin").authenticated()`로 막아 토큰 없이는 401이다. 매처 순서가 바뀌면 다시 열린다.
+  - `OpenApiConfigTest`가 이 공개 범위를 단정한다.
+- 어드민 그룹의 bearer 설명은 어드민 로그인·재발급 토큰을 가리킨다(그룹 customizer가 `Components`를 새로 만들어 사용자 그룹과 공유하는 객체를 고치지 않는다).
+
 ### 엔드포인트마다 빠짐없이 적는 것
 
 - 무엇을 하는 API이고, 어느 화면에서 언제 부르는지
@@ -113,7 +133,7 @@ FE는 작업할 때마다 이 저장소를 받아가 `docs/`를 본다. FE에 AP
 - Request/Response record 필드에는 `@Schema(description, example)`을 단다.
   - **null이 될 수 있는 응답 필드는 description에 null이 되는 조건을 적는다.** springdoc이 스펙을 OpenAPI 3.1.0으로 만들며, `$ref`로 나가는 필드(중첩 record·enum)에는 `@Schema(nullable = true)`를 출력하지 않는다(`docs/openapi.yaml`에 `nullable`이 한 건도 없다). `types = {"object", "null"}`은 `$ref`와 AND로 묶여 null을 무효로 만드는 잘못된 스키마라 쓰지 않는다. 예: `ScheduleDetailResponse`의 `cancellation`, `minAgeGroup`·`maxAgeGroup`.
 - `docs/api-guide.md` 에러 표에서 `INVALID_REQUEST`의 `errors`를 쓰라고 안내할 때는 **필드 검증 실패에만** 쓴다. 본문 없음·JSON 깨짐·경로 변수 형식 오류도 같은 `INVALID_REQUEST`지만 `errors`가 없다(응답과 예외 절). 둘이 같은 화면에서 날 수 있으면 행을 나눠 `errors` 유무와 보여줄 문구(`errors[0].message` / `message`)를 따로 적는다. 예: 일정 전체 취소.
-- API를 바꾸면 같은 PR에서 `OPENAPI_UPDATE=true ./gradlew test --tests '*OpenApiSpecTest'`로 `docs/openapi.yaml`을 다시 만들어 커밋한다. 코드와 다르면 빌드가 실패한다.
-  - `docs/openapi.yaml`은 API를 바꾼 코드와 **같은 커밋**에 넣는다. `docs:` 커밋으로 떼면 그 사이 커밋에서 `OpenApiSpecTest`가 실패한다. `docs/api-guide.md`는 빌드가 대조하지 않으므로 따로 커밋해도 된다.
-- 여러 호출에 걸친 흐름, 공통 규칙, 화면별로 쓰는 API가 바뀌면 `docs/api-guide.md`도 고친다. 이건 빌드가 잡지 못한다.
-- swagger-ui와 스펙 경로는 SecurityConfig에서 공개한다. 운영 프로파일에서는 `springdoc.api-docs.enabled=false`, `springdoc.swagger-ui.enabled=false`로 끈다.
+- API를 바꾸면 같은 PR에서 `OPENAPI_UPDATE=true ./gradlew test --tests '*OpenApiSpecTest'`로 `docs/openapi.yaml`을 다시 만들어 커밋한다. 이 명령은 `docs/openapi-admin.yaml`도 함께 다시 만든다(테스트 안에서 어드민 그룹을 켠다). 코드와 다르면 빌드가 실패한다.
+  - `docs/openapi.yaml`·`docs/openapi-admin.yaml`은 API를 바꾼 코드와 **같은 커밋**에 넣는다. `docs:` 커밋으로 떼면 그 사이 커밋에서 `OpenApiSpecTest`가 실패한다. `docs/api-guide.md`는 빌드가 대조하지 않으므로 따로 커밋해도 된다.
+- 여러 호출에 걸친 흐름, 공통 규칙, 화면별로 쓰는 API가 바뀌면 `docs/api-guide.md`(어드민이면 `docs/admin-api-guide.md`)도 고친다. 이건 빌드가 잡지 못한다.
+- swagger-ui와 스펙 경로는 SecurityConfig에서 공개한다. 운영 프로파일에서는 `springdoc.api-docs.enabled=false`, `springdoc.swagger-ui.enabled=false`로 끈다. 어드민 스펙은 어느 프로파일에서도 공개하지 않는다(스펙 그룹과 공개 범위 절).
