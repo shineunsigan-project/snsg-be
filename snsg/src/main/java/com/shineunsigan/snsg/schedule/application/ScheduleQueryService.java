@@ -18,6 +18,7 @@ import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQuery
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleParticipantQueryResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.WithdrawalEligibilityResult;
 import com.shineunsigan.snsg.schedule.application.port.in.CheckWithdrawableUseCase;
+import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
@@ -54,19 +55,21 @@ public class ScheduleQueryService implements CheckWithdrawableUseCase {
         return toPage(scheduleRepository.findRecruiting(filter, now, after, size + 1), size, now);
     }
 
-    public ScheduleCardPageResult findParticipating(UUID userId, String cursor, Integer size) {
+    public ScheduleCardPageResult findParticipating(UUID userId, SchedulePeriod period, String cursor,
+            Integer size) {
         ScheduleCursor after = decodeCursor(cursor);
         int pageSize = pageSize(size);
         LocalDateTime now = LocalDateTime.now();
-        return toPage(scheduleRepository.findParticipating(userId, startAfter(now), after, pageSize + 1), pageSize,
-                now);
+        return toPage(scheduleRepository.findParticipating(userId, period, completionBoundary(now), after,
+                pageSize + 1), pageSize, now);
     }
 
-    public ScheduleCardPageResult findHosted(UUID userId, String cursor, Integer size) {
+    public ScheduleCardPageResult findHosted(UUID userId, SchedulePeriod period, String cursor, Integer size) {
         ScheduleCursor after = decodeCursor(cursor);
         int pageSize = pageSize(size);
         LocalDateTime now = LocalDateTime.now();
-        return toPage(scheduleRepository.findHosted(userId, startAfter(now), after, pageSize + 1), pageSize, now);
+        return toPage(scheduleRepository.findHosted(userId, period, completionBoundary(now), after, pageSize + 1),
+                pageSize, now);
     }
 
     /**
@@ -119,8 +122,8 @@ public class ScheduleQueryService implements CheckWithdrawableUseCase {
         return Math.max(1, Math.min(size, scheduleProperties.pageSizeMax()));
     }
 
-    /** 시작 + 완료 기준 시간이 지금보다 뒤인 일정만 남기는 기준. 시작이 이 시각보다 뒤여야 한다. */
-    private LocalDateTime startAfter(LocalDateTime now) {
+    /** 완료 시각이 지났는지 가르는 기준. 시작이 이 시각보다 뒤면 완료 전, 이하면 완료 시각이 지났다. */
+    private LocalDateTime completionBoundary(LocalDateTime now) {
         return now.minus(scheduleProperties.completionAfter());
     }
 

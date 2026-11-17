@@ -10,7 +10,8 @@ import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
 /**
- * 일정 목록의 커서. 앞 페이지 마지막 일정의 (시작 시각, id)이고, 다음 페이지는 이 값보다 뒤의 일정이다.
+ * 일정 목록의 커서. 앞 페이지 마지막 일정의 (시작 시각, id)이고, 다음 페이지는 목록의 정렬 방향으로 이 값 다음 일정이다
+ * (시작 빠른 순 목록은 이 값보다 뒤, 지난 일정 목록은 이 값보다 앞). 기간은 싣지 않는다.
  * <p>
  * 클라이언트에는 URL-safe Base64(패딩 없음) 문자열로 준다. 문자가 {@code [A-Za-z0-9_-]}뿐이라 쿼리에 그대로 붙인다.
  * 클라이언트는 내용을 해석하지 않는다.

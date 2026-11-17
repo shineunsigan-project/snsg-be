@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
 import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
@@ -46,8 +47,9 @@ public interface ScheduleRepository {
             Duration blockAfterStart);
 
     /*
-     * 일정 목록 3종. 모두 삭제되지 않은 일정을 (start_at, id) 오름차순으로 limit건까지 준다.
-     * after가 있으면 그 (start_at, id)보다 뒤의 일정만 준다(keyset). null이면 처음부터다.
+     * 일정 목록 3종. 모두 삭제되지 않은 일정을 limit건까지 준다. 모집 중 목록과 UPCOMING은 (start_at, id) 오름차순,
+     * PAST는 (start_at, id) 내림차순이다. after가 있으면 정렬 방향으로 그 (start_at, id) 다음 일정만 준다(keyset).
+     * null이면 처음부터다.
      */
 
     /**
@@ -58,19 +60,22 @@ public interface ScheduleRepository {
             int limit);
 
     /**
-     * 내가 멤버로 확정 참여한 일정. 완료(COMPLETED)가 아니고 시작 시각이 startAfter보다 뒤인 것이다.
-     * 개설자가 취소한 일정도 포함한다. 개설한 일정(HOST 행)은 빠진다.
+     * 내가 멤버로 확정 참여한 일정. 개설자가 취소한 일정도 포함한다. 개설한 일정(HOST 행)은 빠진다.
+     * UPCOMING은 완료(COMPLETED)가 아니고 시작 시각이 completionBoundary보다 뒤인 일정,
+     * PAST는 완료이거나 시작 시각이 completionBoundary 이하인 일정이다.
      *
-     * @param startAfter 지금 − 완료 기준 시간. 시작 + 완료 기준 시간이 지금보다 뒤인 일정만 남긴다
+     * @param completionBoundary 지금 − 완료 기준 시간. 시작 시각이 이 값 이하면 완료 시각이 지난 일정이다
      */
-    List<Schedule> findParticipating(UUID userId, LocalDateTime startAfter, ScheduleCursor after, int limit);
+    List<Schedule> findParticipating(UUID userId, SchedulePeriod period, LocalDateTime completionBoundary,
+            ScheduleCursor after, int limit);
 
     /**
-     * 내가 개설한 일정. 완료(COMPLETED)가 아니고 시작 시각이 startAfter보다 뒤인 것이다. 취소한 일정도 포함한다.
+     * 내가 개설한 일정. 취소한 일정도 포함한다. 기간 조건은 {@link #findParticipating}과 같다.
      *
-     * @param startAfter 지금 − 완료 기준 시간
+     * @param completionBoundary 지금 − 완료 기준 시간
      */
-    List<Schedule> findHosted(UUID userId, LocalDateTime startAfter, ScheduleCursor after, int limit);
+    List<Schedule> findHosted(UUID userId, SchedulePeriod period, LocalDateTime completionBoundary,
+            ScheduleCursor after, int limit);
 
     /*
      * 상태 전환(스케줄러). 조건부 일괄 UPDATE라 여러 번, 여러 서버에서 돌아도 결과가 같다.

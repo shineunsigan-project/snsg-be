@@ -27,6 +27,7 @@ import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleRegionResult;
 import com.shineunsigan.snsg.schedule.application.port.out.RegionPort;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
+import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 
 /**
  * 지역 이름 채우기(활성·비활성·없는 지역)와 지역 조회 횟수를 본다.
@@ -68,27 +69,27 @@ class ListSchedulesFacadeTest {
     @Test
     @DisplayName("참여한·개설한 목록도 요청한 사용자로 일정을 읽고 지역 이름을 채운다")
     void myListsFillRegionNames() {
-        when(scheduleQueryService.findParticipating(USER_ID, "c", 10))
+        when(scheduleQueryService.findParticipating(USER_ID, SchedulePeriod.PAST, "c", 10))
                 .thenReturn(new ScheduleCardPageResult(List.of(card("11440")), null));
-        when(scheduleQueryService.findHosted(USER_ID, null, null))
+        when(scheduleQueryService.findHosted(USER_ID, SchedulePeriod.UPCOMING, null, null))
                 .thenReturn(new ScheduleCardPageResult(List.of(card("11410")), null));
         when(regionPort.findAll()).thenReturn(List.of(
                 new ScheduleRegionResult("11440", "마포구", true),
                 new ScheduleRegionResult("11410", "서대문구", true)));
 
-        assertThat(listSchedulesFacade.listParticipating(USER_ID, "c", 10).items())
+        assertThat(listSchedulesFacade.listParticipating(USER_ID, SchedulePeriod.PAST, "c", 10).items())
                 .extracting(ScheduleListItemResult::regionName).containsExactly("마포구");
-        assertThat(listSchedulesFacade.listHosted(USER_ID, null, null).items())
+        assertThat(listSchedulesFacade.listHosted(USER_ID, SchedulePeriod.UPCOMING, null, null).items())
                 .extracting(ScheduleListItemResult::regionName).containsExactly("서대문구");
     }
 
     @Test
     @DisplayName("일정이 0건이면 빈 items와 nextCursor null이고 지역을 조회하지 않는다")
     void emptyPage() {
-        when(scheduleQueryService.findHosted(USER_ID, null, null))
+        when(scheduleQueryService.findHosted(USER_ID, SchedulePeriod.UPCOMING, null, null))
                 .thenReturn(new ScheduleCardPageResult(List.of(), null));
 
-        ScheduleListResult result = listSchedulesFacade.listHosted(USER_ID, null, null);
+        ScheduleListResult result = listSchedulesFacade.listHosted(USER_ID, SchedulePeriod.UPCOMING, null, null);
 
         assertThat(result.items()).isEmpty();
         assertThat(result.nextCursor()).isNull();

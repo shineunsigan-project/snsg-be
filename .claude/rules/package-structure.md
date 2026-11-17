@@ -254,6 +254,8 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 - **선택 조건이 있는 쿼리는 고정 JPQL 조각을 조건이 있을 때만 이어 붙이고, 값은 모두 파라미터로 바인딩한다.** 값을 문자열에 넣지 않는다. `(:ids is null or s.x in :ids)`처럼 한 쿼리에 넣지 않는다. 컬렉션 파라미터에 null을 바인딩하게 된다.
   - 빈 목록 조건(빈 값만 보낸 필터)은 쿼리를 돌리지 않고 빈 결과를 준다. `in ()`을 만들지 않는다.
 - 다음 페이지는 keyset으로 자른다: `s.startAt > :cursorStartAt or (s.startAt = :cursorStartAt and s.id > :cursorId)`, `order by s.startAt, s.id`. 한 건 더 읽기는 `setMaxResults(size + 1)`.
+  - 내림차순 목록은 비교와 정렬을 함께 뒤집는다: `s.startAt < :cursorStartAt or (s.startAt = :cursorStartAt and s.id < :cursorId)`, `order by s.startAt desc, s.id desc`. 예: `ScheduleRepositoryImpl.findPage`의 `descending`(지난 일정 `SchedulePeriod.PAST`).
+  - 기간처럼 서로 여집합인 구간은 조건 조각 하나만 바꿔 같은 기준 시각으로 나눈다. 합치면 빠짐도 겹침도 없어야 한다. 예: `ScheduleRepositoryImpl.appendPeriod`(`UPCOMING`은 `status <> COMPLETED and startAt > 기준`, `PAST`는 `status = COMPLETED or startAt <= 기준`).
 - **정렬과 커서 비교는 DB에서만 한다.** Java의 `UUID.compareTo`는 부호 있는 비교라 PostgreSQL의 uuid 순서와 다르다. 읽은 목록을 메모리에서 다시 정렬하거나 커서를 Java로 비교하면 페이지 경계에서 중복·누락이 난다.
   - 페이지·커서가 없고 정원으로 크기가 묶인 목록은 이 규칙에 들지 않는다. 애그리거트 루트가 구성요소를 메모리에서 정렬해 돌려준다. 예: 참여자 명단(`Schedule.confirmedParticipantsInListOrder`, 개설자 먼저 → `createdAt` → 행 id). 이때 id는 순서를 매 요청 같게 하는 보조 키일 뿐이고, DB uuid 순서와 같다고 기대하지 않는다.
 - 삭제 조건(`isDeleted = false`)은 루트와 조인한 구성요소 모두에 명시한다(삭제 절).

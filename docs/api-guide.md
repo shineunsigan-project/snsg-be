@@ -864,7 +864,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 - **취소한 뒤 보이는 것**:
   - 일정 상세: 누가 보든(`GUEST` 포함) `displayStatus`가 `CANCELED`이고 `cancellation`에 사유(`reason`)와 취소 일시(`canceledAt`)가 온다. 개설자의 `availableActions`는 빈 배열이다.
   - 참여자의 참여 기록은 그대로 남는다. 확정 인원(`confirmedCount`)도 바뀌지 않고, 참여자 명단도 그대로 볼 수 있다.
-  - 참여한 일정 목록·개설한 일정 목록: 완료 시각(시작 + 12시간) 전까지 `displayStatus = CANCELED`("일정 취소됨")로 남는다. 모집 중 목록에서는 빠진다.
+  - 참여한 일정 목록·개설한 일정 목록: 완료 시각(시작 + 12시간) 전까지 다가오는 일정(`period` 생략)에 `displayStatus = CANCELED`("일정 취소됨")로 남고, 그 뒤에는 지난 일정(`period=PAST`)에 `CANCELED`로 온다. 모집 중 목록에서는 빠진다.
   - 그 일정에는 참여할 수 없고(409 `RECRUIT_CLOSED`), 참여를 취소할 수도 없다(409 `PARTICIPATION_NOT_CANCELABLE`).
   - 취소된 일정은 탈퇴를 막지 않고, 시간 겹침 검사에서도 빠진다. 참여자는 같은 시간대의 다른 일정에 참여할 수 있다.
 - **알림은 없다.** 취소해도 참여자에게 푸시·메시지가 가지 않는다. 참여자는 상세나 참여한 일정 목록의 "일정 취소됨"으로 안다.
@@ -876,8 +876,8 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | API | 화면 | 인증 | 무엇이 오는가 |
 | --- | --- | --- | --- |
 | `GET /api/v1/schedules` | 모집 중 탭(LIST-01·02), 필터(LIST-03) | **필요 없다.** 토큰을 보내도 응답은 같다 | 취소되지 않았고 시작 전인 일정 전부 |
-| `GET /api/v1/schedules/participating` | 참여한 일정 탭(LIST-04) | 필요하다 | 내가 멤버로 참여한 완료 전 일정 |
-| `GET /api/v1/schedules/hosted` | 개설한 일정 탭(LIST-05), 개설 직후 내가 연 일정(CRT-07) | 필요하다 | 내가 연 완료 전 일정 |
+| `GET /api/v1/schedules/participating` | 참여한 일정 탭(LIST-04) | 필요하다 | 내가 멤버로 참여한 일정. 기본은 완료 전 일정, `period=PAST`면 지난 일정 |
+| `GET /api/v1/schedules/hosted` | 개설한 일정 탭(LIST-05), 개설 직후 내가 연 일정(CRT-07) | 필요하다 | 내가 연 일정. 기본은 완료 전 일정, `period=PAST`면 지난 일정 |
 
 인증이 필요한 두 API는 토큰이 없거나 만료되면 401 `UNAUTHENTICATED`다. 재발급 후 다시 부르고, 재발급도 실패하면 로그인 화면으로 간다.
 
@@ -886,15 +886,18 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 - 모집 중(`GET /api/v1/schedules`)
   - 포함: 시작 전 일정. **정원이 찬 일정도 `RECRUITMENT_CLOSED`(모집 마감)로 함께 온다.**
   - 제외: 시작 시각이 된 일정(같은 시각 포함), 취소된 일정, 완료된 일정.
+- 참여한 일정(`/participating`)·개설한 일정(`/hosted`)은 `period`로 **다가오는 일정**(`UPCOMING`, 기본)과 **지난 일정**(`PAST`)을 나눠 부른다. 두 기간을 합치면 빠짐도 겹침도 없다. 기간의 경계는 완료 시각(시작 + 12시간)이고, 정확히 시작 + 12시간이 된 일정부터 지난 일정이다.
 - 참여한 일정(`/participating`)
-  - 포함: 내가 [참여하기]로 참여 확정한 일정 중 완료(시작 + 12시간) 전인 것. 시작했어도 완료 전이면 온다. **개설자가 취소한 일정도 완료 시각 전까지 `CANCELED`(일정 취소됨)로 남는다.**
-  - 제외: 내가 참여를 취소한 일정(다시 참여하면 다시 온다), 완료된 일정, 내가 연 일정(개설한 일정 탭에 있다).
+  - 다가오는 일정(`period` 생략): 내가 [참여하기]로 참여 확정한 일정 중 완료(시작 + 12시간) 전인 것. 시작했어도 완료 전이면 온다. **개설자가 취소한 일정도 완료 시각 전까지 `CANCELED`(일정 취소됨)로 남는다.**
+  - 지난 일정(`period=PAST`): 내가 참여 확정한 일정 중 완료된 것(`COMPLETED`, 일정 완료)과 시작 + 12시간이 지난 것. **개설자가 취소한 일정은 완료 시각이 지나면 여기에 `CANCELED`로 온다.**
+  - 두 기간 모두 제외: 내가 참여를 취소한 일정(다시 참여하면 다시 온다), 내가 연 일정(개설한 일정 탭에 있다).
 - 개설한 일정(`/hosted`)
-  - 포함: 내가 연 일정 중 완료(시작 + 12시간) 전인 것. 방금 연 일정도 온다. **내가 취소한 일정도 완료 시각 전까지 `CANCELED`(일정 취소됨)로 남는다.**
-  - 제외: 멤버로 참여만 한 일정(참여한 일정 탭에 있다), 완료된 일정.
-- 지난(완료된) 일정을 보는 API는 아직 없다.
+  - 다가오는 일정(`period` 생략): 내가 연 일정 중 완료(시작 + 12시간) 전인 것. 방금 연 일정도 온다. **내가 취소한 일정도 완료 시각 전까지 `CANCELED`(일정 취소됨)로 남는다.**
+  - 지난 일정(`period=PAST`): 내가 연 일정 중 완료된 것(`COMPLETED`)과 시작 + 12시간이 지난 것. 내가 취소한 일정은 완료 시각이 지나면 여기에 `CANCELED`로 온다.
+  - 두 기간 모두 제외: 멤버로 참여만 한 일정(참여한 일정 탭에 있다).
+- 화면에서는 참여한·개설한 탭에 들어올 때 `period` 없이(다가오는 일정) 부르고, 지난 일정 구역(또는 하위 탭)은 `period=PAST`로 따로 부른다. 두 결과를 한 목록에 섞지 않는다(정렬 방향이 반대다).
 
-**요청(쿼리 파라미터)**. 모두 선택이다. `/participating`·`/hosted`는 `cursor`, `size`만 받는다. 필터는 없고, 보내도 무시된다.
+**요청(쿼리 파라미터)**. 모두 선택이다. `/participating`·`/hosted`는 `period`, `cursor`, `size`만 받는다. 필터는 없고, 보내도 무시된다.
 
 | 파라미터 | 대상 | 의미·형식 |
 | --- | --- | --- |
@@ -902,6 +905,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | `regionCodes` | 모집 중 | 지역 목록 API(`GET /api/v1/regions`)의 `code`(5자리 문자열). 여러 개는 `regionCodes=11440&regionCodes=11410`. 그중 하나에 맞으면 온다. 생략·모르는 값·빈 값은 `categoryIds`와 같다. **활동과 지역을 함께 보내면 둘 다 맞는 일정만 온다** |
 | `startDate` | 모집 중 | 시작 날짜 범위의 첫날. `yyyy-MM-dd`(한국 날짜). 그날 00:00부터 포함한다 |
 | `endDate` | 모집 중 | 시작 날짜 범위의 마지막 날. `yyyy-MM-dd`. 그날 23:59까지 포함한다 |
+| `period` | 참여한·개설한 | 기간. `UPCOMING`(다가오는 일정, 기본) 또는 `PAST`(지난 일정). **생략하거나 `period=`처럼 빈 값이면 `UPCOMING`** 이다. 대문자 그대로 보낸다. 그 밖의 값(`FUTURE`, 소문자 `past` 등)은 400 `INVALID_REQUEST` |
 | `cursor` | 세 목록 모두 | 이전 응답의 `nextCursor`를 그대로 보낸다. 생략하면 첫 페이지다 |
 | `size` | 세 목록 모두 | 한 페이지 개수. **생략하면 20, 50보다 크면 50, 1보다 작으면 1**로 맞춘다(오류가 아니다). 숫자가 아니면 400 `INVALID_REQUEST` |
 
@@ -923,9 +927,10 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 **정렬과 페이지**
 
 - **시작 일시가 빠른 순**이다. 시작 일시가 같으면 일정 id 순이다. 받은 순서 그대로 그린다.
+- **지난 일정(`period=PAST`)만 반대로 시작 일시가 늦은 순**이다. 가장 최근에 끝난 일정이 먼저 온다. 시작 일시가 같으면 일정 id 역순이다. 페이지 넘기는 방법은 같다.
 - 한 번에 `size`개를 준다. 더 있으면 `nextCursor`에 값이 있고, **마지막 페이지면 `nextCursor`가 `null`** 이다. 남은 개수가 `size`와 딱 맞아도 마지막 페이지에서 `null`이 오므로, 빈 페이지를 한 번 더 부를 일은 없다.
 - 다음 페이지: **같은 파라미터에 `cursor=<nextCursor>`만 붙여** 부른다. 받은 items를 기존 목록 뒤에 붙인다. 끝까지 넘겨도 중복·누락이 없다(같은 시작 일시인 일정이 여러 개여도 같다).
-- **필터나 탭을 바꾸면 `cursor` 없이 처음부터** 부른다. 다른 필터에서 받은 커서를 쓰지 않는다.
+- **필터나 탭, 기간(`period`)을 바꾸면 `cursor` 없이 처음부터** 부른다. 다른 필터·기간에서 받은 커서를 쓰지 않는다. 다음 페이지는 같은 `period`에 `cursor`를 붙인다.
 - `nextCursor`는 **해석하지 않는 불투명 문자열**이다. 영문·숫자·`_`·`-`만 쓰므로 인코딩 없이 쿼리에 붙인다. 내용이나 형식에 기대지 않는다.
 - 맞는 일정이 없으면 200, `items`는 빈 배열, `nextCursor`는 `null`이다. 화면에 "결과 없음"을 보여준다. 오류가 아니다.
 
@@ -975,10 +980,10 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 
 | 값 | 화면 문구 | 언제 | 나오는 목록 |
 | --- | --- | --- | --- |
-| `RECRUITING` | 모집 중 | 그 밖의 경우 | 세 목록 모두 |
-| `RECRUITMENT_CLOSED` | 모집 마감 | 정원이 찼거나 시작 시각이 지났다 | 세 목록 모두(모집 중 목록에서는 정원이 찬 경우) |
-| `CANCELED` | 일정 취소됨 | 개설자가 일정을 취소했다 | 참여한·개설한 일정 |
-| `COMPLETED` | 일정 완료 | 시작 + 12시간이 지났다 | 목록에는 오지 않는다 |
+| `RECRUITING` | 모집 중 | 그 밖의 경우 | 모집 중 목록, 참여한·개설한 일정의 다가오는 일정 |
+| `RECRUITMENT_CLOSED` | 모집 마감 | 정원이 찼거나 시작 시각이 지났다 | 모집 중 목록(정원이 찬 경우), 참여한·개설한 일정의 다가오는 일정 |
+| `CANCELED` | 일정 취소됨 | 개설자가 일정을 취소했다 | 참여한·개설한 일정. 완료 시각 전에는 다가오는 일정, 지나면 지난 일정(`period=PAST`) |
+| `COMPLETED` | 일정 완료 | 시작 + 12시간이 지났다 | 참여한·개설한 일정의 지난 일정(`period=PAST`)에만 온다 |
 
 **오류**
 
@@ -986,7 +991,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | --- | --- | --- | --- |
 | 400 | `INVALID_DATE_FILTER` | `endDate`가 `startDate`보다 앞선다(모집 중 목록) | 날짜를 다시 고르게 한다 |
 | 400 | `INVALID_CURSOR` | 해석할 수 없는 `cursor` | `cursor` 없이 처음부터 다시 부른다 |
-| 400 | `INVALID_REQUEST` | `categoryIds`가 UUID 형식이 아니다, `categoryIds`·`regionCodes`가 중복을 빼고 20개를 넘는다, 날짜가 `yyyy-MM-dd`가 아니거나 없는 날짜다(`2026-13-01`), `size`가 숫자가 아니다 | 정상 화면 흐름에서는 나지 않는다 |
+| 400 | `INVALID_REQUEST` | `period`가 `UPCOMING`·`PAST`가 아니다(참여한·개설한 목록), `categoryIds`가 UUID 형식이 아니다, `categoryIds`·`regionCodes`가 중복을 빼고 20개를 넘는다, 날짜가 `yyyy-MM-dd`가 아니거나 없는 날짜다(`2026-13-01`), `size`가 숫자가 아니다 | 정상 화면 흐름에서는 나지 않는다 |
 | 401 | `UNAUTHENTICATED` | `/participating`·`/hosted`에 토큰이 없거나 만료·무효 | 재발급 후 다시 부르고, 실패하면 로그인 화면으로 |
 
 날짜와 커서가 둘 다 틀리면 `INVALID_DATE_FILTER`가 온다.
@@ -1030,8 +1035,8 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 | 일정 상세 (참여 취소 팝업 [확인]) | `DELETE /api/v1/schedules/{scheduleId}/participants/me` | 200이든 409든 상세를 다시 불러 그린다. 409 `NOT_PARTICIPANT`는 이미 취소된 상태다. 404 `SCHEDULE_NOT_FOUND`면 일정 목록으로 보내고 토스트 |
 | 일정 상세 ([일정 취소] → 사유 입력 팝업 [확인], `availableActions`에 `CANCEL_SCHEDULE`이 있을 때만) | `POST /api/v1/schedules/{scheduleId}/cancellation` | 200이든 403·409든 팝업을 닫고 상세를 다시 불러 그린다. 400 `INVALID_REQUEST`면 팝업에 문구(`errors`가 있으면 `errors[0].message`, 없으면 `message`)를 보여주고 다시 적게 한다. 409 `SCHEDULE_NOT_CANCELABLE`는 이미 취소됐거나 시작한 일정이다(두 번 눌렸으면 첫 요청이 성공한 것). 404 `SCHEDULE_NOT_FOUND`면 토스트 후 일정 목록으로. 응답 전까지 [확인]을 막는다 |
 | 일정 목록 · 모집 중 탭 (LIST-01·02, 필터 LIST-03) | `GET /api/v1/schedules` (토큰 없이) | 탭 진입과 필터 변경 때 `cursor` 없이 부르고, 끝까지 스크롤하면 `cursor=nextCursor`로 다음 페이지를 붙인다. `nextCursor`가 null이면 더 부르지 않는다. 빈 `items`면 결과 없음. 400 `INVALID_DATE_FILTER`면 날짜를 다시 고르게 하고, `INVALID_CURSOR`면 처음부터 다시 부른다 |
-| 일정 목록 · 참여한 일정 탭 (LIST-04) | `GET /api/v1/schedules/participating` | 페이지 넘기기는 모집 중 탭과 같다. `CANCELED`는 "일정 취소됨"으로 그린다. 401이면 재발급 후 다시 부른다 |
-| 일정 목록 · 개설한 일정 탭 (LIST-05), 개설 직후 내가 연 일정 (CRT-07) | `GET /api/v1/schedules/hosted` | 개설 201을 받은 뒤 이 목록으로 와서 부른다. 방금 연 일정이 들어 있다. 페이지 넘기기·401 처리는 위와 같다 |
+| 일정 목록 · 참여한 일정 탭 (LIST-04) | `GET /api/v1/schedules/participating` | 탭에 들어오면 `period` 없이(다가오는 일정) 부른다. 지난 일정은 `period=PAST`로 따로 부르고(시작 늦은 순), 기간을 바꾸면 `cursor` 없이 처음부터 부른다. 페이지 넘기기는 모집 중 탭과 같다. `CANCELED`는 "일정 취소됨", `COMPLETED`는 "일정 완료"로 그린다. 401이면 재발급 후 다시 부른다 |
+| 일정 목록 · 개설한 일정 탭 (LIST-05), 개설 직후 내가 연 일정 (CRT-07) | `GET /api/v1/schedules/hosted` | 개설 201을 받은 뒤 이 목록으로 와서 `period` 없이 부른다. 방금 연 일정이 들어 있다. 지난 일정은 `period=PAST`로 따로 부른다. 페이지 넘기기·401 처리는 위와 같다 |
 
 알림 API는 아직 없다. 일정 API가 새로 생기면 이 표에 추가한다.
 

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 import com.shineunsigan.snsg.common.entity.Auditor;
 import com.shineunsigan.snsg.schedule.domain.constants.ParticipantRole;
 import com.shineunsigan.snsg.schedule.domain.constants.ParticipationStatus;
+import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
@@ -91,44 +92,39 @@ public class ScheduleRepositoryImpl implements ScheduleRepository {
             parameters.put("startFrom", filter.startFrom());
             parameters.put("startBefore", filter.startBefore());
         }
-        return findPage(jpql, parameters, after, limit);
+        return findPage(jpql, parameters, after, limit, false);
     }
 
     /** 확정 행은 일정당 사용자 하나뿐이라(부분 유니크 인덱스) 같은 일정이 두 번 나오지 않는다. */
     @Override
-    public List<Schedule> findParticipating(UUID userId, LocalDateTime startAfter, ScheduleCursor after,
-            int limit) {
+    public List<Schedule> findParticipating(UUID userId, SchedulePeriod period, LocalDateTime completionBoundary,
+            ScheduleCursor after, int limit) {
         StringBuilder jpql = new StringBuilder("""
                 select s from ScheduleParticipant p join p.schedule s
                 where p.userId = :userId
                   and p.role = :member
                   and p.status = :confirmed
                   and p.isDeleted = false
-                  and s.isDeleted = false
-                  and s.status <> :completed
-                  and s.startAt > :startAfter""");
+                  and s.isDeleted = false""");
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("userId", userId);
         parameters.put("member", ParticipantRole.MEMBER);
         parameters.put("confirmed", ParticipationStatus.CONFIRMED);
-        parameters.put("completed", ScheduleStatus.COMPLETED);
-        parameters.put("startAfter", startAfter);
-        return findPage(jpql, parameters, after, limit);
+        appendPeriod(jpql, parameters, period, completionBoundary);
+        return findPage(jpql, parameters, after, limit, period == SchedulePeriod.PAST);
     }
 
     @Override
-    public List<Schedule> findHosted(UUID userId, LocalDateTime startAfter, ScheduleCursor after, int limit) {
+    public List<Schedule> findHosted(UUID userId, SchedulePeriod period, LocalDateTime completionBoundary,
+            ScheduleCursor after, int limit) {
         StringBuilder jpql = new StringBuilder("""
                 select s from Schedule s
                 where s.hostUserId = :userId
-                  and s.isDeleted = false
-                  and s.status <> :completed
-                  and s.startAt > :startAfter""");
+                  and s.isDeleted = false""");
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("userId", userId);
-        parameters.put("completed", ScheduleStatus.COMPLETED);
-        parameters.put("startAfter", startAfter);
-        return findPage(jpql, parameters, after, limit);
+        appendPeriod(jpql, parameters, period, completionBoundary);
+        return findPage(jpql, parameters, after, limit, period == SchedulePeriod.PAST);
     }
 
     @Override
@@ -141,18 +137,32 @@ public class ScheduleRepositoryImpl implements ScheduleRepository {
         scheduleJpaRepository.completeStartedBy(now.minus(completionAfter), now, Auditor.SYSTEM_SCHEDULER);
     }
 
+    /** 두 기간은 서로의 여집합이다. 완료 기준 시각과 같은 시작은 지난 일정이다. */
+    private static void appendPeriod(StringBuilder jpql, Map<String, Object> parameters, SchedulePeriod period,
+            LocalDateTime completionBoundary) {
+        switch (period) {
+            case UPCOMING -> jpql.append(" and s.status <> :completed and s.startAt > :completionBoundary");
+            case PAST -> jpql.append(" and (s.status = :completed or s.startAt <= :completionBoundary)");
+        }
+        parameters.put("completed", ScheduleStatus.COMPLETED);
+        parameters.put("completionBoundary", completionBoundary);
+    }
+
     /**
      * keyset 조건과 정렬을 붙여 limit건을 읽는다. 정렬과 커서 비교는 DB에서 한다.
      * Java의 UUID 비교는 부호 있는 비교라 PostgreSQL uuid 순서와 다르다.
+     * 내림차순이면 (start_at, id)가 커서보다 앞인 일정을 늦은 순으로 읽는다.
      */
     private List<Schedule> findPage(StringBuilder jpql, Map<String, Object> parameters, ScheduleCursor after,
-            int limit) {
+            int limit, boolean descending) {
         if (after != null) {
-            jpql.append(" and (s.startAt > :cursorStartAt or (s.startAt = :cursorStartAt and s.id > :cursorId))");
+            jpql.append(descending
+                    ? " and (s.startAt < :cursorStartAt or (s.startAt = :cursorStartAt and s.id < :cursorId))"
+                    : " and (s.startAt > :cursorStartAt or (s.startAt = :cursorStartAt and s.id > :cursorId))");
             parameters.put("cursorStartAt", after.startAt());
             parameters.put("cursorId", after.id());
         }
-        jpql.append(" order by s.startAt, s.id");
+        jpql.append(descending ? " order by s.startAt desc, s.id desc" : " order by s.startAt, s.id");
         TypedQuery<Schedule> query = entityManager.createQuery(jpql.toString(), Schedule.class);
         parameters.forEach(query::setParameter);
         return query.setMaxResults(limit).getResultList();
