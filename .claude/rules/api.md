@@ -100,6 +100,8 @@ paths:
 
 - 응답 `data`는 `{items, nextCursor}`다. 다음 페이지가 없으면 `nextCursor`는 `null`, 맞는 것이 없으면 200에 `items = []`, `nextCursor = null`이다.
 - 정렬은 (정렬 키, id) 오름차순이고, 다음 페이지는 keyset(마지막 항목의 (정렬 키, id)보다 뒤)으로 자른다. offset을 쓰지 않는다. 쿼리 작성은 `.claude/rules/package-structure.md` 인프라 규약의 목록 쿼리 절.
+  - 최근 것이 먼저 와야 쓸 수 있는 목록만 (정렬 키, id) 내림차순이고, keyset도 마지막 항목보다 앞을 읽는다. 커서 형식은 같다. 예: 참여한·개설한 일정의 지난 일정(`period=PAST`, 시작 늦은 순, SHI-190).
+  - 한 API가 정렬 방향이 다른 구간을 함께 가지면 섞지 않고 파라미터로 나눈다. 방향이 둘이면 keyset 커서 하나로 표현할 수 없다. 예: 같은 API의 `period`(`UPCOMING` 기본·`PAST`). 구간은 커서에 싣지 않고, 바꾸면 필터·탭처럼 cursor 없이 처음부터 부른다.
 - 커서는 마지막 항목의 (정렬 키, id)를 URL-safe Base64(패딩 없음)로 인코딩한 불투명 문자열이다. 문자가 `[A-Za-z0-9_-]`뿐이라 FE가 인코딩 없이 쿼리에 붙인다. FE는 내용을 해석하지 않는다. 예: `ScheduleCursor`.
   - 해석할 수 없는 커서는 그 도메인 ErrorCode의 `INVALID_CURSOR`(400)다. FE는 커서 없이 처음부터 다시 부른다.
 - 한 건 더(size + 1) 읽어 다음 페이지가 있는지 정한다. 남은 개수가 size와 딱 맞아도 마지막 페이지에서 `nextCursor = null`이 나가, FE가 빈 페이지를 한 번 더 부르지 않는다.
