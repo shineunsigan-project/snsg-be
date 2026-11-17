@@ -762,13 +762,30 @@ paths:
       summary: 참여한 일정 목록
       description: |-
         내가 멤버로 참여한 일정을 카드로 보여준다. 목록 화면의 참여한 일정 탭에서 부른다. 로그인이 필요하다.
-        완료 전(시작 + 12시간 전) 일정만 온다. 시작한 일정도 완료 전이면 온다.
-        개설자가 취소한 일정도 완료 시각 전까지 displayStatus = CANCELED(일정 취소됨)로 남는다.
-        내가 참여를 취소한 일정과 내가 연 일정은 오지 않는다(내가 연 일정은 개설한 일정 목록에 있다).
-        정렬·페이지(cursor, size, nextCursor)는 모집 중 목록과 같다. 필터는 없다.
+        period로 기간을 고른다. 생략하면(UPCOMING) 완료 전(시작 + 12시간 전) 일정만 온다. 시작한 일정도 완료 전이면 온다.
+        period=PAST는 지난 일정이다. 완료된 일정(displayStatus = COMPLETED)과 시작 + 12시간이 지난 일정이 온다.
+        개설자가 취소한 일정은 완료 시각 전까지 UPCOMING에, 그 뒤에는 PAST에 displayStatus = CANCELED(일정 취소됨)로 온다.
+        내가 참여를 취소한 일정과 내가 연 일정은 어느 기간에도 오지 않는다(내가 연 일정은 개설한 일정 목록에 있다).
+        UPCOMING의 정렬은 시작 일시가 빠른 순(같으면 id 순), PAST는 늦은 순(같으면 id 역순)이다.
+        페이지(cursor, size, nextCursor)는 모집 중 목록과 같다. 다음 페이지는 같은 period에 cursor = nextCursor를 붙여 부른다. 그 밖의 필터는 없다.
         없으면 items는 빈 배열이고 nextCursor는 null이다. 조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
       operationId: listParticipating
       parameters:
+      - name: period
+        in: query
+        description: |-
+          기간. UPCOMING(기본)은 완료 전(시작 + 12시간 전) 일정을 시작 빠른 순(같으면 id 순)으로,
+          PAST는 지난 일정(완료됐거나 시작 + 12시간이 지난 일정, 그 뒤에 남은 취소 일정 포함)을 시작 늦은 순(같으면 id 역순)으로 준다.
+          두 기간을 합치면 빠짐도 겹침도 없다. 생략하거나 빈 값이면 UPCOMING이다. 대문자 그대로 보낸다. 그 밖의 값은 400 INVALID_REQUEST.
+          기간을 바꾸면 cursor 없이 처음부터 부른다
+        required: false
+        schema:
+          type: string
+          default: UPCOMING
+          enum:
+          - UPCOMING
+          - PAST
+        example: PAST
       - name: cursor
         in: query
         description: 이전 응답의 nextCursor를 그대로 보낸다. 생략하면 첫 페이지다. 해석할 수 없으면 400 INVALID_CURSOR
@@ -792,7 +809,7 @@ paths:
                 $ref: "#/components/schemas/ApiResponseScheduleCardPageResponse"
         "400":
           description: |-
-            INVALID_REQUEST: size가 숫자가 아니다. 정상 화면 흐름에서는 나지 않는다.
+            INVALID_REQUEST: period가 UPCOMING·PAST가 아니거나, size가 숫자가 아니다. 정상 화면 흐름에서는 나지 않는다.
             INVALID_CURSOR: 해석할 수 없는 cursor. cursor 없이 처음부터 다시 부른다
           content:
             '*/*':
@@ -811,12 +828,30 @@ paths:
       summary: 개설한 일정 목록
       description: |-
         내가 연 일정을 카드로 보여준다. 목록 화면의 개설한 일정 탭에서 부르고, 일정 개설에 성공한 뒤 이 화면(내가 연 일정)으로 와서 부른다.
-        로그인이 필요하다. 완료 전(시작 + 12시간 전) 일정만 온다. 방금 연 일정도 온다.
-        내가 취소한 일정도 완료 시각 전까지 displayStatus = CANCELED(일정 취소됨)로 남는다. 멤버로 참여만 한 일정은 오지 않는다.
-        정렬·페이지(cursor, size, nextCursor)는 모집 중 목록과 같다. 필터는 없다.
+        로그인이 필요하다. period로 기간을 고른다. 생략하면(UPCOMING) 완료 전(시작 + 12시간 전) 일정만 온다. 방금 연 일정도 온다.
+        period=PAST는 지난 일정이다. 완료된 일정(displayStatus = COMPLETED)과 시작 + 12시간이 지난 일정이 온다.
+        내가 취소한 일정은 완료 시각 전까지 UPCOMING에, 그 뒤에는 PAST에 displayStatus = CANCELED(일정 취소됨)로 온다.
+        멤버로 참여만 한 일정은 어느 기간에도 오지 않는다.
+        UPCOMING의 정렬은 시작 일시가 빠른 순(같으면 id 순), PAST는 늦은 순(같으면 id 역순)이다.
+        페이지(cursor, size, nextCursor)는 모집 중 목록과 같다. 다음 페이지는 같은 period에 cursor = nextCursor를 붙여 부른다. 그 밖의 필터는 없다.
         없으면 items는 빈 배열이고 nextCursor는 null이다. 조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
       operationId: listHosted
       parameters:
+      - name: period
+        in: query
+        description: |-
+          기간. UPCOMING(기본)은 완료 전(시작 + 12시간 전) 일정을 시작 빠른 순(같으면 id 순)으로,
+          PAST는 지난 일정(완료됐거나 시작 + 12시간이 지난 일정, 그 뒤에 남은 취소 일정 포함)을 시작 늦은 순(같으면 id 역순)으로 준다.
+          두 기간을 합치면 빠짐도 겹침도 없다. 생략하거나 빈 값이면 UPCOMING이다. 대문자 그대로 보낸다. 그 밖의 값은 400 INVALID_REQUEST.
+          기간을 바꾸면 cursor 없이 처음부터 부른다
+        required: false
+        schema:
+          type: string
+          default: UPCOMING
+          enum:
+          - UPCOMING
+          - PAST
+        example: PAST
       - name: cursor
         in: query
         description: 이전 응답의 nextCursor를 그대로 보낸다. 생략하면 첫 페이지다. 해석할 수 없으면 400 INVALID_CURSOR
@@ -840,7 +875,7 @@ paths:
                 $ref: "#/components/schemas/ApiResponseScheduleCardPageResponse"
         "400":
           description: |-
-            INVALID_REQUEST: size가 숫자가 아니다. 정상 화면 흐름에서는 나지 않는다.
+            INVALID_REQUEST: period가 UPCOMING·PAST가 아니거나, size가 숫자가 아니다. 정상 화면 흐름에서는 나지 않는다.
             INVALID_CURSOR: 해석할 수 없는 cursor. cursor 없이 처음부터 다시 부른다
           content:
             '*/*':

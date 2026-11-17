@@ -62,6 +62,7 @@ import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
 import com.shineunsigan.snsg.schedule.domain.constants.Gender;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
+import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 
@@ -323,7 +324,7 @@ class ScheduleControllerTest {
     @Test
     @DisplayName("참여한 목록은 200이고 SecurityContext의 사용자로 facade를 부른다. 마지막 페이지면 nextCursor는 null")
     void listsParticipating() throws Exception {
-        when(listSchedulesFacade.listParticipating(USER_ID, "c", 10)).thenReturn(page(UUID.randomUUID(), null));
+        when(listSchedulesFacade.listParticipating(USER_ID, SchedulePeriod.UPCOMING, "c", 10)).thenReturn(page(UUID.randomUUID(), null));
 
         mockMvc.perform(get("/api/v1/schedules/participating").param("cursor", "c").param("size", "10"))
                 .andExpect(status().isOk())
@@ -332,13 +333,13 @@ class ScheduleControllerTest {
                 .andExpect(jsonPath("$.data.items[0].placeName").doesNotExist())
                 .andExpect(jsonPath("$.data.nextCursor").value(nullValue()));
 
-        verify(listSchedulesFacade).listParticipating(USER_ID, "c", 10);
+        verify(listSchedulesFacade).listParticipating(USER_ID, SchedulePeriod.UPCOMING, "c", 10);
     }
 
     @Test
     @DisplayName("개설한 목록은 200이고 SecurityContext의 사용자로 facade를 부른다")
     void listsHosted() throws Exception {
-        when(listSchedulesFacade.listHosted(USER_ID, null, null)).thenReturn(page(UUID.randomUUID(), "next"));
+        when(listSchedulesFacade.listHosted(USER_ID, SchedulePeriod.UPCOMING, null, null)).thenReturn(page(UUID.randomUUID(), "next"));
 
         mockMvc.perform(get("/api/v1/schedules/hosted"))
                 .andExpect(status().isOk())
@@ -347,7 +348,53 @@ class ScheduleControllerTest {
                 .andExpect(jsonPath("$.data.items[0].placeName").doesNotExist())
                 .andExpect(jsonPath("$.data.nextCursor").value("next"));
 
-        verify(listSchedulesFacade).listHosted(USER_ID, null, null);
+        verify(listSchedulesFacade).listHosted(USER_ID, SchedulePeriod.UPCOMING, null, null);
+    }
+
+    @Test
+    @DisplayName("period=PAST는 지난 일정 기간으로 facade에 넘어간다")
+    void pastPeriodIsPassed() throws Exception {
+        when(listSchedulesFacade.listParticipating(USER_ID, SchedulePeriod.PAST, null, null))
+                .thenReturn(new ScheduleListResult(List.of(), null));
+        when(listSchedulesFacade.listHosted(USER_ID, SchedulePeriod.PAST, "c", null))
+                .thenReturn(new ScheduleListResult(List.of(), null));
+
+        mockMvc.perform(get("/api/v1/schedules/participating").param("period", "PAST"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/schedules/hosted").param("period", "PAST").param("cursor", "c"))
+                .andExpect(status().isOk());
+
+        verify(listSchedulesFacade).listParticipating(USER_ID, SchedulePeriod.PAST, null, null);
+        verify(listSchedulesFacade).listHosted(USER_ID, SchedulePeriod.PAST, "c", null);
+    }
+
+    @Test
+    @DisplayName("빈 값으로 보낸 period는 생략과 같이 UPCOMING이다")
+    void blankPeriodIsUpcoming() throws Exception {
+        when(listSchedulesFacade.listParticipating(USER_ID, SchedulePeriod.UPCOMING, null, null))
+                .thenReturn(new ScheduleListResult(List.of(), null));
+        when(listSchedulesFacade.listHosted(USER_ID, SchedulePeriod.UPCOMING, null, null))
+                .thenReturn(new ScheduleListResult(List.of(), null));
+
+        mockMvc.perform(get("/api/v1/schedules/participating").param("period", ""))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/schedules/hosted").param("period", ""))
+                .andExpect(status().isOk());
+
+        verify(listSchedulesFacade).listParticipating(USER_ID, SchedulePeriod.UPCOMING, null, null);
+        verify(listSchedulesFacade).listHosted(USER_ID, SchedulePeriod.UPCOMING, null, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/schedules/participating?period=FUTURE", "/api/v1/schedules/hosted?period=FUTURE",
+            "/api/v1/schedules/participating?period=past"})
+    @DisplayName("UPCOMING·PAST가 아닌 period(소문자 포함)는 400 INVALID_REQUEST이고 facade를 부르지 않는다")
+    void unknownPeriod(String url) throws Exception {
+        mockMvc.perform(get(url))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        verify(listSchedulesFacade, never()).listParticipating(any(), any(), any(), any());
+        verify(listSchedulesFacade, never()).listHosted(any(), any(), any(), any());
     }
 
     @Test
@@ -411,7 +458,7 @@ class ScheduleControllerTest {
     @Test
     @DisplayName("facade가 INVALID_CURSOR를 던지면 400과 그 code")
     void invalidCursor() throws Exception {
-        when(listSchedulesFacade.listHosted(USER_ID, "broken", null))
+        when(listSchedulesFacade.listHosted(USER_ID, SchedulePeriod.UPCOMING, "broken", null))
                 .thenThrow(new BusinessException(ScheduleErrorCode.INVALID_CURSOR));
 
         mockMvc.perform(get("/api/v1/schedules/hosted").param("cursor", "broken"))

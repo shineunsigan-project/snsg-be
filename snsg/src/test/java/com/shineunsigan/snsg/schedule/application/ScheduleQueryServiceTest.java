@@ -42,6 +42,7 @@ import com.shineunsigan.snsg.schedule.application.dto.result.WithdrawalEligibili
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
+import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
@@ -93,11 +94,12 @@ class ScheduleQueryServiceTest {
     @Test
     @DisplayName("참여한·개설한 목록도 같은 기준으로 size를 맞춘다")
     void pageSizeIsClampedForMyLists() {
-        scheduleQueryService.findParticipating(USER_ID, null, 51);
-        scheduleQueryService.findHosted(USER_ID, null, null);
+        scheduleQueryService.findParticipating(USER_ID, SchedulePeriod.UPCOMING, null, 51);
+        scheduleQueryService.findHosted(USER_ID, SchedulePeriod.UPCOMING, null, null);
 
-        verify(scheduleRepository).findParticipating(eq(USER_ID), any(), isNull(), eq(51));
-        verify(scheduleRepository).findHosted(eq(USER_ID), any(), isNull(), eq(21));
+        verify(scheduleRepository).findParticipating(eq(USER_ID), eq(SchedulePeriod.UPCOMING), any(), isNull(),
+                eq(51));
+        verify(scheduleRepository).findHosted(eq(USER_ID), eq(SchedulePeriod.UPCOMING), any(), isNull(), eq(21));
     }
 
     // 날짜 필터
@@ -170,7 +172,7 @@ class ScheduleQueryServiceTest {
     @Test
     @DisplayName("해석할 수 없는 커서면 INVALID_CURSOR이고 일정을 조회하지 않는다")
     void invalidCursor() {
-        assertError(() -> scheduleQueryService.findHosted(USER_ID, "not base64!", null),
+        assertError(() -> scheduleQueryService.findHosted(USER_ID, SchedulePeriod.UPCOMING, "not base64!", null),
                 ScheduleErrorCode.INVALID_CURSOR);
         verifyNoInteractions(scheduleRepository);
     }
@@ -180,11 +182,12 @@ class ScheduleQueryServiceTest {
     void cursorIsDecoded() {
         ScheduleCursor cursor = new ScheduleCursor(LocalDateTime.of(2026, 11, 14, 19, 30), UUID.randomUUID());
 
-        scheduleQueryService.findParticipating(USER_ID, cursor.encode(), null);
-        scheduleQueryService.findHosted(USER_ID, "", null);
+        scheduleQueryService.findParticipating(USER_ID, SchedulePeriod.UPCOMING, cursor.encode(), null);
+        scheduleQueryService.findHosted(USER_ID, SchedulePeriod.UPCOMING, "", null);
 
-        verify(scheduleRepository).findParticipating(eq(USER_ID), any(), eq(cursor), anyInt());
-        verify(scheduleRepository).findHosted(eq(USER_ID), any(), isNull(), anyInt());
+        verify(scheduleRepository).findParticipating(eq(USER_ID), eq(SchedulePeriod.UPCOMING), any(), eq(cursor),
+                anyInt());
+        verify(scheduleRepository).findHosted(eq(USER_ID), eq(SchedulePeriod.UPCOMING), any(), isNull(), anyInt());
     }
 
     // 다음 페이지
@@ -193,9 +196,9 @@ class ScheduleQueryServiceTest {
     @DisplayName("size + 1건이 오면 size건만 주고 nextCursor는 마지막 item의 (시작 시각, id)다")
     void hasNextPage() {
         List<Schedule> schedules = schedules(3);
-        when(scheduleRepository.findHosted(eq(USER_ID), any(), any(), eq(3))).thenReturn(schedules);
+        when(scheduleRepository.findHosted(eq(USER_ID), any(), any(), any(), eq(3))).thenReturn(schedules);
 
-        ScheduleCardPageResult page = scheduleQueryService.findHosted(USER_ID, null, 2);
+        ScheduleCardPageResult page = scheduleQueryService.findHosted(USER_ID, SchedulePeriod.UPCOMING, null, 2);
 
         assertThat(page.items()).extracting(ScheduleCardResult::id)
                 .containsExactly(schedules.get(0).getId(), schedules.get(1).getId());
@@ -207,9 +210,9 @@ class ScheduleQueryServiceTest {
     @DisplayName("size건 이하가 오면 모두 주고 nextCursor는 null이다")
     void lastPage() {
         List<Schedule> schedules = schedules(2);
-        when(scheduleRepository.findHosted(eq(USER_ID), any(), any(), eq(3))).thenReturn(schedules);
+        when(scheduleRepository.findHosted(eq(USER_ID), any(), any(), any(), eq(3))).thenReturn(schedules);
 
-        ScheduleCardPageResult page = scheduleQueryService.findHosted(USER_ID, null, 2);
+        ScheduleCardPageResult page = scheduleQueryService.findHosted(USER_ID, SchedulePeriod.UPCOMING, null, 2);
 
         assertThat(page.items()).hasSize(2);
         assertThat(page.nextCursor()).isNull();
@@ -223,13 +226,15 @@ class ScheduleQueryServiceTest {
         Schedule known = schedule(CATEGORY_ID, 0);
         UUID missingCategoryId = UUID.randomUUID();
         Schedule unknown = schedule(missingCategoryId, 1);
-        when(scheduleRepository.findHosted(eq(USER_ID), any(), any(), anyInt())).thenReturn(List.of(known, unknown));
+        when(scheduleRepository.findHosted(eq(USER_ID), any(), any(), any(), anyInt()))
+                .thenReturn(List.of(known, unknown));
         ActivityCategory inactiveCategory = mock(ActivityCategory.class);
         when(inactiveCategory.getId()).thenReturn(CATEGORY_ID);
         when(inactiveCategory.getName()).thenReturn("보드게임");
         when(activityCategoryRepository.findAllNotDeletedByIds(any())).thenReturn(List.of(inactiveCategory));
 
-        List<ScheduleCardResult> items = scheduleQueryService.findHosted(USER_ID, null, null).items();
+        List<ScheduleCardResult> items = scheduleQueryService.findHosted(USER_ID, SchedulePeriod.UPCOMING, null, null)
+                .items();
 
         assertThat(items.get(0).categoryName()).isEqualTo("보드게임");
         assertThat(items.get(0).regionCode()).isEqualTo("11440");

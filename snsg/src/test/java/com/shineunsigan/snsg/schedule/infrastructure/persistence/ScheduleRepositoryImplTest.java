@@ -22,6 +22,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.context.annotation.Import;
 
 import com.shineunsigan.snsg.common.entity.Auditor;
+import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
 import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
@@ -29,7 +30,7 @@ import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
 import jakarta.persistence.EntityManager;
 
 /**
- * 시간 겹침 쿼리, 일정 잠금 조회와 잠금 없는 조회, 탈퇴를 막는 일정 조회, 일정 목록 3종 쿼리, 상태 전환 일괄 UPDATE와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
+ * 시간 겹침 쿼리, 일정 잠금 조회와 잠금 없는 조회, 탈퇴를 막는 일정 조회, 일정 목록 3종 쿼리(참여한·개설한 목록의 두 기간 포함), 상태 전환 일괄 UPDATE와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
  * 일정·참여 행은 native INSERT로 넣는다. 사용자 id는 테스트마다 무작위라 다른 데이터와 섞이지 않는다.
  * 테스트 트랜잭션은 롤백된다.
  */
@@ -493,6 +494,97 @@ class ScheduleRepositoryImplTest {
         assertThat(hostedIds()).isEmpty();
     }
 
+    // 지난 일정(PAST). 완료 전 목록의 여집합이다. 기준 시각은 NOW, 완료 기준 시각은 NOW − 12시간이다.
+
+    @Test
+    @DisplayName("참여한 지난 일정은 내가 멤버로 확정 참여한 완료됐거나 시작 + 12시간이 지난 일정이다. 그 뒤의 취소 일정과 경계(정확히 12시간)도 오고, 시작 늦은 순이다")
+    void participatingPastIncluded() {
+        UUID completedEarly = insertSchedule(row().startAt(NOW.minusHours(11)).status("COMPLETED"));
+        UUID boundary = insertSchedule(row().startAt(NOW.minus(COMPLETION_AFTER)));
+        UUID canceled = insertSchedule(row().startAt(NOW.minusDays(2)).status("CANCELED"));
+        UUID completed = insertSchedule(row().startAt(NOW.minusDays(3)).status("COMPLETED"));
+        for (UUID schedule : List.of(completedEarly, boundary, canceled, completed)) {
+            insertParticipant(schedule, userId, "MEMBER", "CONFIRMED", false);
+        }
+
+        assertThat(pastParticipatingIds()).containsExactly(completedEarly, boundary, canceled, completed);
+    }
+
+    @Test
+    @DisplayName("참여한 지난 일정에서 내가 참여 취소한·내가 연·남만 참여한·삭제된 일정, 삭제된 참여 행, 완료 전 일정은 빠진다")
+    void participatingPastExcluded() {
+        LocalDateTime past = NOW.minusDays(1);
+        insertParticipant(insertSchedule(row().startAt(past).status("COMPLETED")), userId, "MEMBER", "CANCELED",
+                false);
+        insertParticipant(insertSchedule(row().startAt(past).hostUserId(userId).status("COMPLETED")), userId, "HOST",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(past).status("COMPLETED")), UUID.randomUUID(), "MEMBER",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(past).status("COMPLETED").deleted(true)), userId, "MEMBER",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(past).status("COMPLETED")), userId, "MEMBER", "CONFIRMED",
+                true);
+        insertParticipant(insertSchedule(row().startAt(NOW.minus(COMPLETION_AFTER).plusMinutes(1))), userId, "MEMBER",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1))), userId, "MEMBER", "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).status("CANCELED")), userId, "MEMBER",
+                "CONFIRMED", false);
+
+        assertThat(pastParticipatingIds()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("개설한 지난 일정은 내가 연 완료됐거나 시작 + 12시간이 지난 일정이다. 그 뒤의 취소 일정도 오고, 시작 늦은 순이다")
+    void hostedPastIncluded() {
+        UUID boundary = insertSchedule(row().startAt(NOW.minus(COMPLETION_AFTER)).hostUserId(userId));
+        UUID canceled = insertSchedule(row().startAt(NOW.minusDays(1)).hostUserId(userId).status("CANCELED"));
+        UUID completed = insertSchedule(row().startAt(NOW.minusDays(2)).hostUserId(userId).status("COMPLETED"));
+
+        assertThat(pastHostedIds()).containsExactly(boundary, canceled, completed);
+    }
+
+    @Test
+    @DisplayName("개설한 지난 일정에서 멤버로 참여만 한·삭제된·완료 전 일정은 빠진다")
+    void hostedPastExcluded() {
+        insertParticipant(insertSchedule(row().startAt(NOW.minusDays(1)).status("COMPLETED")), userId, "MEMBER",
+                "CONFIRMED", false);
+        insertSchedule(row().startAt(NOW.minusDays(1)).hostUserId(userId).status("COMPLETED").deleted(true));
+        insertSchedule(row().startAt(NOW.minus(COMPLETION_AFTER).plusMinutes(1)).hostUserId(userId));
+        insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId).status("CANCELED"));
+
+        assertThat(pastHostedIds()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("지난 일정은 시작 늦은 순이고, 커서로 size 2씩 끝까지 넘기면 같은 시작 시각이 여러 건이어도 중복·누락 없이 전체 목록과 같다")
+    void pastOrderAndCursorPagination() {
+        UUID latest = insertSchedule(row().startAt(NOW.minusDays(1)).hostUserId(userId).status("COMPLETED"));
+        List<UUID> sameStart = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            sameStart.add(insertSchedule(row().startAt(NOW.minusDays(2)).hostUserId(userId).status("COMPLETED")));
+        }
+        UUID earliest = insertSchedule(row().startAt(NOW.minusDays(3)).hostUserId(userId).status("COMPLETED"));
+        List<UUID> all = pastHostedIds();
+
+        List<UUID> paged = new ArrayList<>();
+        ScheduleCursor cursor = null;
+        List<Schedule> page;
+        do {
+            page = scheduleRepository.findHosted(userId, SchedulePeriod.PAST, NOW.minus(COMPLETION_AFTER), cursor, 2);
+            page.forEach(schedule -> paged.add(schedule.getId()));
+            if (!page.isEmpty()) {
+                Schedule last = page.get(page.size() - 1);
+                cursor = ScheduleCursor.decode(new ScheduleCursor(last.getStartAt(), last.getId()).encode());
+            }
+        } while (!page.isEmpty());
+
+        assertThat(all).hasSize(5);
+        assertThat(all.get(0)).isEqualTo(latest);
+        assertThat(all.subList(1, 4)).containsExactlyInAnyOrderElementsOf(sameStart);
+        assertThat(all.get(4)).isEqualTo(earliest);
+        assertThat(paged).containsExactlyElementsOf(all);
+    }
+
     // 모집 마감 전환. 기준 시각을 과거로 고정하고 넣은 행의 id로 다시 읽어 단정한다(바뀐 건수는 공유 DB의 다른 행을 포함한다).
 
     @Test
@@ -645,11 +737,22 @@ class ScheduleRepositoryImplTest {
     }
 
     private List<UUID> participatingIds() {
-        return ids(scheduleRepository.findParticipating(userId, NOW.minus(WINDOW), null, 100));
+        return ids(scheduleRepository.findParticipating(userId, SchedulePeriod.UPCOMING, NOW.minus(WINDOW), null,
+                100));
     }
 
     private List<UUID> hostedIds() {
-        return ids(scheduleRepository.findHosted(userId, NOW.minus(WINDOW), null, 100));
+        return ids(scheduleRepository.findHosted(userId, SchedulePeriod.UPCOMING, NOW.minus(WINDOW), null, 100));
+    }
+
+    private List<UUID> pastParticipatingIds() {
+        return ids(scheduleRepository.findParticipating(userId, SchedulePeriod.PAST, NOW.minus(COMPLETION_AFTER),
+                null, 100));
+    }
+
+    private List<UUID> pastHostedIds() {
+        return ids(scheduleRepository.findHosted(userId, SchedulePeriod.PAST, NOW.minus(COMPLETION_AFTER), null,
+                100));
     }
 
     private static List<UUID> ids(List<Schedule> schedules) {

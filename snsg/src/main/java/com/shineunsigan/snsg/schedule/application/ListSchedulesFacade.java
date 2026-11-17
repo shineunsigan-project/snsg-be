@@ -13,6 +13,7 @@ import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListItemRes
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleRegionResult;
 import com.shineunsigan.snsg.schedule.application.port.out.RegionPort;
+import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 
 import lombok.RequiredArgsConstructor;
 
@@ -33,12 +34,12 @@ public class ListSchedulesFacade {
         return withRegionNames(scheduleQueryService.findRecruiting(command));
     }
 
-    public ScheduleListResult listParticipating(UUID userId, String cursor, Integer size) {
-        return withRegionNames(scheduleQueryService.findParticipating(userId, cursor, size));
+    public ScheduleListResult listParticipating(UUID userId, SchedulePeriod period, String cursor, Integer size) {
+        return withRegionNames(scheduleQueryService.findParticipating(userId, period, cursor, size));
     }
 
-    public ScheduleListResult listHosted(UUID userId, String cursor, Integer size) {
-        return withRegionNames(scheduleQueryService.findHosted(userId, cursor, size));
+    public ScheduleListResult listHosted(UUID userId, SchedulePeriod period, String cursor, Integer size) {
+        return withRegionNames(scheduleQueryService.findHosted(userId, period, cursor, size));
     }
 
     /** 지역 목록에 없는 코드는 빈 문자열이다. 일정이 없으면 지역을 부르지 않는다. */
