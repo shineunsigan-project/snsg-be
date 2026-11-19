@@ -1,6 +1,6 @@
 ---
 name: task
-description: 사용자 지시를 4단계 에이전트 파이프라인(spec → implement → verify → refine-docs)으로 처리하는 전체 절차. 오케스트레이터가 읽는다. 코드·문서를 고치는 작업을 받으면 이 절차를 따른다.
+description: 사용자 지시를 에이전트 파이프라인(spec → implement → verify → ecc-review → refine-docs)으로 처리하는 전체 절차. 오케스트레이터가 읽는다. 코드·문서를 고치는 작업을 받으면 이 절차를 따른다.
 ---
 
 # Task 파이프라인
@@ -22,6 +22,7 @@ description: 사용자 지시를 4단계 에이전트 파이프라인(spec → i
   → FAIL이면 agent2에게 FAIL 항목과 재현 명령만 전달해 재작업 (같은 에이전트, SendMessage)
   → 같은 항목이 2회 FAIL이면 멈추고 사용자에게 보고
   → 전 항목 PASS → 오케스트레이터가 직접 재확인
+  → ecc 리뷰어 (ecc-review) 읽기 전용, 병렬. 지적을 규칙 기준으로 분류 → GOAL 위반은 agent2 재작업, GOAL 밖 버그는 사용자에게
   → agent4 (refine-docs) 이번 결과에 맞춰 읽어야 할 문서(CLAUDE.md, rules, skills, docs/)를 최신화 → 스테이징
   → 오케스트레이터가 문서 변경 확인, 기획 문서(저장소 밖) 어긋남 처리 → 사용자에게 diff 보고
   → [사용자 승인] → 커밋 · PR · 머지
@@ -38,19 +39,38 @@ description: 사용자 지시를 4단계 에이전트 파이프라인(spec → i
 | 5 | agent2 (`implement`) | `task.md` 실행 | 스테이징된 변경 |
 | 6 | agent3 (`verify`) | GOAL과 `git diff --staged`만 보고 판정 | 항목별 PASS/FAIL |
 | 7 | 오케스트레이터 | 직접 재확인(diff, 빌드·테스트) | 확인된 변경 |
-| 8 | agent4 (`refine-docs`) | 이번 결과에 맞춰 다음 사람이 읽을 문서를 최신화 | 스테이징된 문서 변경 + 보고 |
-| 9 | 오케스트레이터 → 사용자 | 문서 변경 확인, 기획 문서 처리 후 **diff 승인** → 커밋·PR·머지 | 머지된 PR |
+| 8 | ecc 리뷰어 (`ecc-review`) → 오케스트레이터 | GOAL 밖 버그·보안·설계 리뷰, 지적 분류 | 분류된 지적 |
+| 9 | agent4 (`refine-docs`) | 이번 결과에 맞춰 다음 사람이 읽을 문서를 최신화 | 스테이징된 문서 변경 + 보고 |
+| 10 | 오케스트레이터 → 사용자 | 문서 변경 확인, 기획 문서 처리 후 **diff 승인**(리뷰 분류 결과 포함) → 커밋·PR·머지 | 머지된 PR |
 
 1단계는 `.claude/rules/git-workflow.md`의 1·2번을 그대로 따른다. **파일을 한 줄이라도 고치기 전에 이슈와 워크트리를 먼저 만든다.**
-9단계의 커밋·PR·머지도 같은 문서의 3·4·5번을 따른다.
+10단계의 커밋·PR·머지도 같은 문서의 3·4·5번을 따른다.
 
 **각 단계를 진행하기 전에 작업 브랜치를 최신 `origin/develop`에 맞춘다**(사용자 합의: "작업 시작 전 develop을 최신화 후 진행한다"). `git fetch origin`으로 develop에 새 커밋이 들어왔는지 보고, 들어왔으면 맞춘 뒤 다음 단계를 띄운다. 새로 들어온 커밋에 마이그레이션이 있으면 번호가 겹치는지도 함께 본다(`.claude/rules/package-structure.md` 마이그레이션 절).
+
+## ecc 리뷰 단계
+
+verify는 GOAL만 판정하므로 GOAL 밖의 버그·보안 문제는 지금까지 오케스트레이터 재확인과 사용자 눈에만 기댔다. 이 자리를 ecc 플러그인의 읽기 전용 리뷰어로 보강한다. 계약은 `.claude/skills/ecc-review/SKILL.md`.
+
+- **코드 변경이 있으면 반드시 돈다.** verify 전 항목 PASS와 오케스트레이터 재확인 뒤, refine-docs 전이다. 문서·skill만 고친 작업은 건너뛴다.
+- **verify를 대신하지 않는다.** verify는 GOAL 판정, ecc 리뷰는 GOAL 밖 점검이다. 리뷰 지적을 verify에 넘기지 않는다.
+- 리뷰어는 diff 경로로 골라 병렬로 띄운다. 고정 프롬프트(staged diff만, 빌드·테스트·DB 실행 금지, 규칙 파일 먼저 읽기)를 반드시 넣는다. ecc 리뷰어는 기본값으로 `./gradlew check`를 돌리거나 unstaged diff를 읽는다.
+- **ecc의 권고가 프로젝트 규칙을 이기지 않는다.** 규칙과 충돌하는 지적은 기각한다. GOAL 밖 버그는 직접 고치게 하지 않고 사용자에게 묻는다.
+- 리뷰로 코드가 바뀌면 verify와 재확인을 다시 돈다.
+
+## ecc 훅에 막혔을 때
+
+ecc 플러그인의 GateGuard 훅(Fact-Forcing Gate)이 도구 호출을 한 번 거부하고 사실을 요구할 때가 있다. 거부는 실패가 아니라 확인 절차다.
+
+- 메인 세션(오케스트레이터)은 세션의 첫 셸 명령과 파일마다 첫 Edit·Write에서 거부된다. 요구한 사실(사용자 지시 원문, 이 명령·파일이 무엇을 하는지, 기존 파일과 중복이 없는지 등)을 답변에 적고 **같은 호출을 그대로** 다시 보낸다.
+- 서브에이전트는 일반 파일은 통과하지만 민감 경로(`auth`·`security` 경로 세그먼트, `.env*`)의 첫 수정과 위험 명령(`rm -rf`, `git restore <경로>`, `git branch -D`, `reset --hard` 등)에서 거부된다. 위험 명령은 **글자 하나 다르지 않은 같은 명령**을 다시 보내야 통과한다. 쓰기 에이전트(agent1·2·4)를 띄울 때 프롬프트에 이 대응을 한 줄 넣는다: "Fact-Forcing Gate로 거부되면 요구한 사실을 적고 같은 호출을 그대로 다시 보낸다."
+- **훅을 끄거나 우회하지 않는다.** `--no-verify`는 ecc가 막고, 프로젝트 원칙으로도 쓰지 않는다. `ECC_GATEGUARD`·`ECC_DISABLED_HOOKS` 같은 설정 변경은 사용자가 정한다.
 
 ## 문서 최신화 단계 (agent4)
 
 작업은 끝났는데 문서가 예전 상태로 남으면 다음 세션과 FE 담당자가 낡은 문서를 믿고 움직인다. 코드는 테스트가 지키지만 문서는 지키는 것이 없어 단계를 따로 둔다. 계약은 `.claude/skills/refine-docs/SKILL.md`.
 
-- **verify 전 항목 PASS와 오케스트레이터 재확인이 끝난 뒤에 띄운다.** 검증 중인 diff를 바꾸지 않고, 한 워크트리에 쓰기 에이전트가 둘이 되지 않게 한다. 사용자 diff 승인 전이라 문서 변경이 같은 PR에 들어간다(CLAUDE.md: rules·skills 갱신은 진행 중인 작업 브랜치에 함께 커밋).
+- **verify 전 항목 PASS와 오케스트레이터 재확인, ecc 리뷰 분류가 끝난 뒤에 띄운다.** 검증 중인 diff를 바꾸지 않고, 한 워크트리에 쓰기 에이전트가 둘이 되지 않게 한다. 사용자 diff 승인 전이라 문서 변경이 같은 PR에 들어간다(CLAUDE.md: rules·skills 갱신은 진행 중인 작업 브랜치에 함께 커밋).
 - agent4는 대화를 볼 수 없다. 오케스트레이터가 다음 셋을 정리해 넘긴다. 넘기지 않은 것은 문서에 들어가지 않는다.
   - **이번 작업에서 사용자와 합의한 것**
   - **사용자가 반복해서 지적한 것**
@@ -82,7 +102,8 @@ description: 사용자 지시를 4단계 에이전트 파이프라인(spec → i
 | agent1 (spec) | 기본 (쓰기 가능) | 사용자 요구사항, 워크트리 절대 경로, 이슈 ID(`SHI-<번호>`), `spec` skill |
 | agent2 (implement) | 기본 (쓰기 가능) | `task.md` 경로, 워크트리 절대 경로, `implement` skill |
 | agent3 (verify) | `Explore` (**읽기 전용**) | `task.md` 경로, 워크트리 절대 경로, `verify` skill |
-| agent4 (refine-docs) | 기본 (쓰기 가능) | `task.md` 경로, 워크트리 절대 경로, 이번 작업의 합의·반복 지적·파이프라인 마찰 기록, 기획 문서 경로, `refine-docs` skill |
+| ecc 리뷰어 | `ecc:code-reviewer` 외 diff에 따라 (`ecc-review` 표) | 워크트리 절대 경로, `task.md`의 GOAL·비목표, `ecc-review` skill의 고정 프롬프트. implement 보고·verify 결과는 주지 않는다 |
+| agent4 (refine-docs) | 기본 (쓰기 가능) | `task.md` 경로, 워크트리 절대 경로, 이번 작업의 합의·반복 지적·파이프라인 마찰 기록(ecc 리뷰에서 반복 기각한 규칙 포함), 기획 문서 경로, `refine-docs` skill |
 
 - agent3는 `Explore`로 띄운다. 쓰기 도구가 없어 **고칠 수 없다.** 고칠 수 있으면 검증이 아니라 수선이 되고, "조금 손봐서 통과시켰다"가 가능해지면 기준이 저절로 완화된다.
 - **agent3에게 agent2의 보고를 주지 않는다.** "테스트를 다 통과시켰다"는 보고를 먼저 읽으면 그것을 전제로 확인하게 된다. 받는 것은 `task.md`의 GOAL과 저장소, `git diff --staged` 뿐이다.
