@@ -1,6 +1,6 @@
 ---
 name: spec
-description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md를 쓰거나, 애매하면 질문만 반환한다. task 파이프라인의 1단계(agent1) 계약이며, 요구사항 정리만 따로 시킬 때도 쓴다.
+description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md를 쓰거나, 애매하면 질문만 반환한다. task 파이프라인의 spec 단계(agent1) 계약이며, 요구사항 정리만 따로 시킬 때도 쓴다.
 ---
 
 # Spec
@@ -151,9 +151,9 @@ GOAL을 쓰기 전에 아래 경계 중 **이번 변경에 해당하는 것만**
 
 | 유형 | 기존 테스트 | GOAL·비목표에 적을 것 |
 |---|---|---|
-| 기능 추가 | 단정을 바꾸지 않는다 | 비목표: 기존 단정 유지. 생성자·시그니처 변경에 따른 컴파일 맞춤만 허용 |
+| 기능 추가 | 단정을 바꾸지 않는다 | 비목표: 기존 단정 유지. 생성자·시그니처 변경에 따른 컴파일 맞춤과, 스키마 변경(새 NOT NULL 컬럼 등)에 따른 기존 테스트의 native INSERT 맞춤(`.claude/rules/testing.md`)만 허용 |
 | 동작 변경 | 바뀌는 단정만 고친다 | GOAL: 바뀌는 단정을 테스트 클래스·메서드와 **바뀌기 전 → 후 값**으로 적는다. 나머지 단정은 유지 |
-| 버그 수정 | 유지하고 회귀 테스트를 더한다 | `## 배경`: 이슈의 **실제 재현 입력·경로**(요청 값, 상태, 엔드포인트)를 그대로. GOAL: 그 입력으로 회귀 테스트가 통과하고, 잘못됐던 결과(값·ErrorCode)를 단정한다. 더 쉬운 비슷한 입력으로 바꾸지 않는다 |
+| 버그 수정 | 유지하고 회귀 테스트를 더한다 | `## 배경`: 이슈의 **실제 재현 상태·값**(데이터 상태, 요청 값, 엔드포인트)을 그대로. GOAL: 어느 계층 테스트로 재현할지(`.claude/rules/testing.md` 기준)와, 그 상태·값으로 잘못됐던 결과(값·ErrorCode)를 단정하는 회귀 테스트가 통과한다. 더 쉬운 비슷한 값·상태로 바꾸지 않는다 |
 | 리팩터링 | 고치지 않는다(이름·참조 맞춤만) | `## 환경`: 베이스에서 대상 테스트가 통과하는지. 비목표: 베이스에서 실패하면 시작하지 않고 보고한다 |
 
 - 버그 수정의 "수정 전에는 실패했다"는 GOAL에 넣지 않는다. verify는 수정 전 코드를 돌릴 수 없어 검증 불가가 된다. implement가 확인해 보고하고 오케스트레이터가 재확인한다(`.claude/skills/implement/SKILL.md`, task SKILL.md 재작업 루프).
@@ -181,7 +181,7 @@ task.md를 쓰기 전에, 이번 변경과 가장 가까운 기존 코드를 범
 - 따라 할 기존 코드
   - 오류: `ScheduleErrorCode.SCHEDULE_NOT_FOUND`(`schedule/domain/exception/ScheduleErrorCode.java:20`) — 대상 없음은 `ErrorType.NOT_FOUND`
   - 데이터 접근: `ScheduleRepository.findByIdForUpdate`(`schedule/domain/repository/ScheduleRepository.java:30`) — 상태 전이는 잠금 조회로 처음 읽는다
-  - 테스트: `ScheduleCommandServiceTest`(`schedule/application/ScheduleCommandServiceTest.java`) — `@DataJpaTest` 슬라이스
+  - 테스트: `ScheduleCommandServiceTest`(`schedule/application/ScheduleCommandServiceTest.java`) — 흐름은 `@ExtendWith(MockitoExtension.class)` 중첩 클래스, 동시성처럼 실제 DB가 필요한 것은 `@DataJpaTest` 중첩 클래스로 나눈다
 ```
 
 ## `## 제약`

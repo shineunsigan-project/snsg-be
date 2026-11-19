@@ -25,7 +25,7 @@
 
 ## 에이전트 문서 관리
 
-- CLAUDE.md, `.claude/rules/`, `.claude/skills/`는 Claude가 작업 중 수시로 채운다. 사용자에게 따로 묻지 않는다.
+- CLAUDE.md, `.claude/rules/`, `.claude/skills/`는 Claude가 작업 중 수시로 채운다. 사용자에게 따로 묻지 않는다. 단 판정 기준을 완화하는 변경은 묻는다(`.claude/skills/task/SKILL.md` "멈춰 묻는 경우").
   - 새 컨벤션을 사용자와 합의했을 때 → 해당 rules 파일
   - 같은 설명·수정 요청이 반복될 때 → rules
   - 같은 작업 절차가 반복될 때 → skill
