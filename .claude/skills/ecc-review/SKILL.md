@@ -28,9 +28,11 @@ verify는 GOAL만 판정한다(`.claude/skills/verify/SKILL.md` "GOAL에 없는 
 | `infrastructure/client/`, `infrastructure/scheduler/`, `infrastructure/event/` | `ecc:silent-failure-hunter` | 삼킨 예외, 위험한 fallback, 타임아웃 |
 | `src/test/` | `ecc:pr-test-analyzer` | 바뀐 동작별 테스트 유무와 품질 |
 | `domain/model/` | `ecc:type-design-analyzer` | 엔티티·VO의 불변식 표현과 캡슐화 |
+| `presentation/`(`@Operation`·`@Schema` description), javadoc이 달린 메서드의 동작 변경 | `ecc:comment-analyzer` | 바뀐 동작과 어긋난 주석·API description. description은 FE 계약이고 `OpenApiSpecTest`는 문구가 사실인지 보지 않는다 |
 
-- 모두 `model: sonnet`이다. 한 작업에 보통 2~4개다.
-- `type-design-analyzer`는 Bash가 없어 diff를 직접 뽑지 못한다. 프롬프트에 `git diff --staged --name-only` 결과를 넣는다.
+- `comment-analyzer`만 `model: haiku`이고 나머지는 `sonnet`이다. 한 작업에 보통 2~4개다.
+- `type-design-analyzer`·`comment-analyzer`는 Bash가 없어 diff를 직접 뽑지 못한다. 프롬프트에 해당 파일의 `git diff --staged` 부분을 넣는다.
+- `database-reviewer`에는 고정 프롬프트 뒤에 한 줄을 더한다: "운영은 ECS 서비스라 배포 중 새 태스크가 마이그레이션을 적용한 뒤에도 이전 버전 태스크가 잠시 돌 수 있다. 이전 버전 코드가 실패하는 변경(컬럼 삭제·이름 변경, 이전 코드가 INSERT하는 테이블에 DEFAULT 없는 NOT NULL 컬럼, 이전 코드가 쓰는 enum 값 제거)을 지적한다." 근거: `.github/workflows/deploy.yml`(ECS 서비스 갱신), V12가 `places`에 DEFAULT 없는 NOT NULL 컬럼을 더했다. 출처: ecc `database-migrations`.
 
 ## 프롬프트에 반드시 넣는 것
 
@@ -63,6 +65,18 @@ DB·Redis·8080 포트를 다른 작업과 공유하고, 빌드·테스트는 �
 
 - **리뷰어가 끝나면 `git status --short`와 `git diff --staged --stat`이 리뷰 전과 같은지 본다.** Bash가 있는 리뷰어는 쓰기가 도구로 막혀 있지 않고 프롬프트로만 막힌다. 달라졌으면 되돌리고 사용자에게 보고한다.
 
+## 합치기와 반박 검증
+
+출처: ecc `/orch-review` 워크플로의 설계(`workflows/README.md`). 워크플로 자체는 쓰지 않는다(아래 "쓰지 않는 것").
+
+- **분류 전에 리뷰어 간 중복을 합친다.** 기준은 `파일` + 지적한 코드 조각이다. 줄 번호·제목은 리뷰어마다 달라 기준이 아니다. 심각도는 가장 높은 것을 남기고, 낸 리뷰어는 모두 적는다.
+- 아래 분류표의 1·2번(규칙 충돌, 이미 지켜짐)을 먼저 적용한다. 기각될 지적에 검증 비용을 쓰지 않는다.
+- **남은 CRITICAL·HIGH는 오케스트레이터가 코드를 읽어 판단하지 않는다.** 오케스트레이터가 구현 맥락을 갖게 되고(task SKILL.md "맥락 분리"), 확인하지 못한 진짜 문제를 기각하게 된다. `Explore` 검증 에이전트 하나에 묶어 넘긴다.
+  - 주는 것: 워크트리 절대 경로, 지적마다 `파일:줄 / 실패 시나리오 / 근거`. 리뷰어 이름·다른 지적·implement 보고·verify 결과는 주지 않는다.
+  - 지시: 지적마다 `성립` / `반박(반증 파일:줄)` / `판단 불가` 중 하나. 반박은 코드로 반증을 댈 수 있을 때만 한다. 빌드·테스트·DB는 실행하지 않는다.
+  - `반박`만 기각한다. `판단 불가`는 기각하지 않고 사용자 보고에 `미확인`으로 올린다.
+- MEDIUM·LOW는 검증하지 않고 분류만 한다.
+
 ## 지적 분류 (오케스트레이터)
 
 지적마다 아래 순서로 처음 맞는 칸에 넣는다.
@@ -71,7 +85,7 @@ DB·Redis·8080 포트를 다른 작업과 공유하고, 빌드·테스트는 �
 |---|---|---|
 | 1 | CLAUDE.md·`.claude/rules`와 충돌한다 | **기각.** 예는 아래 "자주 나오는 규칙 충돌" |
 | 2 | ArchUnit(`ArchitectureTest`)이나 기존 테스트가 이미 지킨다 | 기각 |
-| 3 | 실패 시나리오를 코드로 확인할 수 없다(추측) | 기각. 오케스트레이터가 해당 줄을 직접 읽어 판단한다 |
+| 3 | 실패 시나리오가 없거나, 검증 에이전트가 코드로 반박했다 | 기각 |
 | 4 | GOAL 위반의 증거다 | agent2에게 **그 항목과 재현 방법만** `SendMessage`로 보낸다. 재작업 루프와 2회 제한을 그대로 따른다 |
 | 5 | GOAL 밖이지만 실제 버그·보안 문제다 | **직접 고치게 하지 않는다.** 사용자에게 보고하고, 이번 작업에 넣을지(GOAL 추가 승인) 후속 이슈로 뺄지 묻는다. implement는 GOAL을 고칠 수 없다 |
 | 6 | 나머지(취향, 개선 제안) | PR 본문 `background or etc`의 참고나 후속 이슈 후보로 남긴다 |
@@ -110,6 +124,10 @@ ecc 에이전트·스킬 본문에서 확인한 것들이다. 이런 지적은 1
 | `ecc:planner`, `ecc:architect` | opus 모델이고 spec 단계와 겹친다. spec은 애매하면 사용자에게 묻는 것이 계약이다 |
 | 스킬 `ecc:springboot-*`, `ecc:jpa-patterns`, `ecc:java-coding-standards`, `ecc:api-design`, `ecc:hexagonal-architecture`, `ecc:redis-patterns`, `ecc:postgres-patterns`, `ecc:tdd-workflow`, `ecc:verification-loop`, `ecc:security-review` | 예시가 위 "자주 나오는 규칙 충돌"에 해당하거나 Maven·npm을 전제로 한다. 에이전트에 로드하면 규칙과 다른 코드를 쓴다 |
 | `/orch-review`, `/orch-*`, ecc `/code-review`, `/review-pr` | 프로젝트 규칙을 넣을 자리가 없고, java-reviewer가 `./gradlew check`를 돌린다. PR 모드는 저장소에 리뷰 파일을 쓰거나 PR에 게시한다 |
+| `/plan`, `/prp-*`, `/checkpoint`, `/learn`, `/test-coverage`, `/update-docs`, `/pr` | spec·refine-docs와 겹치거나 저장소에 파일을 쓴다(`.claude/plans/`, 체크포인트 로그). `/pr`은 base가 main이다. `/plan`의 기존 패턴 찾기만 spec에 가져왔다 |
+| ecc `rules/`(`common/`, `java/`) | 플러그인으로는 로드되지 않는다. 직접 복사하지 않는다. 80% 커버리지, Testcontainers, 불변 객체, 모든 엔드포인트 rate limiting이 프로젝트 규칙과 충돌하고, 매 세션 컨텍스트에서 rules와 경쟁한다 |
+| `ecc:docs-lookup`, `ecc:documentation-lookup` | context7 MCP가 설치돼 있지 않아 동작하지 않는다 |
+| `/astra-review`, `/multi-*`, `ecc:council-multi-model` | codex 등 외부 CLI가 없다 |
 
 ## ecc 훅
 
