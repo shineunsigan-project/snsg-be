@@ -19,7 +19,7 @@ description: 사용자 지시를 에이전트 파이프라인(spec → implement
   → [사용자 승인] task.md의 GOAL을 보여주고 승인받는다
   → agent2 (implement) task.md를 실행 → git add 로 스테이징까지
   → agent3 (verify)    읽기 전용. GOAL과 diff만 보고 항목별 PASS/FAIL
-  → FAIL이면 agent2에게 FAIL 항목과 재현 명령만 전달해 재작업 (같은 에이전트, SendMessage)
+  → FAIL이면 agent2에게 FAIL 항목과 재현 명령만 전달해 재작업 (같은 에이전트, SendMessage) → verify는 새로 띄운다
   → 같은 항목이 2회 FAIL이면 멈추고 사용자에게 보고
   → 전 항목 PASS → 오케스트레이터가 직접 재확인
   → ecc 리뷰어 (ecc-review) 읽기 전용, 병렬. 지적을 규칙 기준으로 분류 → GOAL 위반은 agent2 재작업, GOAL 밖 버그는 사용자에게
@@ -75,6 +75,8 @@ ecc 플러그인의 GateGuard 훅(Fact-Forcing Gate)이 도구 호출을 한 번
   - **이번 작업에서 사용자와 합의한 것**
   - **사용자가 반복해서 지적한 것**
   - **파이프라인 마찰 기록**: spec이 질문으로 되돌린 이유, verify FAIL·오케스트레이터 재확인 FAIL과 재작업 사유, 절차대로 했는데 막힌 지점과 실제로 통한 방법. agent4는 이것을 skill·rules 고도화의 근거로 쓴다. 대화에서만 드러난 마찰은 넘기지 않으면 다음 작업에서 같은 자리에서 다시 막힌다.
+- **셋은 생긴 즉시 세션 스크래치패드의 `SHI-<번호>-handoff.md`에 한 줄씩 적는다**(`.claude/rules/temp-files.md`). 형식: `[단계] 사실 / 실제로 통한 방법 / 근거(명령·파일)`. 합의는 사용자 표현 그대로 적는다. 대화 기억에만 두면 긴 작업 중 컨텍스트가 요약될 때 뭉개지고 사용자 표현이 사라진다. agent4에게는 이 파일 내용을 넘기고, 머지 뒤 지운다. 출처: ecc `strategic-compact`("Write the plan to a file before compacting").
+- **판정 기준을 바꾸는 문서 변경은 사용자 diff 보고에서 따로 한 줄씩 보여준다.** 대상: verify의 PASS·FAIL 조건, spec의 GOAL·비목표 규칙, ecc-review의 분류·기각 표, `.claude/rules/testing.md`의 테스트하지 않는 것. 기준을 넓히거나 예외를 더하면 "완화"라고 표시한다. 작업한 쪽 에이전트가 다음 작업의 판정 기준을 고치는 구조라, 코드 diff에 묻히면 안 된다. 출처: ecc `loop-design-check`("the more self-improving a loop is, the stricter the human review it needs").
 - 문서 정리·skill 고도화를 맡는 에이전트를 따로 두지 않는다. agent4가 그 역할이고, 마찰 기록이 그 입력이다. agent4는 이번 변경과 무관한 낡은 문서를 고치지 않고 "후보"로 보고한다. 매번 전체를 훑어 고치면 PR에 무관한 변경이 섞인다. 전체 정리가 필요하면 refine-docs를 단독으로 돌리는 별도 docs 이슈로 진행한다.
 - agent4는 코드와 `task.md`의 GOAL을 고치지 않는다. 문서 변경은 GOAL 판정 대상이 아니므로 오케스트레이터가 diff를 직접 읽어 확인한다. 문서 외 파일이 섞였으면 되돌린다.
 - 저장소 밖 기획 문서는 agent4가 어긋남만 보고하고 오케스트레이터가 고친다. 커밋되지 않는 파일이다.
@@ -107,7 +109,8 @@ ecc 플러그인의 GateGuard 훅(Fact-Forcing Gate)이 도구 호출을 한 번
 
 - agent3는 `Explore`로 띄운다. 쓰기 도구가 없어 **고칠 수 없다.** 고칠 수 있으면 검증이 아니라 수선이 되고, "조금 손봐서 통과시켰다"가 가능해지면 기준이 저절로 완화된다.
 - **agent3에게 agent2의 보고를 주지 않는다.** "테스트를 다 통과시켰다"는 보고를 먼저 읽으면 그것을 전제로 확인하게 된다. 받는 것은 `task.md`의 GOAL과 저장소, `git diff --staged` 뿐이다.
-- 질문이나 재작업은 **같은 에이전트를 `SendMessage`로 재개한다.** 새로 띄우면 앞서 쌓은 맥락을 다시 설명해야 한다.
+- agent1·2·4의 질문이나 재작업은 **같은 에이전트를 `SendMessage`로 재개한다.** 새로 띄우면 앞서 쌓은 맥락을 다시 설명해야 한다.
+- **verify(agent3)는 재개하지 않고 매번 새로 띄운다.** 재작업 뒤, ecc 리뷰로 코드가 바뀐 뒤 모두 같다. 이전 판정을 기억하는 verify는 지난 FAIL 항목만 다시 보고, 재작업이 깨뜨린 PASS 항목을 놓친다. 이전 FAIL 내용도 프롬프트에 넣지 않는다. 받는 것은 처음과 같다. 출처: ecc `santa-method`("each review round uses fresh agents… prior context creates anchoring bias").
 - **`Agent` 도구의 `isolation: "worktree"`는 쓰지 않는다.** 자체 임시 워크트리라 `snsg/.env`가 없어 테스트가 돌지 않고, 브랜치 이름이 git-workflow.md의 `<prefix>/SHI-<번호>-<작업-이름>` 규칙과도 어긋난다. 워크트리는 1단계에서 오케스트레이터가 만든 것을 쓴다.
 - **테스트를 돌리거나 앱을 띄우는 에이전트는 한 번에 하나만 띄운다.** git-workflow.md "워크트리를 쓸 때 주의"에 적힌 대로 DB·Redis·8080 포트를 모든 워크트리가 공유한다. 동시에 돌리면 한쪽에서 돌린 테스트가 다른 쪽 데이터를 지우고, 두 번째 `bootRun`은 포트를 잡지 못한다.
 - **한 워크트리에 쓰기 에이전트는 하나만 둔다.** 둘을 동시에 돌려 같은 파일을 고치면 나중에 쓴 쪽이 덮어쓰고, **무엇이 사라졌는지 diff로도 드러나지 않는다.** 포트 충돌은 에러로 드러나지만 파일 덮어쓰기는 조용히 지나간다.
@@ -119,6 +122,9 @@ ecc 플러그인의 GateGuard 훅(Fact-Forcing Gate)이 도구 호출을 한 번
 - **같은 GOAL 항목이 2회 FAIL이면 멈추고 사용자에게 보고한다.** 세 번째 시도가 통하는 경우보다 GOAL이나 접근이 틀린 경우가 많다. 그때 필요한 것은 재시도가 아니라 사용자의 판단이다.
 - 전 항목 PASS여도 오케스트레이터가 직접 재확인한다. `git diff --staged`와 `git status --short`를 보고, GOAL에 적힌 검증 명령 중 최소한 빌드·테스트는 직접 돌린다.
   - 빌드·테스트는 `./gradlew cleanTest build`로 돌린다. 입력이 그대로면 Gradle이 test를 UP-TO-DATE로 건너뛰어, verify가 돌린 결과를 다시 보는 것에 그친다. SHI-156에서 verify는 전 항목 PASS였지만 `cleanTest build`에서 DB 연결 고갈로 21건이 실패했다(`.claude/rules/testing.md` DB 연결 수 항목).
+  - **implement 보고에서 verify가 볼 수 없는 두 가지를 확인한다.** verify는 보고를 받지 않으므로 여기서만 확인된다.
+    - 버그 수정이면 재현 테스트의 **수정 전 실패 출력**이 있는지 본다(`.claude/skills/spec/SKILL.md` 작업 유형별 기존 테스트). 없거나 의심되면 수정을 잠시 빼고 그 테스트를 돌려 실패를 확인한 뒤 원복한다.
+    - `## 참고`의 따라 할 기존 코드와 **다르게 짠 곳과 이유**를 diff와 대조한다. 이유가 rules와 맞지 않으면 재작업으로 돌린다.
 
 ## 위임하지 않아도 되는 경우
 
