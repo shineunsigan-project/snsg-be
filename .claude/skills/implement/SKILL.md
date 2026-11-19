@@ -1,6 +1,6 @@
 ---
 name: implement
-description: task.md의 GOAL을 그대로 실행하고 git add로 스테이징까지만 한다. 커밋·push·PR은 하지 않는다. task 파이프라인의 2단계(agent2) 계약.
+description: task.md의 GOAL을 그대로 실행하고 git add로 스테이징까지만 한다. 커밋·push·PR은 하지 않는다. task 파이프라인의 implement 단계(agent2) 계약.
 ---
 
 # Implement
@@ -59,5 +59,6 @@ git status --short
 3. 실행한 검증 명령과 결과
 4. 막힌 것, 판단이 필요한 것
 5. `## 참고`의 따라 할 기존 코드와 다르게 짠 곳: 무엇을, 왜. 없으면 "없음". 출처: ecc `/prp-implement`의 deviation 기록
+6. 판정 기준 문서(verify·spec·ecc-review skill, `.claude/rules/testing.md`)를 고쳤으면 `기준 변경: 강화/완화`와 바뀐 기준 한 줄. 오케스트레이터가 diff 보고에서 따로 보여준다(task SKILL.md 문서 최신화 단계)
 
 보고는 오케스트레이터에게 간다. **검증하는 에이전트는 이 보고를 받지 않는다.** 보고가 검증의 전제가 되지 않도록 분리되어 있다. 보고를 잘 써서 통과를 받아낼 수 없고, 그럴 필요도 없다.

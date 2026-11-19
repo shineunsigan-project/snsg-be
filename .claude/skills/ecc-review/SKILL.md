@@ -17,18 +17,18 @@ verify는 GOAL만 판정한다(`.claude/skills/verify/SKILL.md` "GOAL에 없는 
 
 ## 어떤 리뷰어를 띄우는가
 
-`git diff --staged --name-only`를 보고 고른다. 고른 리뷰어는 **한 메시지에서 병렬로** 띄운다. 모두 읽기 전용이라 동시에 돌려도 된다(task SKILL.md "에이전트를 띄우는 방법").
+`git diff --staged --name-only`(comment-analyzer 조건은 javadoc이 기본 문맥 3줄 밖에 있어도 보이도록 `git diff --staged -U20` 본문)를 보고 고른다. 고른 리뷰어는 **한 메시지에서 병렬로** 띄운다. 모두 읽기 전용이라 동시에 돌려도 된다(task SKILL.md "에이전트를 띄우는 방법").
 
 | 조건 (staged 경로) | `subagent_type` | 보는 것 |
 |---|---|---|
 | 코드 변경이 있으면 항상 | `ecc:code-reviewer` | 확신 80% 이상의 버그·보안·품질 문제. HIGH 이상은 실패 시나리오를 요구한다 |
 | `.java` | `ecc:java-reviewer` | Spring·JPA·트랜잭션·예외 처리 |
 | `db/migration/`, `*Repository*.java` | `ecc:database-reviewer` | 인덱스, 잠금, 마이그레이션 안전성 |
-| `auth/`, `admin/`, `security/`, 파일 업로드, `infrastructure/client/`, `*.yaml` | `ecc:security-reviewer` | 인증·인가, 비밀값, 입력 검증, 외부 호출 |
+| `auth/`, `admin/`, `security/`, 파일 업로드, `infrastructure/client/`, `src/main/resources/application*.yaml` | `ecc:security-reviewer` | 인증·인가, 비밀값, 입력 검증, 외부 호출 |
 | `infrastructure/client/`, `infrastructure/scheduler/`, `infrastructure/event/` | `ecc:silent-failure-hunter` | 삼킨 예외, 위험한 fallback, 타임아웃 |
 | `src/test/` | `ecc:pr-test-analyzer` | 바뀐 동작별 테스트 유무와 품질 |
 | `domain/model/` | `ecc:type-design-analyzer` | 엔티티·VO의 불변식 표현과 캡슐화 |
-| `presentation/`(`@Operation`·`@Schema` description), javadoc이 달린 메서드의 동작 변경 | `ecc:comment-analyzer` | 바뀐 동작과 어긋난 주석·API description. description은 FE 계약이고 `OpenApiSpecTest`는 문구가 사실인지 보지 않는다 |
+| `presentation/`, 또는 `git diff --staged`에 javadoc(`/**`) 블록이나 그 블록이 달린 메서드의 변경이 있음 | `ecc:comment-analyzer` | 바뀐 동작과 어긋난 주석·API description. description은 FE 계약이고 `OpenApiSpecTest`는 문구가 사실인지 보지 않는다 |
 
 - `comment-analyzer`만 `model: haiku`이고 나머지는 `sonnet`이다. 한 작업에 보통 2~4개다.
 - `type-design-analyzer`·`comment-analyzer`는 Bash가 없어 diff를 직접 뽑지 못한다. 프롬프트에 해당 파일의 `git diff --staged` 부분을 넣는다.
@@ -70,12 +70,12 @@ DB·Redis·8080 포트를 다른 작업과 공유하고, 빌드·테스트는 �
 출처: ecc `/orch-review` 워크플로의 설계(`workflows/README.md`). 워크플로 자체는 쓰지 않는다(아래 "쓰지 않는 것").
 
 - **분류 전에 리뷰어 간 중복을 합친다.** 기준은 `파일` + 지적한 코드 조각이다. 줄 번호·제목은 리뷰어마다 달라 기준이 아니다. 심각도는 가장 높은 것을 남기고, 낸 리뷰어는 모두 적는다.
-- 아래 분류표의 1·2번(규칙 충돌, 이미 지켜짐)을 먼저 적용한다. 기각될 지적에 검증 비용을 쓰지 않는다.
-- **남은 CRITICAL·HIGH는 오케스트레이터가 코드를 읽어 판단하지 않는다.** 오케스트레이터가 구현 맥락을 갖게 되고(task SKILL.md "맥락 분리"), 확인하지 못한 진짜 문제를 기각하게 된다. `Explore` 검증 에이전트 하나에 묶어 넘긴다.
+- 아래 분류표의 1번(규칙 충돌)을 먼저 적용한다. 지적 문장과 rules만 대조하면 되고 코드를 읽지 않는다. 기각될 지적에 검증 비용을 쓰지 않는다.
+- **남은 CRITICAL·HIGH는 오케스트레이터가 코드를 읽어 판단하지 않는다.** 오케스트레이터가 구현 맥락을 갖게 되고(task SKILL.md 서두), 확인하지 못한 진짜 문제를 기각하게 된다. `Explore` 검증 에이전트 하나에 묶어 넘긴다.
   - 주는 것: 워크트리 절대 경로, 지적마다 `파일:줄 / 실패 시나리오 / 근거`. 리뷰어 이름·다른 지적·implement 보고·verify 결과는 주지 않는다.
-  - 지시: 지적마다 `성립` / `반박(반증 파일:줄)` / `판단 불가` 중 하나. 반박은 코드로 반증을 댈 수 있을 때만 한다. 빌드·테스트·DB는 실행하지 않는다.
-  - `반박`만 기각한다. `판단 불가`는 기각하지 않고 사용자 보고에 `미확인`으로 올린다.
-- MEDIUM·LOW는 검증하지 않고 분류만 한다.
+  - 지시: 지적마다 `성립` / `이미 지켜짐(ArchUnit·기존 테스트 파일:줄)` / `반박(반증 파일:줄)` / `판단 불가` 중 하나. 반박과 이미 지켜짐은 코드로 근거를 댈 수 있을 때만 한다. 빌드·테스트·DB는 실행하지 않는다.
+  - `이미 지켜짐`은 2번, `반박`은 3번으로 기각한다. `판단 불가`는 기각하지 않고 `미확인`으로 **분류 직후 바로 사용자에게 묻는다**(task SKILL.md "멈춰 묻는 경우").
+- MEDIUM·LOW는 검증하지 않고 분류만 한다. 2번 판정이 필요해 보이면 6번으로 내린다.
 
 ## 지적 분류 (오케스트레이터)
 
@@ -84,13 +84,15 @@ DB·Redis·8080 포트를 다른 작업과 공유하고, 빌드·테스트는 �
 | 순서 | 경우 | 처리 |
 |---|---|---|
 | 1 | CLAUDE.md·`.claude/rules`와 충돌한다 | **기각.** 예는 아래 "자주 나오는 규칙 충돌" |
-| 2 | ArchUnit(`ArchitectureTest`)이나 기존 테스트가 이미 지킨다 | 기각 |
+| 2 | 검증 에이전트가 ArchUnit(`ArchitectureTest`)이나 기존 테스트가 이미 지킨다고 근거를 댔다 | 기각 |
 | 3 | 실패 시나리오가 없거나, 검증 에이전트가 코드로 반박했다 | 기각 |
-| 4 | GOAL 위반의 증거다 | agent2에게 **그 항목과 재현 방법만** `SendMessage`로 보낸다. 재작업 루프와 2회 제한을 그대로 따른다 |
-| 5 | GOAL 밖이지만 실제 버그·보안 문제다 | **직접 고치게 하지 않는다.** 사용자에게 보고하고, 이번 작업에 넣을지(GOAL 추가 승인) 후속 이슈로 뺄지 묻는다. implement는 GOAL을 고칠 수 없다 |
+| 4 | GOAL 위반의 증거다 | agent2에게 **그 항목과 재현 방법만** `SendMessage`로 보낸다. 같은 GOAL 항목의 FAIL로 센다(재작업 루프의 2회 제한) |
+| 5 | GOAL 밖이지만 실제 버그·보안 문제다 | **직접 고치게 하지 않는다.** 분류 직후 사용자에게 이번 작업에 넣을지, 후속 이슈로 뺄지 묻는다 |
 | 6 | 나머지(취향, 개선 제안) | PR 본문 `background or etc`의 참고나 후속 이슈 후보로 남긴다 |
 
-- 4·5로 코드가 바뀌면 **verify와 오케스트레이터 재확인을 다시 돈다.** 리뷰는 다시 돌리지 않는다. 사용자가 원하면 그때 돌린다.
+- **4번으로 재작업하면** verify를 새로 띄우고 재확인을 다시 돈 뒤, 그 지적이 고쳐졌는지만 `Explore` 에이전트 하나로 확인한다(지적의 `파일:줄 / 실패 시나리오`만 준다). verify는 리뷰 지적을 받지 않아 이것을 보지 않는다. "안 고쳐졌다"면 같은 GOAL 항목의 FAIL로 세고 agent2를 재개한다(task SKILL.md "FAIL 횟수").
+- **5번에서 사용자가 이번 작업에 넣기로 하면** agent1을 재개해 task.md의 GOAL에 항목을 더하고 사용자 재승인을 받은 뒤, agent2 → verify(새로) → 재확인을 돈다. implement·refine-docs는 GOAL을 고칠 수 없고, 오케스트레이터가 옮겨 적으면 기준이 다듬어진다(task SKILL.md 아티팩트 절).
+- 4·5로 재작업한 뒤 **리뷰는 다시 돌리지 않는다.** 다시 돌면 리뷰 → 재작업 → 리뷰가 끝나지 않는다. 사용자가 원하면 그때 돌린다.
 - 1로 기각한 지적이 같은 규칙에서 반복되면, 그 규칙의 이유가 문서에 충분히 적혀 있는지 refine-docs에 마찰 기록으로 넘긴다. ecc 문구를 rules에 옮기지 않는다.
 - 사용자에게 diff 승인을 받을 때 분류 결과를 함께 보여준다. 기각한 것도 한 줄씩 이유와 함께 보여준다. 기각 판단도 사용자가 확인할 대상이다.
 
@@ -103,7 +105,7 @@ ecc 에이전트·스킬 본문에서 확인한 것들이다. 이런 지적은 1
 | `timestamptz`·`Instant` | 시간은 오프셋 없는 `LocalDateTime`(CLAUDE.md) |
 | 목록은 `Page<T>` 반환 | keyset 커서 목록(`.claude/rules/api.md` 목록 절) |
 | DELETE 204, 검증 오류 422, `{error:{code}}` 봉투 | `ApiResponse` 봉투, 400 `INVALID_REQUEST`(`.claude/rules/api.md`) |
-| 토큰 필터를 `@Component`로 | 체인마다 `new`로 넣는다(`.claude/rules/package-structure.md` 보안 체인 절) |
+| 새 토큰 필터를 `@Component`로 | 새 필터는 체인 설정에서 `new`로 만들어 체인에만 넣는다. 기존 사용자 필터 `JwtAuthenticationFilter`는 빈이고 `FilterRegistrationBean.setEnabled(false)`로 자동 등록만 끈다. 이 두 방식에서 벗어난 지적만 유효하다(`.claude/rules/package-structure.md` 보안 체인 절) |
 | `@PreAuthorize`·서비스 안 역할 확인 | 보안 체인 매처 `hasRole`(같은 절) |
 | setter, hard delete, IDENTITY Long id | 의도 메서드, `isDeleted`, UUID v7(`.claude/rules/package-structure.md` domain 절) |
 | facade에 `@Transactional` | facade는 트랜잭션을 걸지 않는다(Service와 Facade 절) |

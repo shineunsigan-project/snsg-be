@@ -36,6 +36,7 @@
    gh pr merge <번호> --squash --delete-branch
    git worktree remove ../wt-SHI-<번호>
    git fetch --prune
+   git pull --ff-only   # 메인 디렉터리(develop)에서. 머지된 skill·agent 파일이 다음 세션부터 읽힌다
    ```
 
 ## 워크트리를 쓸 때 주의

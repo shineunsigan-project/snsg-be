@@ -1,6 +1,6 @@
 ---
 name: refine-docs
-description: 작업이 끝난 변경을 기준으로 다음 사람이 읽을 문서(CLAUDE.md, .claude/rules, .claude/skills, docs/)를 최신화하고 스테이징한다. task 파이프라인의 4단계(agent4) 계약이며, 문서 점검만 따로 시킬 때도 쓴다.
+description: 작업이 끝난 변경을 기준으로 다음 사람이 읽을 문서(CLAUDE.md, .claude/rules, .claude/skills, docs/)를 최신화하고 스테이징한다. task 파이프라인의 refine-docs 단계(agent4) 계약이며, 문서 점검만 따로 시킬 때도 쓴다.
 ---
 
 # Refine docs
@@ -23,7 +23,7 @@ description: 작업이 끝난 변경을 기준으로 다음 사람이 읽을 문
 | 워크트리 절대 경로, `task.md` 경로 | 구현·검증 에이전트의 보고 |
 | `git diff --staged` | |
 | 오케스트레이터가 정리한 **이번 작업에서 사용자와 합의한 것**, **사용자가 반복해서 지적한 것** | |
-| 오케스트레이터가 정리한 **파이프라인 마찰 기록**: spec이 질문으로 되돌린 이유, verify FAIL·오케스트레이터 재확인 FAIL과 재작업 사유, 절차대로 했는데 막힌 지점과 실제로 통한 방법 | |
+| 오케스트레이터가 정리한 **파이프라인 마찰 기록**: spec이 질문으로 되돌린 이유, verify FAIL·오케스트레이터 재확인 FAIL과 재작업 사유, ecc 리뷰에서 같은 규칙으로 반복 기각한 지적, 절차대로 했는데 막힌 지점과 실제로 통한 방법 | |
 | 저장소 밖 기획 문서 경로(있으면) | |
 
 - 에이전트는 사용자와의 대화를 볼 수 없다. 합의와 지적은 오케스트레이터가 사용자 표현에 가깝게 옮겨 준다. 받지 못한 합의를 diff에서 추측해 규칙으로 만들지 않는다.
@@ -33,7 +33,7 @@ description: 작업이 끝난 변경을 기준으로 다음 사람이 읽을 문
 
 | 문서 | 무엇을 보는가 |
 |---|---|
-| `docs/api-guide.md`, `docs/openapi.yaml`, `docs/linear-convention.md` | FE가 읽는 문서다. 이번 변경으로 동작·값·오류 코드·흐름이 바뀌었는데 문서가 그대로인 곳 (`.claude/rules/api.md` 문서 절) |
+| `docs/api-guide.md`, `docs/openapi.yaml`, `docs/admin-api-guide.md`, `docs/openapi-admin.yaml`, `docs/linear-convention.md` | FE(사용자 앱·어드민 앱)가 읽는 문서다. 가이드 문서(`*-guide.md`)는 이 단계가 최신화한다. 이번 변경으로 동작·값·오류 코드·흐름이 바뀌었는데 문서가 그대로인 곳 (`.claude/rules/api.md` 문서 절) |
 | `.claude/rules/*.md` | 사용자와 새로 합의한 규칙, 같은 지적이 반복된 것, 이번 변경으로 낡은 예시(클래스·설정 키·경로 이름) |
 | `.claude/skills/*/SKILL.md` | 이번 작업에서 반복된 절차, 마찰 기록에 적힌 막힌 지점과 실제로 통한 방법 |
 | `CLAUDE.md` | 위 문서로 보낼 수 없는, 매 세션 알아야 하는 사실만. 짧게 유지한다 |
@@ -49,7 +49,7 @@ description: 작업이 끝난 변경을 기준으로 다음 사람이 읽을 문
 - 규칙은 rules로, 절차는 skills로 보낸다. CLAUDE.md에 늘어놓지 않는다.
 - 기존 문장을 지우거나 뜻을 바꿀 때는 그 문장이 이번 변경으로 틀려졌다는 근거를 보고에 적는다.
 - **코드와 `task.md`의 GOAL은 고치지 않는다.** 문서와 코드가 어긋나 코드가 틀린 것으로 보이면 고치지 않고 보고한다. 그건 구현 단계로 돌아갈 일이다.
-- `docs/openapi.yaml`은 손으로 고치지 않는다. 코드에서 생성되고 `OpenApiSpecTest`가 대조한다. 어긋나 있으면 보고한다.
+- `docs/openapi.yaml`·`docs/openapi-admin.yaml`은 손으로 고치지 않는다. 코드에서 생성되고 `OpenApiSpecTest`가 대조한다. 어긋나 있으면 보고한다.
 - **점검 범위는 이번 변경과 넘겨받은 합의·지적·마찰 기록이 닿는 문서다.** 점검하다 이번 변경과 무관한 낡은 문서를 보면 고치지 않고 "후보"로 보고한다. 고치면 PR에 무관한 변경이 섞여 승인할 diff가 커진다. 전체 정리는 이 skill을 단독으로 돌리는 별도 docs 이슈에서 한다.
 - 문서를 고칠 필요가 없으면 아무것도 고치지 않는다. 그것도 정상 결과다.
 
