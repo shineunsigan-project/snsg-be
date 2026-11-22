@@ -33,13 +33,18 @@ public class HandleSocialUnlinkFacade {
     }
 
     private void verifyKakao(String authorization) {
+        String adminKey = kakaoWebhookProperties.adminKey();
+        // 설정 키가 비어 있으면 빈 키를 보낸 요청이 통과하므로 모든 웹훅을 거부한다.
+        if (adminKey == null || adminKey.isBlank()) {
+            throw new BusinessException(AuthErrorCode.INVALID_WEBHOOK_SENDER);
+        }
         if (authorization == null || !authorization.startsWith(ADMIN_KEY_PREFIX)) {
             throw new BusinessException(AuthErrorCode.INVALID_WEBHOOK_SENDER);
         }
         String received = authorization.substring(ADMIN_KEY_PREFIX.length());
         // 길이 차이로 키를 한 글자씩 맞춰갈 수 없도록 상수 시간으로 비교한다.
         if (!MessageDigest.isEqual(received.getBytes(StandardCharsets.UTF_8),
-                kakaoWebhookProperties.adminKey().getBytes(StandardCharsets.UTF_8))) {
+                adminKey.getBytes(StandardCharsets.UTF_8))) {
             throw new BusinessException(AuthErrorCode.INVALID_WEBHOOK_SENDER);
         }
     }
