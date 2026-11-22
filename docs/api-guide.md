@@ -55,6 +55,7 @@
 | 401 | `INVALID_REFRESH_TOKEN` | refresh가 만료·무효. 14일 동안 재발급이 없었거나, 이 기기에서 로그아웃했거나, 탈퇴했거나, 같은 기기에서 재발급이 겹침 | 로그인 화면으로 |
 | 401 | `INVALID_SIGNUP_TOKEN` | 가입 세션이 15분을 넘김 | 카카오 로그인부터 다시 |
 | 401 | `INVALID_SOCIAL_CODE` | 인가코드가 만료·위조됨 | 카카오 로그인부터 다시 |
+| 401 | `INVALID_OAUTH_STATE` | 카카오 콜백의 `state`가 없거나, 로그인 시작 때 심은 `oauthState` 쿠키가 없거나(다른 브라우저에서 끝냈거나 10분이 지남), 둘이 다름(다른 탭에서 로그인을 새로 시작함) | 카카오 로그인부터 다시 |
 | 409 | `DUPLICATED_NICKNAME` | 이미 쓰이는 닉네임(대소문자 무시) | 다른 닉네임 입력 안내 |
 | 400 | `UNDERAGE` | 가입일 기준 만 18세 미만 | 가입할 수 없음을 안내 |
 | 400 | `INVALID_PROFILE_IMAGE` | JPG·PNG가 아니거나 빈 파일. 5MB를 넘는 파일은 이 코드가 아니라 `413 INVALID_REQUEST`로 온다(업로드 크기 한도에서 먼저 걸린다) | 다른 사진 선택 안내 |
@@ -103,6 +104,12 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 ```
 
 토큰은 URL에 담지 않는다. 쿼리에 실으면 브라우저 히스토리·서버 로그·Referer에 남는다.
+
+**로그인은 시작한 브라우저에서 끝나야 한다.** 1번에서 서버가 난수 `state`를 카카오 주소에 싣고 같은 값을 `oauthState` 쿠키(HttpOnly, 10분)로 심는다. 3번에서 카카오가 돌려준 `state`와 쿠키가 같을 때만 로그인시킨다. 남이 만든 콜백 링크를 열어 남의 계정으로 로그인되는 공격(로그인 CSRF)을 막기 위해서다.
+
+- 다르면 3번이 프론트엔드로 돌아가지 않고 401 `INVALID_OAUTH_STATE`(JSON)로 끝난다. `INVALID_SOCIAL_CODE`와 같은 방식이다.
+- 여러 탭에서 동시에 로그인을 시작하면 나중에 시작한 탭의 `state`가 쿠키를 덮어써, **먼저 시작한 탭은 실패한다.** 나중 탭은 성공한다.
+- **FE 코드는 바뀌지 않는다.** 지금처럼 `location.href`로 이동하면 쿠키는 브라우저가 알아서 주고받는다.
 
 ### 401을 받았을 때
 
@@ -1133,7 +1140,7 @@ FE 개발 중 실제 서버에 붙여볼 때.
 | 로그인 후 돌아올 화면 주소 | 서버가 리다이렉트할 곳(`FRONTEND_REDIRECT_URI`) | `http://localhost:3000/auth/callback` |
 | 운영·개발 서버 도메인 | 쿠키의 `SameSite`·`Secure` 설정 | 미정 |
 
-쿠키는 지금 `SameSite=None; Secure`다. FE와 BE가 다른 출처라는 전제다. 같은 도메인으로 묶거나 FE 개발 서버 프록시를 쓰면 `Lax`로 조일 수 있고, 그편이 더 안전하다.
+토큰 쿠키(`refreshToken`·`signUpToken`)는 지금 `SameSite=None; Secure`다. FE와 BE가 다른 출처라는 전제다. 로그인 state 쿠키(`oauthState`)만 `SameSite=Lax; Secure`, `Path=/api/v1/auth`, 수명 10분이다. 카카오가 보내는 최상위 GET 이동(콜백)에는 Lax 쿠키도 따라가서 더 좁혔다. 같은 도메인으로 묶거나 FE 개발 서버 프록시를 쓰면 `Lax`로 조일 수 있고, 그편이 더 안전하다.
 
 ## 이 문서를 고치는 때
 

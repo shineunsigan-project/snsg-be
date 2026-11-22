@@ -74,6 +74,10 @@ paths:
   - 리다이렉트로 토큰을 넘길 때 **쿼리 파라미터에 담지 않는다.** 브라우저 히스토리·서버 로그·Referer에 남는다.
 - **검증 실패는 한 코드로 묶는다.** 만료·위조·형식 오류를 구분해 알려주면 공격자에게 힌트가 된다. sid가 없는 이전 형식 refresh, 세션 불일치(교체됨·로그아웃됨·만료됨)도 같은 `INVALID_REFRESH_TOKEN`이다. 클라이언트는 어느 쪽이든 재발급을 시도하면 된다.
 - 소셜 로그인은 **BE가 인가코드를 받아 토큰으로 교환**한다. 클라이언트 시크릿을 FE에 두지 않는다.
+  - **콜백은 OAuth `state`를 시작한 브라우저의 쿠키와 대조한 뒤에만 인가코드를 교환한다**(로그인 CSRF 방지, SHI-205). 없으면 남이 자기 인가코드로 만든 콜백 링크를 피해자가 열 때 피해자 브라우저에 남의 계정 쿠키가 심어진다.
+    - state는 Redis에 두지 않고 쿠키(`oauthState`)에만 둔다. 서버 저장만으로는 공격자가 자기 브라우저로 유효한 state를 받아 링크에 실을 수 있어 막지 못한다.
+    - `authorize`가 요청마다 난수(`SecureRandom` 32바이트)를 소셜 주소의 `state`와 쿠키에 함께 싣는다. 쿠키는 HttpOnly·Secure·`SameSite=Lax`·`Path=/api/v1/auth`·10분이다. 콜백은 소셜이 보내는 최상위 GET 이동이라 Lax로 충분해 토큰 쿠키(`None`)보다 좁혔다(`AuthCookieFactory.oauthState`).
+    - 대조는 상수 시간(`MessageDigest.isEqual`)이고, state 없음·쿠키 없음·불일치는 한 코드 401 `INVALID_OAUTH_STATE`다(`AuthController.requireMatchingState`). 기존 콜백 오류(`INVALID_SOCIAL_CODE`)처럼 FE로 리다이렉트하지 않고 JSON으로 끝난다. 성공(302)에서만 state 쿠키를 지우고 실패에서는 두어 수명으로 사라지게 한다.
 - 어드민 토큰은 위 규칙(subject만, sid로 종류 구분, 세션별 해시 보관·회전, 검증 실패 한 코드 `INVALID_ADMIN_REFRESH_TOKEN`)을 그대로 따르고 다음이 다르다.
   - 서명 키가 따로다(`ADMIN_JWT_SECRET`, `JWT_SECRET`과 다른 값). 한쪽 토큰은 다른 쪽에서 서명 검증부터 실패한다.
   - 쿠키는 `adminRefreshToken`, `Path=/api/admin/v1/auth`(`AdminCookieFactory`). 사용자 쿠키와 이름·경로가 다르다.
