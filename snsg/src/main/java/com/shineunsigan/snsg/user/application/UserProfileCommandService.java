@@ -65,6 +65,16 @@ public class UserProfileCommandService {
         return requested != null && !requested.equals(current);
     }
 
+    /**
+     * 바뀐 사진만 돌려주고, 생략했거나 현재 사진과 같으면 {@code null}(바꾸지 않음)이다.
+     * 업로드 경로가 아닌 현재 사진(소셜 사진·기본 이미지)을 그대로 보내도 형식 검사에 막히지 않게 한다.
+     */
+    private String changedImageUrl(UpdateMyProfileCommand command, User user) {
+        return isChanged(command.profileImageUrl(), user.getProfile().getProfileImageUrl())
+                ? command.profileImageUrl()
+                : null;
+    }
+
     private void validateNicknameChangeable(Optional<LocalDateTime> lastChangedAt, LocalDateTime now) {
         if (changeableAt(lastChangedAt, now) != null) {
             throw new BusinessException(UserErrorCode.NICKNAME_CHANGE_RESTRICTED);
@@ -90,7 +100,7 @@ public class UserProfileCommandService {
 
     private void validate(UpdateMyProfileCommand command, User user, boolean nicknameChanged,
             Optional<LocalDateTime> lastChangedAt, LocalDateTime now) {
-        User.validateProfileChange(command.nickname(), command.email(), command.profileImageUrl());
+        User.validateProfileChange(command.nickname(), command.email(), changedImageUrl(command, user));
         validateProfileImageNotUsed(command, user);
         if (nicknameChanged) {
             validateNicknameChangeable(lastChangedAt, now);
@@ -112,7 +122,7 @@ public class UserProfileCommandService {
     /** 닉네임 유니크 인덱스 위반(동시 변경 경합)이 커밋 때가 아니라 여기서 DUPLICATED_NICKNAME으로 드러나도록 바로 저장한다. */
     private void change(UpdateMyProfileCommand command, User user, boolean nicknameChanged, LocalDateTime now) {
         String previousNickname = user.getProfile().getNickname();
-        user.changeProfile(command.nickname(), command.email(), command.profileImageUrl());
+        user.changeProfile(command.nickname(), command.email(), changedImageUrl(command, user));
         userRepository.save(user);
         if (nicknameChanged) {
             recordNicknameChange(user, previousNickname, now);
