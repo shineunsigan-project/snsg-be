@@ -58,6 +58,9 @@ description: 사용자 지시를 에이전트 파이프라인(spec → implement
   - **rebase 전에 마이그레이션 번호부터 본다.** `git diff --name-only HEAD...origin/develop -- snsg/src/main/resources/db/migration/`에 이 브랜치의 마이그레이션과 같은 번호가 있으면 rebase하지 않고 멈춰 묻는다. 파일 이름이 다르면 rebase는 충돌 없이 끝나 겹침이 드러나지 않는다.
   - 충돌 없이 맞춰지면 `./gradlew cleanTest build`를 다시 돌린다. 통과하면 PR로 간다. **실패하면 멈춰 묻는다.** 커밋된 뒤라 staged diff가 없어 verify로 돌아갈 수 없다.
   - **충돌이 나거나, 새로 들어온 마이그레이션과 번호가 겹치면** `git rebase --abort`로 되돌리고 멈춰 사용자에게 묻는다("멈춰 묻는 경우"). 해결하면 사용자가 승인한 diff가 바뀌고, 커밋된 뒤라 verify가 볼 staged diff도 없다. 해결 방법(agent2에게 맡길지, 커밋을 되돌려 다시 스테이징하고 verify부터 돌지)은 사용자와 정한다. 번호 규칙은 `.claude/rules/package-structure.md` 마이그레이션 절.
+- **두 시점 사이에 병렬 작업이 develop에 먼저 머지된 것을 알았을 때**(예: SHI-203 진행 중 SHI-202 머지): 커밋 뒤에 맞추면 충돌을 풀어도 재검증할 staged diff가 없으므로, 커밋 전에 충돌부터 본다.
+  - 확인: 스테이징 상태를 임시 커밋으로 만들고(`git commit-tree $(git write-tree) -p HEAD -m tmp`, 브랜치는 움직이지 않는다) `git merge-tree --write-tree <임시 커밋> origin/develop`으로 충돌 파일을 본다. 작업 트리를 바꾸지 않는다. SHI-203은 여기서 `ScheduleRepositoryImpl` 충돌 1곳을 커밋 전에 찾았다.
+  - 충돌이 있으면 멈춰 사용자에게 묻는다. SHI-203에서 사용자가 합의한 방법("그렇게 진행해"): 리뷰 전에 작업 브랜치에 임시 커밋(`git commit`) → `git rebase origin/develop`으로 충돌 해결 → `git reset --soft origin/develop`으로 develop 위 스테이징 상태로 되돌리고 verify를 새로 띄운다(재확인·ecc 리뷰도 그 뒤에 돈다).
 
 ### 마이그레이션 사전 확인 (1단계)
 
@@ -97,6 +100,7 @@ FAIL을 종류로 나눠 돌려보낸다. 코드가 아닌 문제를 agent2에�
 
 - `git diff --staged`와 `git status --short`를 보고, verifier를 띄우기 직전에 기록해 둔 것과 같은지 본다("에이전트를 띄우는 방법"의 스냅샷). verifier는 Edit·Write가 없지만 Bash가 있어, 쓰기는 프롬프트로만 막혀 있다.
 - 빌드·테스트는 `./gradlew cleanTest build`로 직접 돌린다. 입력이 그대로면 Gradle이 test를 UP-TO-DATE로 건너뛰어, verify가 돌린 결과를 다시 보는 것에 그친다. SHI-156에서 verify는 전 항목 PASS였지만 `cleanTest build`에서 DB 연결 고갈로 21건이 실패했다(`.claude/rules/testing.md` DB 연결 수 항목).
+  - 단 **verify가 같은 스냅샷에서 `cleanTest build`를 돌렸으면 다시 돌리지 않는다.** 그 실행이 남긴 결과 XML(`snsg/build/test-results/test/*.xml`)의 tests·failures·errors 합계를 직접 세어 확인한다. 같은 스냅샷에서 같은 명령을 두 번 돌려도 새로 드러나는 것이 없다(사용자 지시, SHI-203). verify가 `--tests`로 일부만 돌렸으면 위대로 직접 돌린다.
 - **implement 보고에서 verify가 볼 수 없는 두 가지를 확인한다.** verify는 보고를 받지 않으므로 여기서만 확인된다.
   - 버그 수정이면 재현 테스트의 **수정 전 실패 출력**이 있는지 본다(`.claude/skills/spec/SKILL.md` 작업 유형별 기존 테스트). 없거나 의심되면 오케스트레이터가 코드를 빼 보지 않는다. agent2를 재개해 수정 전 실패를 다시 확인하고 출력을 보내게 한다. 확인을 마친 뒤 staged diff가 재개 직전 스냅샷과 다르면 verify를 새로 띄운다.
   - `## 참고`의 따라 할 기존 코드와 **다르게 짠 곳과 이유**가 보고에 있는지 본다. 이유가 rules와 맞는지 판단이 필요하면 그 곳만 읽기 전용 에이전트에 맡긴다.
@@ -190,6 +194,10 @@ ecc 플러그인의 GateGuard 훅(Fact-Forcing Gate)이 도구 호출을 한 번
 - **verify(agent3)는 재개하지 않고 매번 새로 띄운다.** 재작업 뒤, ecc 리뷰로 코드가 바뀐 뒤 모두 같다. 이전 판정을 기억하는 verify는 지난 FAIL 항목만 다시 보고, 재작업이 깨뜨린 PASS 항목을 놓친다. 이전 FAIL 내용도 프롬프트에 넣지 않는다. 받는 것은 처음과 같다. 출처: ecc `santa-method`("each review round uses fresh agents… prior context creates anchoring bias").
 - **스냅샷**: verifier를 띄우기 직전과 agent2를 재개하기 직전에 `git diff --staged`·`git status --short`를 기록한다. verifier가 끝난 뒤 둘이 다르면 그 판정은 무효다. 바뀐 것을 사용자에게 보고하고 verify를 새로 띄운다.
 - **최종 verify**: agent4가 끝난 직후, 사용자 diff 보고 전에 **전체를 스테이징한 상태에서 한 번** verify를 새로 띄워 돌린다. refine-docs가 스테이징한 문서 경로를 함께 넘겨 범위 밖 판정에서 빼게 한다. 하네스가 커밋 직전 `/verify`를 요구하는 것은 이것으로 갈음한다. 승인 뒤에는 스테이징을 바꾸지 않으므로 다시 돌지 않는다.
+  - **마지막 PASS 뒤에 바뀐 것이 `.md` 문서뿐이면 빌드·테스트를 돌리지 않는다**(사용자 지시 "그렇게 바꾸고 이번 것부터 적용해", SHI-203). 문서는 빌드에 들어가지 않아 같은 테스트를 한 번 더 돌릴 뿐이다. 대신 오케스트레이터가 둘을 확인하고, 이것이 최종 verify를 갈음한다.
+    - 바뀐 경로: PASS를 받을 때 `git write-tree`로 스테이징 트리 해시를 적어 두고, 지금 `git diff --name-only <그 해시> $(git write-tree)`가 모두 `.md`인지 본다. 코드, `docs/openapi.yaml`·`docs/openapi-admin.yaml`, 설정·마이그레이션이 하나라도 있으면 verify를 새로 띄워 돌린다(`OpenApiSpecTest`가 openapi를 코드와 비교한다).
+    - 내용: 바뀐 문서의 diff를 직접 읽는다. 판정 기준 문서(verify·spec·ecc-review skill, `.claude/rules/testing.md`)가 바뀌었으면 사용자 diff 보고에서 바뀐 기준을 한 줄씩 보여준다(문서 최신화 단계).
+  - **재작업으로 바뀐 것이 문구뿐이어도 같은 기준으로 고른다.** `.md`만 바뀌었으면 테스트 없이 위 두 확인만 한다. 코드의 문구(`@Schema`·`@Operation` description 등)가 바뀌었으면 `docs/openapi.yaml`이 따라 바뀌므로 verify를 새로 띄운다(SHI-203에서 ecc 리뷰 문구 재작업 뒤 verify와 오케스트레이터가 같은 전체 빌드를 겹쳐 돌렸다).
   - FAIL이면 재작업 루프로 간다. 재작업으로 diff가 바뀌면 사용자 diff 승인을 다시 받는다. ecc 리뷰는 다시 돌지 않는다.
   - 커밋을 여럿으로 나눌 때(코드·테스트·`docs:`)는 스테이징을 바꾸지 않고 `git commit -- <경로>`로 나눈다. 일부만 스테이징한 상태로 verify를 돌리면 빠진 테스트 때문에 FAIL이 난다.
 - **`Agent` 도구의 `isolation: "worktree"`는 쓰지 않는다.** 자체 임시 워크트리라 `snsg/.env`가 없어 테스트가 돌지 않고, 브랜치 이름이 git-workflow.md의 `<prefix>/SHI-<번호>-<작업-이름>` 규칙과도 어긋난다. 워크트리는 1단계에서 오케스트레이터가 만든 것을 쓴다.

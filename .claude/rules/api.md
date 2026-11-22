@@ -35,7 +35,7 @@ paths:
   - 제약마다 `message`에 화면에 그대로 보여줄 문구를 준다. domain ErrorCode와 같은 문구를 쓰고, 값이 비었을 때(`@NotNull`)도 그 필드의 형식 문구를 쓴다. 다른 도메인의 상수는 import할 수 없으므로 정규식·문구가 두 곳에 적히는 것은 허용한다(`.claude/rules/package-structure.md` 도메인 간 참조의 값 상수 중복).
 - **Request DTO를 만드는 기준**: 필드가 둘 이상이거나 검증 제약(`@NotBlank`, `@Size` 등)이 붙으면 만든다. 파라미터 하나를 그대로 넘길 뿐이면 만들지 않고 `@RequestParam`·`@PathVariable`로 받아 Command를 만든다. 필드 하나짜리 껍데기 record는 읽는 사람에게 아무것도 알려주지 않는다.
   - 단 **나중에 필드가 늘어날 것이 분명하면** 처음부터 만든다. 공개된 API의 요청 형태를 바꾸면 FE도 함께 고쳐야 한다.
-  - 쿼리·경로 파라미터는 둘 이상이어도 검증 제약이 없으면 DTO 없이 `@RequestParam`·`@PathVariable`로 받는다. 필드 수 기준은 요청 본문(JSON)에 적용한다. 파라미터마다 이름·필수 여부·문서(`@Parameter`)가 메서드 시그니처에 바로 보이고, 생략과 빈 값 구분(아래 항목)도 그 자리에서 드러난다. 예: `PlaceCandidateController`(`categoryId`, `regionCode`), `KakaoWebhookController`(`user_id`, `referrer_type`), `ScheduleController`의 모집 중 목록(`categoryIds`, `regionCodes`, `startDate`, `endDate`, `cursor`, `size`. 범위를 벗어난 `size`는 제약 대신 잘라낸다. 아래 목록 절).
+  - 쿼리·경로 파라미터는 둘 이상이어도 검증 제약이 없으면 DTO 없이 `@RequestParam`·`@PathVariable`로 받는다. 필드 수 기준은 요청 본문(JSON)에 적용한다. 파라미터마다 이름·필수 여부·문서(`@Parameter`)가 메서드 시그니처에 바로 보이고, 생략과 빈 값 구분(아래 항목)도 그 자리에서 드러난다. 예: `PlaceCandidateController`(`categoryId`, `regionCode`), `KakaoWebhookController`(`user_id`, `referrer_type`), `ScheduleController`의 모집 중 목록(`categoryIds`, `regionCodes`, `startDate`, `endDate`, `sort`, `cursor`, `size`. 범위를 벗어난 `size`는 제약 대신 잘라낸다. 아래 목록 절).
 - 선택 쿼리 파라미터에서 생략과 빈 값을 다르게 다뤄야 하면 `@RequestParam(required = false) String`으로 받고 `defaultValue`를 주지 않는다. 생략은 `null`, `?x=`는 `""`로 들어온다. `defaultValue`를 주면 빈 값도 기본값으로 바뀌어 구분이 사라진다. 예: `PlaceCandidateController`의 `regionCode`(생략은 활성 지역 전체, 빈 값은 400 `INVALID_REGION`).
   - 빈 값의 뜻은 API마다 정해 문서에 적는다. 모집 중 일정 목록의 `categoryIds=`·`regionCodes=`는 400이 아니라 "맞는 일정 없음"(200, 빈 결과)이다. 모르는 값이 빈 결과인 것과 같게 맞췄다.
   - 여러 값을 받는 `List<…>` 파라미터는 빈 값이 `null`이나 빈 문자열 원소로 섞여 들어오므로 받은 뒤 걸러낸다. 예: `RecruitingScheduleFilter`.
@@ -100,10 +100,14 @@ paths:
 
 - 응답 `data`는 `{items, nextCursor}`다. 다음 페이지가 없으면 `nextCursor`는 `null`, 맞는 것이 없으면 200에 `items = []`, `nextCursor = null`이다.
 - 정렬은 (정렬 키, id) 오름차순이고, 다음 페이지는 keyset(마지막 항목의 (정렬 키, id)보다 뒤)으로 자른다. offset을 쓰지 않는다. 쿼리 작성은 `.claude/rules/package-structure.md` 인프라 규약의 목록 쿼리 절.
-  - 최근 것이 먼저 와야 쓸 수 있는 목록만 (정렬 키, id) 내림차순이고, keyset도 마지막 항목보다 앞을 읽는다. 커서 형식은 같다. 예: 참여한·개설한 일정의 지난 일정(`period=PAST`, 시작 늦은 순, SHI-190).
+  - 최근 것이 먼저 와야 쓸 수 있는 목록만 (정렬 키, id) 내림차순이고, keyset도 마지막 항목보다 앞을 읽는다. 커서 형식은 같다. 예: 참여한·개설한 일정의 지난 일정(`period=PAST`, 시작 늦은 순, SHI-190), 모집 중 목록의 `sort=LATEST`(개설 늦은 순, 커서에 정렬 표식이 붙는다. 아래 커서 항목).
   - 한 API가 정렬 방향이 다른 구간을 함께 가지면 섞지 않고 파라미터로 나눈다. 방향이 둘이면 keyset 커서 하나로 표현할 수 없다. 예: 같은 API의 `period`(`UPCOMING` 기본·`PAST`). 구간은 커서에 싣지 않고, 바꾸면 필터·탭처럼 cursor 없이 처음부터 부른다.
+  - **한 목록에서 정렬 기준을 고르게 하면 `sort` 쿼리 파라미터(enum)로 받는다.** `@RequestParam(defaultValue = "<기존 정렬>")`라 생략·빈 값은 지금까지의 정렬이고, 그 밖의 값(소문자 포함)은 타입 변환 실패로 400 `INVALID_REQUEST`다(`period`와 같다). 기본값을 지금까지의 정렬로 두어 기존 호출이 그대로 통한다. 범위가 정렬마다 달라도 된다. 바꾸면 cursor 없이 처음부터 부른다. 예: 모집 중 일정 목록(`RecruitingScheduleSort`: `START_AT` 기본·`LATEST` 개설 늦은 순·`CLOSING_SOON` 모레까지 시작하고 자리가 남은 일정을 남은 자리 적은 순 → 시작 빠른 순, SHI-203). 쿼리 작성은 `.claude/rules/package-structure.md` 목록 쿼리 절.
+  - **다른 요청이 바꾸는 값(확정 인원 등)으로 정렬하면, 페이지를 넘기는 사이 그 값이 바뀌어 다음 페이지에서 항목이 겹치거나 빠질 수 있다.** 스냅숏·버전으로 막지 않고 FE 문서(`docs/api-guide.md`)에 적는다. FE는 이미 받은 id를 건너뛴다. 예: `sort=CLOSING_SOON`(남은 자리, SHI-203 결정. 홈 칸은 첫 페이지만 써서 영향이 작다).
 - 커서는 마지막 항목의 (정렬 키, id)를 URL-safe Base64(패딩 없음)로 인코딩한 불투명 문자열이다. 문자가 `[A-Za-z0-9_-]`뿐이라 FE가 인코딩 없이 쿼리에 붙인다. FE는 내용을 해석하지 않는다. 예: `ScheduleCursor`.
   - 해석할 수 없는 커서는 그 도메인 ErrorCode의 `INVALID_CURSOR`(400)다. FE는 커서 없이 처음부터 다시 부른다.
+  - **`sort`로 고르는 정렬은 정렬마다 커서를 따로 두고, 기본 정렬이 아닌 커서는 원문 앞에 정렬 표식을 붙인다**(`LATEST|<createdAt>|<id>`, `CLOSING_SOON|<남은 자리>|<startAt>|<id>`). 정렬 키가 달라 다른 정렬의 커서를 읽으면 오류 없이 엉뚱한 위치부터 읽게 되므로, 표식·항목 수가 맞지 않으면 `INVALID_CURSOR`다. 기본 정렬 커서는 표식 없이 원래 형식 그대로 두어 이미 받은 커서가 통한다. 예: `ScheduleCursor`(`START_AT`)·`LatestScheduleCursor`·`ClosingSoonScheduleCursor`(SHI-203).
+  - `period` 구간의 커서에는 표식이 없다. 정렬 키 형태가 같아 다른 기간의 커서도 오류 없이 읽힌다. SHI-203에서 바꾸지 않기로 했다(비목표).
 - 한 건 더(size + 1) 읽어 다음 페이지가 있는지 정한다. 남은 개수가 size와 딱 맞아도 마지막 페이지에서 `nextCursor = null`이 나가, FE가 빈 페이지를 한 번 더 부르지 않는다.
 - `size`는 생략하면 기본값, 상한을 넘으면 상한, 1보다 작으면 1로 **잘라낸다.** 오류로 내지 않는다. 기본값·상한은 그 도메인의 설정 record로 읽는다(`schedule.page-size-default: 20`·`schedule.page-size-max: 50`, `admin.page-size-default: 20`·`admin.page-size-max: 50`, `place.page-size-default: 20`·`place.page-size-max: 50`).
 - 공개 목록 API에서 여러 값을 받는 필터는 빈 값·중복을 뺀 뒤 개수 상한을 두고, 넘으면 400 `INVALID_REQUEST`다. 값을 아주 많이 보내면 IN 조건의 바인드 파라미터가 DB 한도를 넘어 500이 나므로 요청 단계에서 끊는다. 예: 모집 중 일정 목록의 `categoryIds`·`regionCodes`는 각각 20개.
