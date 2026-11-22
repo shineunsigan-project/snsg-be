@@ -18,8 +18,11 @@ public class AuthCookieFactory {
 
     public static final String REFRESH_TOKEN = "refreshToken";
     public static final String SIGN_UP_TOKEN = "signUpToken";
+    public static final String OAUTH_STATE = "oauthState";
 
     private static final String PATH = "/api/v1/auth";
+    /** 카카오 인가코드 유효시간(10분)에 맞춘다. 그 뒤의 콜백은 어차피 실패한다. */
+    private static final Duration OAUTH_STATE_MAX_AGE = Duration.ofMinutes(10);
 
     private final Duration refreshTokenMaxAge;
     private final Duration signUpTokenMaxAge;
@@ -38,6 +41,22 @@ public class AuthCookieFactory {
     }
 
     /**
+     * 소셜 로그인을 시작한 브라우저에 state를 묶는다(로그인 CSRF 방지).
+     * <p>
+     * 토큰 쿠키와 달리 SameSite=Lax다. 콜백은 소셜이 보내는 최상위 GET 이동이라 Lax 쿠키가 따라온다.
+     */
+    public ResponseCookie oauthState(String state) {
+        return oauthStateCookie(state, OAUTH_STATE_MAX_AGE);
+    }
+
+    /**
+     * 콜백 성공 시 state 쿠키를 지운다. 같은 이름·경로·SameSite로 수명 0짜리를 덮어쓴다.
+     */
+    public ResponseCookie expiredOAuthState() {
+        return oauthStateCookie("", Duration.ZERO);
+    }
+
+    /**
      * 로그아웃·가입 완료 시 쿠키를 지운다. 같은 이름·경로로 수명 0짜리를 덮어쓴다.
      */
     public ResponseCookie expired(String name) {
@@ -49,6 +68,16 @@ public class AuthCookieFactory {
                 .httpOnly(true)
                 .secure(true)
                 .sameSite("None")
+                .path(PATH)
+                .maxAge(maxAge)
+                .build();
+    }
+
+    private ResponseCookie oauthStateCookie(String value, Duration maxAge) {
+        return ResponseCookie.from(OAUTH_STATE, value)
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Lax")
                 .path(PATH)
                 .maxAge(maxAge)
                 .build();

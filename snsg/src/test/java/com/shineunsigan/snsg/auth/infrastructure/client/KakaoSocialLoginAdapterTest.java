@@ -122,11 +122,12 @@ class KakaoSocialLoginAdapterTest {
     }
 
     @Test
-    @DisplayName("인증 시작 주소에 client_id와 redirect_uri가 들어간다")
+    @DisplayName("인증 시작 주소에 client_id와 redirect_uri, 인코딩된 state가 들어간다")
     void authorizeUrl() {
-        assertThat(adapter.authorizeUrl())
+        assertThat(adapter.authorizeUrl("a+b/c="))
                 .startsWith("https://kauth.kakao.com/oauth/authorize?response_type=code")
                 .contains("client_id=client-id")
-                .contains("redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback");
+                .contains("redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback")
+                .contains("state=a%2Bb%2Fc%3D");
     }
 }

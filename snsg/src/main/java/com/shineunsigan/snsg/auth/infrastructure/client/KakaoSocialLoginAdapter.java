@@ -41,11 +41,12 @@ public class KakaoSocialLoginAdapter implements SocialLoginPort {
     }
 
     @Override
-    public String authorizeUrl() {
+    public String authorizeUrl(String state) {
         return AUTHORIZE_URL
                 + "?response_type=code"
                 + "&client_id=" + encode(kakao.clientId())
-                + "&redirect_uri=" + encode(kakao.redirectUri());
+                + "&redirect_uri=" + encode(kakao.redirectUri())
+                + "&state=" + encode(state);
     }
 
     @Override
