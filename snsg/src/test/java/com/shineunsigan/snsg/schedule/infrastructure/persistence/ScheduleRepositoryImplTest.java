@@ -30,7 +30,7 @@ import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
 import jakarta.persistence.EntityManager;
 
 /**
- * 시간 겹침 쿼리, 일정 잠금 조회와 잠금 없는 조회, 탈퇴를 막는 일정 조회, 일정 목록 3종 쿼리(참여한·개설한 목록의 두 기간 포함), 상태 전환 일괄 UPDATE와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
+ * 시간 겹침 쿼리, 일정 잠금 조회와 잠금 없는 조회, 탈퇴를 막는 일정 조회, 일정 목록 3종 쿼리(참여한·개설한 목록의 두 기간 포함), 다가오는 내 일정 조회, 상태 전환 일괄 UPDATE와 DB 제약(확정 참여 부분 유니크 인덱스, 확정 인원 CHECK)을 실제 PostgreSQL에서 검증한다.
  * 일정·참여 행은 native INSERT로 넣는다. 사용자 id는 테스트마다 무작위라 다른 데이터와 섞이지 않는다.
  * 테스트 트랜잭션은 롤백된다.
  */
@@ -494,6 +494,77 @@ class ScheduleRepositoryImplTest {
         assertThat(hostedIds()).isEmpty();
     }
 
+    // 다가오는 내 일정. 사용자 id가 무작위라 다른 데이터와 섞이지 않는다. 기준 시각은 NOW다.
+
+    @Test
+    @DisplayName("다가오는 내 일정에 내가 연 일정(HOST 행)이 온다")
+    void nextUpcomingHosted() {
+        UUID hosted = insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId));
+        insertParticipant(hosted, userId, "HOST", "CONFIRMED", false);
+
+        assertThat(nextUpcomingId()).contains(hosted);
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정에 내가 멤버로 확정 참여한 일정이 온다")
+    void nextUpcomingParticipating() {
+        UUID schedule = insertSchedule(row().startAt(NOW.plusDays(1)));
+        insertParticipant(schedule, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(nextUpcomingId()).contains(schedule);
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정에 정원이 차 모집 마감된 시작 전 일정도 온다")
+    void nextUpcomingFull() {
+        UUID full = insertSchedule(row().startAt(NOW.plusDays(1)).capacity(4).confirmedCount(4)
+                .recruitmentStatus("CLOSED"));
+        insertParticipant(full, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(nextUpcomingId()).contains(full);
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정이 여럿이면 연 일정·참여한 일정을 통틀어 시작이 가장 빠른 1건이다")
+    void nextUpcomingEarliest() {
+        UUID later = insertSchedule(row().startAt(NOW.plusDays(3)).hostUserId(userId));
+        insertParticipant(later, userId, "HOST", "CONFIRMED", false);
+        UUID earliest = insertSchedule(row().startAt(NOW.plusMinutes(30)));
+        insertParticipant(earliest, userId, "MEMBER", "CONFIRMED", false);
+        UUID middle = insertSchedule(row().startAt(NOW.plusDays(2)));
+        insertParticipant(middle, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(nextUpcomingId()).contains(earliest);
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정에서 취소·완료된·시작 시각이 기준 시각과 같거나 이전인·참여 취소한·삭제된·삭제된 참여 행의·남의 일정은 빠진다")
+    void nextUpcomingExcluded() {
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).status("CANCELED")), userId, "MEMBER",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).hostUserId(userId).status("CANCELED")),
+                userId, "HOST", "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).status("COMPLETED")), userId, "MEMBER",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW)), userId, "MEMBER", "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.minusMinutes(30))), userId, "MEMBER", "CONFIRMED",
+                false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1))), userId, "MEMBER", "CANCELED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).deleted(true)), userId, "MEMBER",
+                "CONFIRMED", false);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1))), userId, "MEMBER", "CONFIRMED", true);
+        insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1))), UUID.randomUUID(), "MEMBER", "CONFIRMED",
+                false);
+
+        assertThat(nextUpcomingId()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정이 없으면 빈 결과다")
+    void nextUpcomingNone() {
+        assertThat(nextUpcomingId()).isEmpty();
+    }
+
     // 지난 일정(PAST). 완료 전 목록의 여집합이다. 기준 시각은 NOW, 완료 기준 시각은 NOW − 12시간이다.
 
     @Test
@@ -753,6 +824,10 @@ class ScheduleRepositoryImplTest {
     private List<UUID> pastHostedIds() {
         return ids(scheduleRepository.findHosted(userId, SchedulePeriod.PAST, NOW.minus(COMPLETION_AFTER), null,
                 100));
+    }
+
+    private Optional<UUID> nextUpcomingId() {
+        return scheduleRepository.findNextUpcoming(userId, NOW).map(Schedule::getId);
     }
 
     private static List<UUID> ids(List<Schedule> schedules) {
