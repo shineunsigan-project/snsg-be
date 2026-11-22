@@ -59,6 +59,16 @@ class ScheduleCursorTest {
                 .encodeToString(raw.getBytes(StandardCharsets.UTF_8)));
     }
 
+    @Test
+    @DisplayName("최근 열린 순·마감 임박 순의 커서는 시작 일시 순 커서로 해석하지 않는다(INVALID_CURSOR)")
+    void otherSortCursors() {
+        LocalDateTime at = LocalDateTime.of(2026, 11, 14, 19, 30);
+        UUID id = UUID.randomUUID();
+
+        assertInvalidCursor(new LatestScheduleCursor(at, id).encode());
+        assertInvalidCursor(new ClosingSoonScheduleCursor(3, at, id).encode());
+    }
+
     private static void assertInvalidCursor(String value) {
         assertThatThrownBy(() -> ScheduleCursor.decode(value))
                 .isInstanceOf(BusinessException.class)
