@@ -360,6 +360,9 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 - 예외: 애노테이션 속성이 읽는 값은 record를 주입할 자리가 없어 자리표시자(`"${...}"`)로 읽는다. 예: `@Scheduled(fixedDelayString = "${schedule.status-transition-interval}")`, `@Scheduled(cron = "${withdrawal.anonymize-cron}")`, `@Scheduled(cron = "${place.import-cron}")`, `@ConditionalOnProperty(name = "openapi.admin-group-enabled")`. 그 키는 record에 넣지 않고, 넣지 않은 이유를 yaml 주석으로 남긴다(`@ConfigurationProperties`는 모르는 키를 무시한다).
 - **새 환경변수를 설정에서 읽으면 운영 목록 `snsg/.env.example`에 키를 값 없이 더한다.** 로컬 `snsg/.env`에도 넣어야 테스트 컨텍스트가 뜬다(`.claude/rules/testing.md`). 운영 값은 ECS task definition(`snsg-be-web-task`, 저장소 밖)에 넣는다. `.github/workflows/deploy.yml`은 최신 task definition의 이미지만 바꿔 배포하므로, 기본값 없는 자리표시자(`${DATA_GO_KR_API_KEY}`)가 task definition에 없으면 운영 기동이 멈춘다. task definition에 넣어야 한다는 것을 PR의 background에 적는다. 예: SHI-181의 `DATA_GO_KR_API_KEY`(`public-data.api-key`), SHI-182의 `ADMIN_JWT_SECRET`(`admin-jwt.secret`, 기본값 없음)·`ADMIN_CORS_ALLOWED_ORIGINS`(`cors.admin-allowed-origins`, 기본값 빈 목록).
   - `ADMIN_CORS_ALLOWED_ORIGINS`는 빠졌을 때 열리지 않고 닫히게 두었다. 없으면 어드민 경로의 브라우저 호출을 모두 거부한다(`CorsProperties`, SHI-182 결정). 사용자 쪽 `CORS_ALLOWED_ORIGINS`의 기본값(`*`)과 다르다.
+  - 요청이 보낸 값과 비교하는 검증용 키도 같은 모양이다. 자리표시자에 빈 기본값을 주고(`oauth.kakao.admin-key: ${KAKAO_ADMIN_KEY:}`), 비교하는 자리에서 설정 키가 null이거나 공백뿐이면 비교하지 않고 거부한다(`HandleSocialUnlinkFacade.verifyKakao`, SHI-207). 기동 실패로 막지 않았다. `.env.example`이 빈 값이라 템플릿을 복사한 로컬에서 컨텍스트가 뜨지 않게 된다.
+    - 이유: 빈 설정 키는 빈 키를 보낸 요청과 같아 통과한다. 기본값이 없으면 해석하지 못한 자리표시자가 글자 그대로 바인딩되어(`.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의", SHI-190) 그 문자열(`${KAKAO_ADMIN_KEY}`)을 보낸 요청이 통과한다. 카카오 연결 끊기 웹훅은 인증 없이 열려 있어, 둘 다 누구나 임의 회원을 탈퇴시킬 수 있는 구멍이었다.
+    - 대가: 운영에서 키가 빠지면 기동은 되고 웹훅만 모두 거부된다(컨트롤러는 200을 주고 warn 로그만 남긴다).
   - 머지 전 워크트리에만 넣은 값을 다른 워크트리·메인 디렉터리 `.env`에 옮기는 절차는 `.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의".
 
 ## 코드 작성
