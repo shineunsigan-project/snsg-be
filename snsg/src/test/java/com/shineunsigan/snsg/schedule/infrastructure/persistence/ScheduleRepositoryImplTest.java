@@ -23,6 +23,8 @@ import org.springframework.context.annotation.Import;
 
 import com.shineunsigan.snsg.common.entity.Auditor;
 import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
+import com.shineunsigan.snsg.schedule.domain.model.ClosingSoonScheduleCursor;
+import com.shineunsigan.snsg.schedule.domain.model.LatestScheduleCursor;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
 import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
@@ -52,6 +54,8 @@ class ScheduleRepositoryImplTest {
     private static final LocalDateTime TRANSITION_NOW = LocalDateTime.of(2020, 1, 1, 12, 0);
     /** 넣은 행의 created_at·updated_at. 전환되지 않은 행은 이 값이 그대로 남는다. */
     private static final LocalDateTime INSERTED_AT = LocalDateTime.of(2019, 12, 1, 9, 0);
+    /** 최근 열린 순 테스트 행의 개설 시각 기준. 같은 개설 시각을 여러 건 넣으려고 고정한다. */
+    private static final LocalDateTime CREATED_AT = LocalDateTime.of(2027, 3, 1, 9, 0);
     /** 탈퇴 제한 시간(schedule.withdrawal-block-after-start). */
     private static final Duration WITHDRAWAL_BLOCK = Duration.ofHours(24);
 
@@ -428,6 +432,169 @@ class ScheduleRepositoryImplTest {
 
         assertThat(all).hasSize(6);
         assertThat(paged).containsExactlyElementsOf(all);
+    }
+
+    // 모집 중 목록, 최근 열린 순(LATEST). 범위는 시작 일시 순과 같고 개설 시각 늦은 순이다.
+
+    @Test
+    @DisplayName("최근 열린 순은 시작 일시 순과 범위가 같다. 모집 마감 일정은 포함하고 시작한·취소·완료·삭제 일정은 뺀다. 개설 시각 늦은 순이다")
+    void latestScope() {
+        UUID category = UUID.randomUUID();
+        UUID older = insertSchedule(row().categoryId(category).startAt(NOW.plusHours(1)).createdAt(CREATED_AT));
+        UUID closed = insertSchedule(row().categoryId(category).startAt(NOW.plusHours(2))
+                .capacity(6).confirmedCount(6).recruitmentStatus("CLOSED").createdAt(CREATED_AT.plusHours(1)));
+        insertSchedule(row().categoryId(category).startAt(NOW.minusHours(1)).createdAt(CREATED_AT.plusHours(2)));
+        insertSchedule(row().categoryId(category).startAt(NOW).createdAt(CREATED_AT.plusHours(2)));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).status("CANCELED")
+                .createdAt(CREATED_AT.plusHours(2)));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).status("COMPLETED")
+                .createdAt(CREATED_AT.plusHours(2)));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).deleted(true)
+                .createdAt(CREATED_AT.plusHours(2)));
+
+        assertThat(latestIds(filter(List.of(category), null, null, null))).containsExactly(closed, older);
+    }
+
+    @Test
+    @DisplayName("최근 열린 순은 개설 시각 내림차순이고, 커서로 size 2씩 끝까지 넘기면 같은 개설 시각이 여러 건이어도 중복·누락 없이 전체 목록과 같다")
+    void latestOrderAndCursorPagination() {
+        UUID category = UUID.randomUUID();
+        UUID newest = insertSchedule(row().categoryId(category).startAt(NOW.plusDays(5))
+                .createdAt(CREATED_AT.plusHours(2)));
+        List<UUID> sameCreatedAt = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            sameCreatedAt.add(insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1 + i))
+                    .createdAt(CREATED_AT.plusHours(1))));
+        }
+        UUID oldest = insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1)).createdAt(CREATED_AT));
+        RecruitingScheduleFilter filter = filter(List.of(category), null, null, null);
+        List<UUID> all = latestIds(filter);
+
+        List<UUID> paged = new ArrayList<>();
+        LatestScheduleCursor cursor = null;
+        List<Schedule> page;
+        do {
+            page = scheduleRepository.findRecruitingLatest(filter, NOW, cursor, 2);
+            page.forEach(schedule -> paged.add(schedule.getId()));
+            if (!page.isEmpty()) {
+                Schedule last = page.get(page.size() - 1);
+                cursor = LatestScheduleCursor.decode(
+                        new LatestScheduleCursor(last.getCreatedAt(), last.getId()).encode());
+            }
+        } while (!page.isEmpty());
+
+        assertThat(all).hasSize(5);
+        assertThat(all.get(0)).isEqualTo(newest);
+        assertThat(all.subList(1, 4)).containsExactlyInAnyOrderElementsOf(sameCreatedAt);
+        assertThat(all.get(4)).isEqualTo(oldest);
+        assertThat(paged).containsExactlyElementsOf(all);
+    }
+
+    @Test
+    @DisplayName("최근 열린 순에도 활동·지역·날짜 필터가 함께 걸린다")
+    void latestWithFilters() {
+        UUID category = UUID.randomUUID();
+        LocalDate day = NOW.toLocalDate().plusDays(5);
+        UUID matched = insertSchedule(row().categoryId(category).startAt(day.atTime(10, 0)).regionCode("11440"));
+        insertSchedule(row().categoryId(category).startAt(day.atTime(11, 0)).regionCode("11200"));
+        insertSchedule(row().categoryId(category).startAt(day.plusDays(1).atTime(10, 0)).regionCode("11440"));
+        insertSchedule(row().startAt(day.atTime(12, 0)).regionCode("11440"));
+
+        assertThat(latestIds(filter(List.of(category), List.of("11440"), day, day))).containsExactly(matched);
+    }
+
+    // 모집 중 목록, 마감 임박 순(CLOSING_SOON). 기준 시각 NOW(2027-03-10 12:00)의 날짜 + 2일(03-12)까지 시작하는 일정이다.
+
+    @Test
+    @DisplayName("마감 임박 순은 시작 전 예정 일정 중 모레까지 시작하는 일정만 준다. 정원이 찬 일정과 시작한·취소·완료·삭제 일정은 뺀다")
+    void closingSoonScope() {
+        UUID category = UUID.randomUUID();
+        UUID tomorrow = insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1)));
+        UUID lastMinute = insertSchedule(row().categoryId(category).startAt(LocalDateTime.of(2027, 3, 12, 23, 59)));
+        insertSchedule(row().categoryId(category).startAt(LocalDateTime.of(2027, 3, 13, 0, 0)));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(2))
+                .capacity(6).confirmedCount(6).recruitmentStatus("CLOSED"));
+        insertSchedule(row().categoryId(category).startAt(NOW.minusHours(1)));
+        insertSchedule(row().categoryId(category).startAt(NOW));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).status("CANCELED"));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).status("COMPLETED"));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusHours(3)).deleted(true));
+
+        assertThat(closingSoonIds(filter(List.of(category), null, null, null), NOW))
+                .containsExactly(tomorrow, lastMinute);
+    }
+
+    @Test
+    @DisplayName("마감 임박의 끝은 시각이 아니라 날짜다. 기준 시각이 23:59여도 모레 23:59 시작은 오고 글피 00:00 시작은 오지 않는다")
+    void closingSoonDateBoundaryAtLateNow() {
+        UUID category = UUID.randomUUID();
+        UUID lastMinute = insertSchedule(row().categoryId(category).startAt(LocalDateTime.of(2027, 3, 12, 23, 59)));
+        insertSchedule(row().categoryId(category).startAt(LocalDateTime.of(2027, 3, 13, 0, 0)));
+
+        assertThat(closingSoonIds(filter(List.of(category), null, null, null), LocalDateTime.of(2027, 3, 10, 23, 59)))
+                .containsExactly(lastMinute);
+    }
+
+    @Test
+    @DisplayName("마감 임박 순은 남은 자리 → 시작 시각 → id 오름차순이고, 커서로 size 2씩 끝까지 넘기면 같은 키가 여러 건이어도 중복·누락 없이 전체 목록과 같다")
+    void closingSoonOrderAndCursorPagination() {
+        UUID category = UUID.randomUUID();
+        UUID oneSeatLater = insertSchedule(row().categoryId(category).startAt(NOW.plusDays(2)).confirmedCount(5));
+        UUID oneSeatEarlier = insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1)).confirmedCount(5));
+        List<UUID> sameKey = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            sameKey.add(insertSchedule(row().categoryId(category).startAt(NOW.plusHours(1)).confirmedCount(3)));
+        }
+        UUID manySeats = insertSchedule(row().categoryId(category).startAt(NOW.plusHours(1)).confirmedCount(1));
+        RecruitingScheduleFilter filter = filter(List.of(category), null, null, null);
+        List<UUID> all = closingSoonIds(filter, NOW);
+
+        List<UUID> paged = new ArrayList<>();
+        ClosingSoonScheduleCursor cursor = null;
+        List<Schedule> page;
+        do {
+            page = scheduleRepository.findRecruitingClosingSoon(filter, NOW, cursor, 2);
+            page.forEach(schedule -> paged.add(schedule.getId()));
+            if (!page.isEmpty()) {
+                Schedule last = page.get(page.size() - 1);
+                cursor = ClosingSoonScheduleCursor.decode(new ClosingSoonScheduleCursor(
+                        last.getCapacity() - last.getConfirmedCount(), last.getStartAt(), last.getId()).encode());
+            }
+        } while (!page.isEmpty());
+
+        assertThat(all).hasSize(6);
+        assertThat(all.subList(0, 2)).containsExactly(oneSeatEarlier, oneSeatLater);
+        assertThat(all.subList(2, 5)).containsExactlyInAnyOrderElementsOf(sameKey);
+        assertThat(all.get(5)).isEqualTo(manySeats);
+        assertThat(paged).containsExactlyElementsOf(all);
+    }
+
+    @Test
+    @DisplayName("마감 임박 순에도 활동·지역 필터가 함께 걸린다")
+    void closingSoonWithFilters() {
+        UUID category = UUID.randomUUID();
+        UUID matched = insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1)).regionCode("11440"));
+        insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1)).regionCode("11200"));
+        insertSchedule(row().startAt(NOW.plusDays(1)).regionCode("11440"));
+
+        assertThat(closingSoonIds(filter(List.of(category), List.of("11440"), null, null), NOW))
+                .containsExactly(matched);
+    }
+
+    @Test
+    @DisplayName("마감 임박 순과 날짜 필터는 교집합이다. 모레보다 뒤 날짜만 고르면 빈 결과, 모레를 고르면 그날 일정만 온다")
+    void closingSoonWithDateFilter() {
+        UUID category = UUID.randomUUID();
+        LocalDate dayAfterTomorrow = NOW.toLocalDate().plusDays(2);
+        insertSchedule(row().categoryId(category).startAt(NOW.plusDays(1)));
+        UUID onDayAfterTomorrow = insertSchedule(row().categoryId(category).startAt(dayAfterTomorrow.atTime(10, 0)));
+        UUID later = insertSchedule(row().categoryId(category).startAt(dayAfterTomorrow.plusDays(1).atTime(10, 0)));
+        LocalDate laterDay = dayAfterTomorrow.plusDays(1);
+
+        assertThat(recruitingIds(filter(List.of(category), null, laterDay, laterDay))).containsExactly(later);
+        assertThat(closingSoonIds(filter(List.of(category), null, laterDay, laterDay), NOW)).isEmpty();
+        assertThat(closingSoonIds(filter(List.of(category), null, dayAfterTomorrow, laterDay), NOW))
+                .containsExactly(onDayAfterTomorrow);
     }
 
     // 참여한 목록. 사용자 id가 무작위라 다른 데이터와 섞이지 않는다.
@@ -807,6 +974,14 @@ class ScheduleRepositoryImplTest {
         return ids(scheduleRepository.findRecruiting(filter, NOW, null, 100));
     }
 
+    private List<UUID> latestIds(RecruitingScheduleFilter filter) {
+        return ids(scheduleRepository.findRecruitingLatest(filter, NOW, null, 100));
+    }
+
+    private List<UUID> closingSoonIds(RecruitingScheduleFilter filter, LocalDateTime now) {
+        return ids(scheduleRepository.findRecruitingClosingSoon(filter, now, null, 100));
+    }
+
     private List<UUID> participatingIds() {
         return ids(scheduleRepository.findParticipating(userId, SchedulePeriod.UPCOMING, NOW.minus(WINDOW), null,
                 100));
@@ -877,7 +1052,7 @@ class ScheduleRepositoryImplTest {
                 .setParameter(8, row.recruitmentStatus)
                 .setParameter(9, UUID.randomUUID())
                 .setParameter(10, row.regionCode)
-                .setParameter(11, INSERTED_AT)
+                .setParameter(11, row.createdAt)
                 .setParameter(12, INSERTED_AT)
                 .setParameter(13, row.deleted)
                 .executeUpdate();
@@ -911,6 +1086,12 @@ class ScheduleRepositoryImplTest {
         private String regionCode = "11440";
         private UUID hostUserId;
         private String recruitmentStatus = "RECRUITING";
+        private LocalDateTime createdAt = INSERTED_AT;
+
+        ScheduleRow createdAt(LocalDateTime createdAt) {
+            this.createdAt = createdAt;
+            return this;
+        }
 
         ScheduleRow startAt(LocalDateTime startAt) {
             this.startAt = startAt;

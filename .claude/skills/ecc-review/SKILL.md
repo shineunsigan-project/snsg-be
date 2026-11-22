@@ -33,6 +33,7 @@ verify는 GOAL만 판정한다(`.claude/skills/verify/SKILL.md` "GOAL에 없는 
 - `comment-analyzer`만 `model: haiku`이고 나머지는 `sonnet`이다. 한 작업에 보통 2~4개다.
 - `type-design-analyzer`·`comment-analyzer`는 Bash가 없어 diff를 직접 뽑지 못한다. 프롬프트에 해당 파일의 `git diff --staged` 부분을 넣는다.
 - `database-reviewer`에는 고정 프롬프트 뒤에 한 줄을 더한다: "운영은 ECS 서비스라 배포 중 새 태스크가 마이그레이션을 적용한 뒤에도 이전 버전 태스크가 잠시 돌 수 있다. 이전 버전 코드가 실패하는 변경(컬럼 삭제·이름 변경, 이전 코드가 INSERT하는 테이블에 DEFAULT 없는 NOT NULL 컬럼, 이전 코드가 쓰는 enum 값 제거)을 지적한다." 근거: `.github/workflows/deploy.yml`(ECS 서비스 갱신), V12가 `places`에 DEFAULT 없는 NOT NULL 컬럼을 더했다. 출처: ecc `database-migrations`.
+  - 마이그레이션이 없는 diff에서 `database-reviewer`가 마이그레이션이 없다는 것만 보고 "지적 없음"으로 끝낼 수 있다(SHI-203 첫 답). 그래서 프롬프트에 **이번 diff의 핵심 대상**을 한 줄 더 적는다. 쿼리 변경이면 바뀐 메서드 이름과 볼 것(keyset 비교 방향, 계산식 정렬, 삭제 조건, 탈 인덱스)이다. SHI-203은 이렇게 다시 요청하자 쿼리를 실제로 검토했다.
 
 ## 프롬프트에 반드시 넣는 것
 

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -24,6 +25,8 @@ import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
+import com.shineunsigan.snsg.schedule.domain.model.ClosingSoonScheduleCursor;
+import com.shineunsigan.snsg.schedule.domain.model.LatestScheduleCursor;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
 import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
@@ -48,14 +51,18 @@ public class ScheduleQueryService implements CheckWithdrawableUseCase {
     private final ActivityCategoryRepository activityCategoryRepository;
     private final ScheduleProperties scheduleProperties;
 
-    /** 날짜 범위를 커서보다 먼저 본다. 둘 다 틀리면 INVALID_DATE_FILTER다. */
+    /**
+     * 날짜 범위를 커서보다 먼저 본다. 둘 다 틀리면 INVALID_DATE_FILTER다.
+     * 커서는 고른 정렬의 형식으로만 해석한다. 다른 정렬에서 받은 커서는 INVALID_CURSOR다.
+     */
     public ScheduleCardPageResult findRecruiting(ListRecruitingSchedulesCommand command) {
         RecruitingScheduleFilter filter = RecruitingScheduleFilter.of(command.categoryIds(), command.regionCodes(),
                 command.startDate(), command.endDate());
-        ScheduleCursor after = decodeCursor(command.cursor());
-        int size = pageSize(command.size());
-        LocalDateTime now = LocalDateTime.now();
-        return toPage(scheduleRepository.findRecruiting(filter, now, after, size + 1), size, now);
+        return switch (command.sort()) {
+            case START_AT -> findRecruitingByStartAt(filter, command.cursor(), command.size());
+            case LATEST -> findRecruitingLatest(filter, command.cursor(), command.size());
+            case CLOSING_SOON -> findRecruitingClosingSoon(filter, command.cursor(), command.size());
+        };
     }
 
     public ScheduleCardPageResult findParticipating(UUID userId, SchedulePeriod period, String cursor,
@@ -124,8 +131,39 @@ public class ScheduleQueryService implements CheckWithdrawableUseCase {
                 .orElseGet(WithdrawalEligibilityResult::allowed);
     }
 
+    private ScheduleCardPageResult findRecruitingByStartAt(RecruitingScheduleFilter filter, String cursor,
+            Integer requestedSize) {
+        ScheduleCursor after = decodeCursor(cursor);
+        int size = pageSize(requestedSize);
+        LocalDateTime now = LocalDateTime.now();
+        return toPage(scheduleRepository.findRecruiting(filter, now, after, size + 1), size, now);
+    }
+
+    private ScheduleCardPageResult findRecruitingLatest(RecruitingScheduleFilter filter, String cursor,
+            Integer requestedSize) {
+        LatestScheduleCursor after = isAbsent(cursor) ? null : LatestScheduleCursor.decode(cursor);
+        int size = pageSize(requestedSize);
+        LocalDateTime now = LocalDateTime.now();
+        return toPage(scheduleRepository.findRecruitingLatest(filter, now, after, size + 1), size, now,
+                last -> new LatestScheduleCursor(last.getCreatedAt(), last.getId()).encode());
+    }
+
+    private ScheduleCardPageResult findRecruitingClosingSoon(RecruitingScheduleFilter filter, String cursor,
+            Integer requestedSize) {
+        ClosingSoonScheduleCursor after = isAbsent(cursor) ? null : ClosingSoonScheduleCursor.decode(cursor);
+        int size = pageSize(requestedSize);
+        LocalDateTime now = LocalDateTime.now();
+        return toPage(scheduleRepository.findRecruitingClosingSoon(filter, now, after, size + 1), size, now,
+                last -> new ClosingSoonScheduleCursor(last.getCapacity() - last.getConfirmedCount(),
+                        last.getStartAt(), last.getId()).encode());
+    }
+
     private static ScheduleCursor decodeCursor(String cursor) {
-        return cursor == null || cursor.isEmpty() ? null : ScheduleCursor.decode(cursor);
+        return isAbsent(cursor) ? null : ScheduleCursor.decode(cursor);
+    }
+
+    private static boolean isAbsent(String cursor) {
+        return cursor == null || cursor.isEmpty();
     }
 
     /** 생략하면 기본 개수, 최대를 넘으면 최대, 1보다 작으면 1이다. */
@@ -140,13 +178,19 @@ public class ScheduleQueryService implements CheckWithdrawableUseCase {
     }
 
     private ScheduleCardPageResult toPage(List<Schedule> schedules, int size, LocalDateTime now) {
+        return toPage(schedules, size, now, ScheduleQueryService::nextCursor);
+    }
+
+    /** nextCursor는 목록의 정렬 키로 마지막 item에서 만든다. */
+    private ScheduleCardPageResult toPage(List<Schedule> schedules, int size, LocalDateTime now,
+            Function<Schedule, String> cursorOf) {
         boolean hasNext = schedules.size() > size;
         List<Schedule> page = hasNext ? schedules.subList(0, size) : schedules;
         Map<UUID, String> categoryNames = findCategoryNames(page);
         List<ScheduleCardResult> items = page.stream()
                 .map(schedule -> toCard(schedule, categoryNames, now))
                 .toList();
-        return new ScheduleCardPageResult(items, hasNext ? nextCursor(page.get(size - 1)) : null);
+        return new ScheduleCardPageResult(items, hasNext ? cursorOf.apply(page.get(size - 1)) : null);
     }
 
     /** 읽은 일정의 활동을 한 번에 찾는다. 비활성 활동도 이름을 준다. */

@@ -27,6 +27,7 @@ import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleListResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleRegionResult;
 import com.shineunsigan.snsg.schedule.application.port.out.RegionPort;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
+import com.shineunsigan.snsg.schedule.domain.constants.RecruitingScheduleSort;
 import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 
 /**
@@ -49,8 +50,8 @@ class ListSchedulesFacadeTest {
     @Test
     @DisplayName("활성·비활성 지역은 시군구 이름, 지역 목록에 없는 코드는 빈 문자열을 채운다. 지역 전체 조회는 한 번이다")
     void fillsRegionNames() {
-        ListRecruitingSchedulesCommand command = new ListRecruitingSchedulesCommand(null, null, null, null, null,
-                null);
+        ListRecruitingSchedulesCommand command = new ListRecruitingSchedulesCommand(null, null, null, null,
+                RecruitingScheduleSort.START_AT, null, null);
         when(scheduleQueryService.findRecruiting(command)).thenReturn(new ScheduleCardPageResult(
                 List.of(card("11440"), card("11410"), card("99999"), card("11440")), "next"));
         when(regionPort.findAll()).thenReturn(List.of(

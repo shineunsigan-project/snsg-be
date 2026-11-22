@@ -56,6 +56,7 @@
   - **마이그레이션을 더하는 작업끼리는 병렬로 진행할 수 없다.** 한 워크트리가 머지 전 마이그레이션을 공유 DB에 적용해 두면 다른 워크트리의 Flyway 검증이 어긋난다. 먼저 시작한 작업이 머지된 뒤 develop을 최신화하고 다음 번호로 진행한다(SHI-146은 SHI-147 머지 후 V3로 진행했다). 워크트리별 DB는 두지 않기로 했다.
     - 기존 테이블에 DEFAULT 없는 NOT NULL 컬럼을 더하는 마이그레이션은 마이그레이션이 없는 작업도 깨뜨린다. 공유 DB에 적용된 순간부터, 그 컬럼을 모르는 다른 워크트리가 그 테이블에 INSERT하면(엔티티 저장, 테스트의 native INSERT) NOT NULL 위반으로 실패한다. 예: SHI-184의 V12(`places`의 `created_by`·`updated_by`·`reviewed_by`). 다른 워크트리에서 그 테이블 INSERT가 갑자기 실패하면 이것부터 본다. 그 작업이 머지된 뒤 develop을 받으면 풀린다.
 - 워크트리를 지우기 전에 Gradle 데몬이 그 디렉터리를 잡고 있으면 삭제가 실패한다. 앱을 먼저 멈춘다.
+- `git worktree remove`가 `Filename too long`으로 중간에 실패할 수 있다. Windows 경로 길이 한도 때문이다. `snsg/build/reports/tests` 아래 테스트 보고서 경로가 240자를 넘는다. 이때 워크트리 등록은 해제되고 디렉터리에 파일 일부가 남는다. PowerShell에서 긴 경로 접두사를 붙여 남은 디렉터리를 지우고(`Remove-Item -LiteralPath '\\?\<워크트리 절대 경로>' -Recurse -Force`), `Test-Path '<워크트리 절대 경로>'`가 `False`인지 확인한다(SHI-202).
 
 ## main
 

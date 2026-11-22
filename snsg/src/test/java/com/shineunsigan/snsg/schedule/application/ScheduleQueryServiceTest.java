@@ -26,6 +26,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -41,11 +44,14 @@ import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleParticipant
 import com.shineunsigan.snsg.schedule.application.dto.result.WithdrawalEligibilityResult;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
+import com.shineunsigan.snsg.schedule.domain.constants.RecruitingScheduleSort;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
 import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
 import com.shineunsigan.snsg.schedule.domain.exception.ScheduleErrorCode;
 import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
+import com.shineunsigan.snsg.schedule.domain.model.ClosingSoonScheduleCursor;
+import com.shineunsigan.snsg.schedule.domain.model.LatestScheduleCursor;
 import com.shineunsigan.snsg.schedule.domain.model.PlaceSnapshot;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
@@ -146,7 +152,8 @@ class ScheduleQueryServiceTest {
         List<UUID> categoryIds = IntStream.range(0, 21).mapToObj(index -> UUID.randomUUID()).toList();
 
         assertThatThrownBy(() -> scheduleQueryService.findRecruiting(
-                new ListRecruitingSchedulesCommand(categoryIds, null, null, null, null, null)))
+                new ListRecruitingSchedulesCommand(categoryIds, null, null, null, RecruitingScheduleSort.START_AT,
+                        null, null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(CommonErrorCode.INVALID_REQUEST);
@@ -188,6 +195,82 @@ class ScheduleQueryServiceTest {
         verify(scheduleRepository).findParticipating(eq(USER_ID), eq(SchedulePeriod.UPCOMING), any(), eq(cursor),
                 anyInt());
         verify(scheduleRepository).findHosted(eq(USER_ID), eq(SchedulePeriod.UPCOMING), any(), isNull(), anyInt());
+    }
+
+    // 모집 중 목록의 정렬
+
+    @ParameterizedTest
+    @CsvSource({"START_AT, LATEST", "START_AT, CLOSING_SOON", "LATEST, START_AT", "LATEST, CLOSING_SOON",
+            "CLOSING_SOON, START_AT", "CLOSING_SOON, LATEST"})
+    @DisplayName("다른 정렬에서 받은 커서를 보내면 INVALID_CURSOR이고 일정을 조회하지 않는다")
+    void cursorOfOtherSort(RecruitingScheduleSort cursorSort, RecruitingScheduleSort requestSort) {
+        assertError(() -> scheduleQueryService.findRecruiting(
+                sortCommand(requestSort, null, null, cursorOf(cursorSort), null)), ScheduleErrorCode.INVALID_CURSOR);
+        verifyNoInteractions(scheduleRepository);
+    }
+
+    @ParameterizedTest
+    @EnumSource(RecruitingScheduleSort.class)
+    @DisplayName("어느 정렬이든 날짜와 커서가 둘 다 틀리면 날짜를 먼저 봐서 INVALID_DATE_FILTER")
+    void dateCheckedBeforeCursorInEverySort(RecruitingScheduleSort sort) {
+        assertError(() -> scheduleQueryService.findRecruiting(sortCommand(sort, LocalDate.of(2026, 11, 15),
+                LocalDate.of(2026, 11, 14), "not base64!", null)), ScheduleErrorCode.INVALID_DATE_FILTER);
+        verifyNoInteractions(scheduleRepository);
+    }
+
+    @Test
+    @DisplayName("최근 열린 순은 커서를 (개설 시각, id)로 해석해 넘기고, nextCursor는 마지막 item의 (개설 시각, id)다")
+    void latestCursor() {
+        LatestScheduleCursor cursor = new LatestScheduleCursor(LocalDateTime.of(2026, 11, 14, 19, 30),
+                UUID.randomUUID());
+        List<Schedule> schedules = schedules(3);
+        for (int index = 0; index < schedules.size(); index++) {
+            ReflectionTestUtils.setField(schedules.get(index), "createdAt",
+                    LocalDateTime.of(2026, 11, 10, 9, 0).minusMinutes(index));
+        }
+        when(scheduleRepository.findRecruitingLatest(any(), any(), eq(cursor), eq(3))).thenReturn(schedules);
+
+        ScheduleCardPageResult page = scheduleQueryService.findRecruiting(
+                sortCommand(RecruitingScheduleSort.LATEST, null, null, cursor.encode(), 2));
+
+        assertThat(page.items()).extracting(ScheduleCardResult::id)
+                .containsExactly(schedules.get(0).getId(), schedules.get(1).getId());
+        assertThat(page.nextCursor()).isEqualTo(
+                new LatestScheduleCursor(schedules.get(1).getCreatedAt(), schedules.get(1).getId()).encode());
+    }
+
+    @Test
+    @DisplayName("마감 임박 순은 커서를 (남은 자리, 시작 시각, id)로 해석해 넘기고, nextCursor는 마지막 item의 그 값이다")
+    void closingSoonCursor() {
+        ClosingSoonScheduleCursor cursor = new ClosingSoonScheduleCursor(2, LocalDateTime.of(2026, 11, 14, 19, 30),
+                UUID.randomUUID());
+        List<Schedule> schedules = schedules(3);
+        when(scheduleRepository.findRecruitingClosingSoon(any(), any(), eq(cursor), eq(3))).thenReturn(schedules);
+
+        ScheduleCardPageResult page = scheduleQueryService.findRecruiting(
+                sortCommand(RecruitingScheduleSort.CLOSING_SOON, null, null, cursor.encode(), 2));
+
+        assertThat(page.items()).extracting(ScheduleCardResult::id)
+                .containsExactly(schedules.get(0).getId(), schedules.get(1).getId());
+        assertThat(page.nextCursor()).isEqualTo(new ClosingSoonScheduleCursor(5, schedules.get(1).getStartAt(),
+                schedules.get(1).getId()).encode());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RecruitingScheduleSort.class, names = {"LATEST", "CLOSING_SOON"})
+    @DisplayName("새 정렬도 빈 커서는 처음부터이고 필터를 그대로 넘긴다")
+    void blankCursorInNewSorts(RecruitingScheduleSort sort) {
+        ArgumentCaptor<RecruitingScheduleFilter> filter = ArgumentCaptor.forClass(RecruitingScheduleFilter.class);
+
+        scheduleQueryService.findRecruiting(sortCommand(sort, LocalDate.of(2026, 11, 14), null, "", null));
+
+        if (sort == RecruitingScheduleSort.LATEST) {
+            verify(scheduleRepository).findRecruitingLatest(filter.capture(), any(), isNull(), eq(21));
+        } else {
+            verify(scheduleRepository).findRecruitingClosingSoon(filter.capture(), any(), isNull(), eq(21));
+        }
+        assertThat(filter.getValue().categoryIds()).containsExactly(CATEGORY_ID);
+        assertThat(filter.getValue().startFrom()).isEqualTo(LocalDateTime.of(2026, 11, 14, 0, 0));
     }
 
     // 다음 페이지
@@ -249,7 +332,7 @@ class ScheduleQueryServiceTest {
         ArgumentCaptor<RecruitingScheduleFilter> filter = ArgumentCaptor.forClass(RecruitingScheduleFilter.class);
 
         scheduleQueryService.findRecruiting(new ListRecruitingSchedulesCommand(Arrays.asList((UUID) null),
-                List.of(" "), null, null, null, null));
+                List.of(" "), null, null, RecruitingScheduleSort.START_AT, null, null));
 
         verify(scheduleRepository).findRecruiting(filter.capture(), any(), any(), anyInt());
         assertThat(filter.getValue().matchesNothing()).isTrue();
@@ -378,7 +461,24 @@ class ScheduleQueryServiceTest {
 
     private static ListRecruitingSchedulesCommand command(LocalDate startDate, LocalDate endDate, String cursor,
             Integer size) {
-        return new ListRecruitingSchedulesCommand(List.of(CATEGORY_ID), null, startDate, endDate, cursor, size);
+        return new ListRecruitingSchedulesCommand(List.of(CATEGORY_ID), null, startDate, endDate,
+                RecruitingScheduleSort.START_AT, cursor, size);
+    }
+
+    private static ListRecruitingSchedulesCommand sortCommand(RecruitingScheduleSort sort, LocalDate startDate,
+            LocalDate endDate, String cursor, Integer size) {
+        return new ListRecruitingSchedulesCommand(List.of(CATEGORY_ID), null, startDate, endDate, sort, cursor, size);
+    }
+
+    /** 그 정렬의 형식으로 만든 커서. */
+    private static String cursorOf(RecruitingScheduleSort sort) {
+        LocalDateTime at = LocalDateTime.of(2026, 11, 14, 19, 30);
+        UUID id = UUID.randomUUID();
+        return switch (sort) {
+            case START_AT -> new ScheduleCursor(at, id).encode();
+            case LATEST -> new LatestScheduleCursor(at, id).encode();
+            case CLOSING_SOON -> new ClosingSoonScheduleCursor(3, at, id).encode();
+        };
     }
 
     private static List<Schedule> schedules(int count) {

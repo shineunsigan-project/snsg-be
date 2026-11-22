@@ -64,6 +64,7 @@ import com.shineunsigan.snsg.schedule.domain.constants.AgePhase;
 import com.shineunsigan.snsg.schedule.domain.constants.DisplayStatus;
 import com.shineunsigan.snsg.schedule.domain.constants.DurationType;
 import com.shineunsigan.snsg.schedule.domain.constants.Gender;
+import com.shineunsigan.snsg.schedule.domain.constants.RecruitingScheduleSort;
 import com.shineunsigan.snsg.schedule.domain.constants.ScheduleAction;
 import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.domain.constants.ViewerRole;
@@ -472,6 +473,40 @@ class ScheduleControllerTest {
                 .andExpect(jsonPath("$.code").value("INVALID_CURSOR"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"START_AT", "LATEST", "CLOSING_SOON"})
+    @DisplayName("sort는 그 정렬로 facade에 넘어간다")
+    void sortIsPassed(String sort) throws Exception {
+        when(listSchedulesFacade.listRecruiting(any())).thenReturn(new ScheduleListResult(List.of(), null));
+
+        mockMvc.perform(get("/api/v1/schedules").param("sort", sort))
+                .andExpect(status().isOk());
+
+        assertThat(recruitingCommand().sort()).isEqualTo(RecruitingScheduleSort.valueOf(sort));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/schedules", "/api/v1/schedules?sort="})
+    @DisplayName("sort를 생략하거나 빈 값으로 보내면 START_AT이다")
+    void missingOrBlankSortIsStartAt(String url) throws Exception {
+        when(listSchedulesFacade.listRecruiting(any())).thenReturn(new ScheduleListResult(List.of(), null));
+
+        mockMvc.perform(get(url))
+                .andExpect(status().isOk());
+
+        assertThat(recruitingCommand().sort()).isEqualTo(RecruitingScheduleSort.START_AT);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"latest", "POPULAR"})
+    @DisplayName("START_AT·LATEST·CLOSING_SOON이 아닌 sort(소문자 포함)는 400 INVALID_REQUEST이고 facade를 부르지 않는다")
+    void unknownSort(String sort) throws Exception {
+        mockMvc.perform(get("/api/v1/schedules").param("sort", sort))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        verify(listSchedulesFacade, never()).listRecruiting(any());
+    }
+
     // 상세
 
     @Test
@@ -684,5 +719,12 @@ class ScheduleControllerTest {
         json.append(", \"durationType\": ").append(durationType);
         json.append(", \"description\": ").append(description);
         return json.append('}').toString();
+    }
+
+    private ListRecruitingSchedulesCommand recruitingCommand() {
+        ArgumentCaptor<ListRecruitingSchedulesCommand> command =
+                ArgumentCaptor.forClass(ListRecruitingSchedulesCommand.class);
+        verify(listSchedulesFacade).listRecruiting(command.capture());
+        return command.getValue();
     }
 }
