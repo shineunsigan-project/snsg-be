@@ -32,8 +32,8 @@ public class SocialLoginFacade {
     private final SignUpSessionPort signUpSessionPort;
     private final TokenIssuer tokenIssuer;
 
-    public String authorizeUrl(SocialProvider provider) {
-        return socialLoginPort(provider).authorizeUrl();
+    public String authorizeUrl(SocialProvider provider, String state) {
+        return socialLoginPort(provider).authorizeUrl(state);
     }
 
     public SocialAuthResult authenticate(SocialProvider provider, String authorizationCode) {

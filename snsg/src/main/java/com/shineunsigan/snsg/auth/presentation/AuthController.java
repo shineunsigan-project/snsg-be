@@ -2,6 +2,10 @@ package com.shineunsigan.snsg.auth.presentation;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -50,6 +54,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuthController {
 
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final int STATE_BYTES = 32;
+
     private final SocialLoginFacade socialLoginFacade;
     private final CompleteSignUpFacade completeSignUpFacade;
     private final ReissueTokenFacade reissueTokenFacade;
@@ -65,12 +72,18 @@ public class AuthController {
                     소셜 인증 페이지로 302 리다이렉트한다. 클라이언트는 소셜 앱 키를 갖지 않는다.
                     **fetch나 XHR로 부르지 않는다.** 브라우저를 이동시켜야 한다(window.location.href = ...).
                     fetch는 리다이렉트를 따라가 소셜 도메인에 닿고, 소셜은 CORS 헤더를 주지 않아 실패한다.
-                    같은 이유로 Swagger의 Try it out에서도 실패한다. 주소창에 직접 입력해 시험한다.""")
+                    같은 이유로 Swagger의 Try it out에서도 실패한다. 주소창에 직접 입력해 시험한다.
+                    요청마다 난수 state를 만들어 소셜 인증 주소에 싣고, 같은 값을 oauthState 쿠키(HttpOnly, SameSite=Lax, 10분)로 심는다.
+                    콜백이 이 둘을 대조하므로 로그인은 시작한 브라우저에서 끝나야 한다.""")
     @ApiResponses(@io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "302",
-            description = "소셜 인증 페이지로 이동. Location 헤더에 주소가 담긴다", content = @Content))
+            description = "소셜 인증 페이지로 이동. Location 헤더에 주소가 담기고 oauthState 쿠키가 심어진다",
+            content = @Content))
     public ResponseEntity<Void> authorize(@PathVariable SocialProvider provider) {
+        String state = generateState();
+
         return ResponseEntity.status(302)
-                .location(URI.create(socialLoginFacade.authorizeUrl(provider)))
+                .header(HttpHeaders.SET_COOKIE, cookieFactory.oauthState(state).toString())
+                .location(URI.create(socialLoginFacade.authorizeUrl(provider, state)))
                 .build();
     }
 
@@ -80,10 +93,20 @@ public class AuthController {
             description = """
                     소셜이 호출하는 주소다. 클라이언트가 직접 부르지 않는다.
                     기존 회원이면 refreshToken 쿠키를, 신규면 signUpToken 쿠키를 심고 프론트엔드로 302 리다이렉트한다.
-                    신규는 쿼리로 signUp=true가 붙는다. 토큰은 URL에 담지 않는다.""")
-    @ApiResponses(@io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "302",
-            description = "프론트엔드로 이동. 쿠키가 심어진다", content = @Content))
-    public ResponseEntity<Void> callback(@PathVariable SocialProvider provider, @RequestParam("code") String code) {
+                    신규는 쿼리로 signUp=true가 붙는다. 토큰은 URL에 담지 않는다.
+                    쿼리 state와 oauthState 쿠키가 같을 때만 소셜 인증을 하고, 성공하면 oauthState 쿠키를 지운다.
+                    state가 없거나, 쿠키가 없거나, 둘이 다르면 401 INVALID_OAUTH_STATE다(로그인 CSRF 방지).
+                    로그인을 시작한 브라우저가 아니거나, 다른 탭에서 로그인을 새로 시작한 경우다. 소셜 로그인부터 다시 한다.""")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "302",
+                    description = "프론트엔드로 이동. 쿠키가 심어진다", content = @Content),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
+                    description = "INVALID_OAUTH_STATE: state가 없거나, oauthState 쿠키가 없거나(10분 지남, 다른 브라우저), 둘이 다르다. "
+                            + "INVALID_SOCIAL_CODE: 인가코드가 틀렸다")})
+    public ResponseEntity<Void> callback(@PathVariable SocialProvider provider, @RequestParam("code") String code,
+            @RequestParam(value = "state", required = false) String state,
+            @CookieValue(value = AuthCookieFactory.OAUTH_STATE, required = false) String stateCookie) {
+        requireMatchingState(state, stateCookie);
         SocialAuthResult result = socialLoginFacade.authenticate(provider, code);
 
         if (result instanceof SocialAuthResult.LoggedIn loggedIn) {
@@ -188,10 +211,29 @@ public class AuthController {
         }
     }
 
+    private String generateState() {
+        byte[] bytes = new byte[STATE_BYTES];
+        SECURE_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    /**
+     * 콜백이 이 브라우저에서 시작한 로그인의 결과인지 본다. 없음·불일치를 한 코드로 묶는다.
+     * 비교는 상수 시간이다.
+     */
+    private void requireMatchingState(String state, String stateCookie) {
+        if (state == null || state.isBlank() || stateCookie == null || stateCookie.isBlank()
+                || !MessageDigest.isEqual(state.getBytes(StandardCharsets.UTF_8),
+                        stateCookie.getBytes(StandardCharsets.UTF_8))) {
+            throw new BusinessException(AuthErrorCode.INVALID_OAUTH_STATE);
+        }
+    }
+
     private ResponseEntity<Void> redirectToFrontend(ResponseCookie cookie, boolean signUp) {
         String location = signUp ? frontendRedirectUri + "?signUp=true" : frontendRedirectUri;
         return ResponseEntity.status(302)
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .header(HttpHeaders.SET_COOKIE, cookieFactory.expiredOAuthState().toString())
                 .location(URI.create(location))
                 .build();
     }

@@ -11,9 +11,9 @@ public interface SocialLoginPort {
     SocialProvider provider();
 
     /**
-     * 사용자를 보낼 소셜 인증 페이지 주소.
+     * 사용자를 보낼 소셜 인증 페이지 주소. state는 소셜이 콜백에 그대로 돌려준다.
      */
-    String authorizeUrl();
+    String authorizeUrl(String state);
 
     /**
      * 인가코드를 토큰으로 바꾸고 사용자 정보를 조회한다.
