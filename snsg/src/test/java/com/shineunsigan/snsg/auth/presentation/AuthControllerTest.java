@@ -1,7 +1,11 @@
 package com.shineunsigan.snsg.auth.presentation;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.greaterThan;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,7 +30,9 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.shineunsigan.snsg.auth.application.AuthProperties;
 import com.shineunsigan.snsg.auth.application.CompleteSignUpFacade;
@@ -53,6 +59,7 @@ import jakarta.servlet.http.Cookie;
 class AuthControllerTest {
 
     private static final String REFRESH_TOKEN = "refresh-token";
+    private static final String STATE = "state-value";
     private static final String NAME_MESSAGE = "이름은 2~20자의 한글 또는 영문만 쓸 수 있어요.";
     private static final String NICKNAME_MESSAGE = "닉네임은 2~10자의 한글·영문·숫자·.·_만 쓸 수 있어요.";
     private static final String EMAIL_MESSAGE = "이메일 형식이 올바르지 않아요.";
@@ -96,16 +103,45 @@ class AuthControllerTest {
     private com.shineunsigan.snsg.auth.application.port.out.TokenPort tokenPort;
 
     @Test
+    @DisplayName("로그인 시작은 요청마다 새 state를 소셜 주소에 싣고, 같은 값을 Lax state 쿠키로 심는다")
+    void authorizeBindsStateToBrowser() throws Exception {
+        when(socialLoginFacade.authorizeUrl(eq(SocialProvider.KAKAO), anyString()))
+                .thenAnswer(invocation -> "https://kauth.kakao.com/oauth/authorize?state=" + invocation.getArgument(1));
+
+        String first = authorizeAndReturnState();
+        String second = authorizeAndReturnState();
+
+        assertThat(first).isNotEqualTo(second);
+    }
+
+    private String authorizeAndReturnState() throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/kakao/authorize"))
+                .andExpect(status().isFound())
+                .andExpect(cookie().httpOnly(AuthCookieFactory.OAUTH_STATE, true))
+                .andExpect(cookie().secure(AuthCookieFactory.OAUTH_STATE, true))
+                .andExpect(cookie().sameSite(AuthCookieFactory.OAUTH_STATE, "Lax"))
+                .andExpect(cookie().path(AuthCookieFactory.OAUTH_STATE, "/api/v1/auth"))
+                .andExpect(cookie().maxAge(AuthCookieFactory.OAUTH_STATE, greaterThan(0)))
+                .andReturn();
+
+        String state = result.getResponse().getCookie(AuthCookieFactory.OAUTH_STATE).getValue();
+        assertThat(state).isNotBlank();
+        assertThat(result.getResponse().getHeader("Location")).endsWith("state=" + state);
+        return state;
+    }
+
+    @Test
     @DisplayName("기존 회원 콜백은 refresh를 쿠키로 심고 프론트엔드로 보낸다. 토큰은 URL에 넣지 않는다")
     void callbackForExistingUser() throws Exception {
         when(socialLoginFacade.authenticate(SocialProvider.KAKAO, "code"))
                 .thenReturn(new SocialAuthResult.LoggedIn(new TokenResult("access", REFRESH_TOKEN)));
 
-        mockMvc.perform(get("/api/v1/auth/kakao/callback").param("code", "code"))
+        mockMvc.perform(callbackWithMatchingState())
                 .andExpect(status().isFound())
                 .andExpect(cookie().value(AuthCookieFactory.REFRESH_TOKEN, REFRESH_TOKEN))
                 .andExpect(cookie().httpOnly(AuthCookieFactory.REFRESH_TOKEN, true))
-                .andExpect(header().string("Location", "http://localhost:3000/auth/callback"));
+                .andExpect(header().string("Location", "http://localhost:3000/auth/callback"))
+                .andExpect(cookie().maxAge(AuthCookieFactory.OAUTH_STATE, 0));
     }
 
     @Test
@@ -114,11 +150,62 @@ class AuthControllerTest {
         when(socialLoginFacade.authenticate(SocialProvider.KAKAO, "code"))
                 .thenReturn(new SocialAuthResult.SignUpRequired("signup-token"));
 
-        mockMvc.perform(get("/api/v1/auth/kakao/callback").param("code", "code"))
+        mockMvc.perform(callbackWithMatchingState())
                 .andExpect(status().isFound())
                 .andExpect(cookie().value(AuthCookieFactory.SIGN_UP_TOKEN, "signup-token"))
                 .andExpect(cookie().httpOnly(AuthCookieFactory.SIGN_UP_TOKEN, true))
-                .andExpect(header().string("Location", "http://localhost:3000/auth/callback?signUp=true"));
+                .andExpect(header().string("Location", "http://localhost:3000/auth/callback?signUp=true"))
+                .andExpect(cookie().maxAge(AuthCookieFactory.OAUTH_STATE, 0));
+    }
+
+    private MockHttpServletRequestBuilder callbackWithMatchingState() {
+        return get("/api/v1/auth/kakao/callback").param("code", "code")
+                .param("state", STATE)
+                .cookie(new Cookie(AuthCookieFactory.OAUTH_STATE, STATE));
+    }
+
+    @Test
+    @DisplayName("state 쿼리와 쿠키가 모두 없는 콜백은 401 INVALID_OAUTH_STATE이고 소셜 인증을 하지 않는다(로그인 CSRF)")
+    void callbackWithoutStateIsRejected() throws Exception {
+        expectInvalidOAuthState(get("/api/v1/auth/kakao/callback").param("code", "code"));
+    }
+
+    @Test
+    @DisplayName("state 쿠키만 있고 쿼리 state가 없으면 401 INVALID_OAUTH_STATE")
+    void callbackWithoutStateQueryIsRejected() throws Exception {
+        expectInvalidOAuthState(get("/api/v1/auth/kakao/callback").param("code", "code")
+                .cookie(new Cookie(AuthCookieFactory.OAUTH_STATE, STATE)));
+    }
+
+    @Test
+    @DisplayName("쿼리 state만 있고 state 쿠키가 없으면 401 INVALID_OAUTH_STATE")
+    void callbackWithoutStateCookieIsRejected() throws Exception {
+        expectInvalidOAuthState(get("/api/v1/auth/kakao/callback").param("code", "code")
+                .param("state", STATE));
+    }
+
+    @Test
+    @DisplayName("쿼리 state와 state 쿠키가 다르면 401 INVALID_OAUTH_STATE")
+    void callbackWithMismatchedStateIsRejected() throws Exception {
+        expectInvalidOAuthState(get("/api/v1/auth/kakao/callback").param("code", "code")
+                .param("state", "attacker-state")
+                .cookie(new Cookie(AuthCookieFactory.OAUTH_STATE, STATE)));
+    }
+
+    /**
+     * 소셜 인증이 성공하도록 stub해 둔다. state를 확인하지 않으면 공격자 계정의 refresh 쿠키가 심긴다.
+     */
+    private void expectInvalidOAuthState(MockHttpServletRequestBuilder request) throws Exception {
+        when(socialLoginFacade.authenticate(SocialProvider.KAKAO, "code"))
+                .thenReturn(new SocialAuthResult.LoggedIn(new TokenResult("access", REFRESH_TOKEN)));
+
+        mockMvc.perform(request)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_OAUTH_STATE"))
+                .andExpect(cookie().doesNotExist(AuthCookieFactory.REFRESH_TOKEN))
+                .andExpect(cookie().doesNotExist(AuthCookieFactory.SIGN_UP_TOKEN));
+
+        verify(socialLoginFacade, never()).authenticate(any(), any());
     }
 
     @Test
