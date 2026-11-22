@@ -821,6 +821,35 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiResponseScheduleCardPageResponse"
+  /api/v1/schedules/next:
+    get:
+      tags:
+      - 일정
+      summary: 다가오는 내 일정
+      description: |-
+        홈 상단 배너에 그릴 일정 1건을 준다. 홈 화면에 들어올 때 부른다. 로그인이 필요하다.
+        대상은 내가 멤버로 참여 확정했거나 내가 연 일정 중, 취소되지 않았고 시작 전(시작 일시가 지금보다 뒤)인 일정이다.
+        정원이 차 모집 마감된 일정도 대상이다. 내가 참여를 취소한 일정, 시작한 일정, 완료된 일정은 대상이 아니다.
+        그중 시작 일시가 가장 빠른 1건만 온다(같으면 id 순으로 앞의 것).
+        대상이 없으면 오류가 아니라 200이고 본문은 {"isSuccess":true}다(data 키가 빠진다). 이때는 쉬는시간 소개 배너를 그린다.
+        participantProfileImageUrls는 참여자 명단과 같은 순서(개설자 먼저 → 참여 일시 순)의 앞 3명의 사진이다. 나도 빼지 않는다.
+        확정 인원이 3명보다 적으면 그 수만큼 온다. 사진보다 확정 인원이 많아 "+N"을 그리려면 confirmedCount로 계산한다.
+        배너를 누르면 id로 일정 상세(GET /api/v1/schedules/{scheduleId})로 간다.
+        조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
+      operationId: getNext
+      responses:
+        "200":
+          description: "다가오는 내 일정 1건. 대상이 없으면 data가 빠진다({\"isSuccess\":true})"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseNextScheduleResponse"
+        "401":
+          description: "UNAUTHENTICATED: 토큰이 없거나 만료·무효. 재발급 후 다시 부르거나 로그인 화면으로 간다"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseNextScheduleResponse"
   /api/v1/schedules/hosted:
     get:
       tags:
@@ -1846,6 +1875,102 @@ components:
           type: boolean
           description: 탈퇴했거나 사용자 정보를 찾을 수 없으면 true. 화면에 탈퇴 표시를 붙일 때 쓴다
           example: false
+    ApiResponseNextScheduleResponse:
+      type: object
+      properties:
+        isSuccess:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/NextScheduleResponse"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    NextScheduleResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 일정 ID. 배너를 누르면 이 값으로 일정 상세로 간다
+          example: 01a1c3d4-0000-7000-8000-000000000001
+        category:
+          $ref: "#/components/schemas/ScheduleCardCategory"
+          description: 활동
+        title:
+          type: string
+          description: 활동명(일정 제목)
+          example: 보드게임 같이 해요
+        regionName:
+          type: string
+          description: "지역 이름(시군구). 지역 정보를 찾을 수 없으면 빈 문자열이고, 그때는 지역을 표시하지 않는다"
+          example: 마포구
+        startAt:
+          type: string
+          format: date-time
+          description: "시작 일시. 한국 시간, 오프셋 없는 ISO-8601"
+          example: 2026-11-14T19:30:00
+        confirmedCount:
+          type: integer
+          format: int32
+          description: 확정 인원. 개설자를 포함한다. 사진보다 많으면 "+N"을 이 값으로 계산한다
+          example: 4
+        capacity:
+          type: integer
+          format: int32
+          description: 정원. 개설자를 포함한다
+          example: 6
+        remainingSeats:
+          type: integer
+          format: int32
+          description: 남은 자리 = capacity − confirmedCount. 0이면 정원이 찼다
+          example: 2
+        displayStatus:
+          type: string
+          description: |-
+            화면에 보여줄 상태. 서버가 일정 상태·모집 상태·시각을 합쳐 정한다. FE는 이 값만 보고 배지를 그린다.
+            이 API는 시작 전 일정만 주므로 두 값만 온다.
+            RECRUITING: 모집 중. RECRUITMENT_CLOSED: 모집 마감(정원이 찼다)
+          enum:
+          - CANCELED
+          - COMPLETED
+          - RECRUITMENT_CLOSED
+          - RECRUITING
+          example: RECRUITING
+        createdAt:
+          type: string
+          format: date-time
+          description: "개설 일시. 한국 시간, 오프셋 없는 ISO-8601"
+          example: 2026-11-10T09:12:34.567
+        placeName:
+          type: string
+          description: 장소 이름. 개설 시점의 값이다
+          example: 보드게임카페 홍대점
+        durationType:
+          type: string
+          description: "예상 소요 시간. SHORT 1시간 내외(60분), NORMAL 2시간 내외(120분), LONG 3시간\
+            \ 이상(180분)"
+          enum:
+          - SHORT
+          - NORMAL
+          - LONG
+          example: NORMAL
+        participantProfileImageUrls:
+          type: array
+          description: |-
+            참여자 프로필 사진 경로. 도메인 없이 경로만 온다. 참여자 명단과 같은 순서(개설자 먼저 → 참여 일시 순)의 앞 3명이고,
+            개설자가 첫 번째다. 나도 빼지 않는다. 확정 인원이 3명보다 적으면 그 수만큼 온다(개설자가 있어 최소 1장).
+            탈퇴한 사람은 기본 이미지 경로가 온다
+          example:
+          - /images/profiles/a.png
+          - /images/default-profile.png
+          - /images/profiles/c.png
+          items:
+            type: string
     ApiResponseListRegionResponse:
       type: object
       properties:

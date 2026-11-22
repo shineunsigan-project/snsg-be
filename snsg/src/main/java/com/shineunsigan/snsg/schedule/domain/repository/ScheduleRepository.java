@@ -46,6 +46,12 @@ public interface ScheduleRepository {
     Optional<LocalDateTime> findLatestWithdrawalBlockingStartAt(UUID userId, LocalDateTime now,
             Duration blockAfterStart);
 
+    /**
+     * 다가오는 내 일정 1건. 내가 확정 참여(개설자 포함)한, 삭제되지 않은 예정(SCHEDULED) 일정 중 시작 시각이 now보다 뒤인 것에서
+     * (start_at, id) 순으로 가장 앞의 것이다. 시작 시각이 now와 같으면 빠진다. 모집 마감(정원 참)도 포함한다. 없으면 비어 있다.
+     */
+    Optional<Schedule> findNextUpcoming(UUID userId, LocalDateTime now);
+
     /*
      * 일정 목록 3종. 모두 삭제되지 않은 일정을 limit건까지 준다. 모집 중 목록과 UPCOMING은 (start_at, id) 오름차순,
      * PAST는 (start_at, id) 내림차순이다. after가 있으면 정렬 방향으로 그 (start_at, id) 다음 일정만 준다(keyset).
