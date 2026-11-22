@@ -311,7 +311,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   | --- | --- | --- |
   | `nickname` | 2~10자의 한글·영문·숫자·`.`·`_`. 14일 변경 제한(아래) | 닉네임은 2~10자의 한글·영문·숫자·.·_만 쓸 수 있어요. |
   | `email` | `local@domain.tld` 형식, 최대 100자. **`""`이면 이메일을 지운다.** 앞뒤 공백은 다듬지 않고 거부한다 | 이메일 형식이 올바르지 않아요. |
-  | `profileImageUrl` | 아래 [프로필 사진 업로드](#프로필-사진-업로드)가 돌려준 경로만. 바꾸면 이전에 올렸던 사진 파일은 지워진다 | (`errors` 없이 400 `INVALID_PROFILE_IMAGE_URL`) |
+  | `profileImageUrl` | 아래 [프로필 사진 업로드](#프로필-사진-업로드)가 돌려준 경로만. 지금 사진 값을 그대로 보내는 것은 된다(소셜 사진 주소·기본 이미지도 바꾸지 않은 것으로 본다). 바꾸면 이전에 올렸던 사진 파일은 지워진다 | (`errors` 없이 400 `INVALID_PROFILE_IMAGE_URL`) |
 
 - **이름·성별·생년월일은 바꿀 수 없다.** 요청에 넣어도 오류 없이 무시된다.
 - **현재 값과 정확히 같은 값은 바꾸지 않은 것으로 본다.** 변경 제한에도 세지 않는다. 닉네임은 **대소문자만 달라도 변경**이다(`Mint` → `mint`).
@@ -326,7 +326,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
   | 상태 | code | 언제 | 화면에서 할 일 |
   | --- | --- | --- | --- |
   | 400 | `INVALID_REQUEST` | 닉네임·이메일 형식 위반(`errors`에 필드별 문구), 잘못된 JSON | 해당 입력칸 아래에 `message`를 보여준다 |
-  | 400 | `INVALID_PROFILE_IMAGE_URL` | 업로드 API가 준 경로가 아니다. 빈 문자열, 다른 주소, 형식을 바꾼 경로, 다른 회원이 쓰고 있는 경로 | FE 버그다. 업로드 응답의 값을 그대로 넣는다. 사진을 다시 올리게 한다 |
+  | 400 | `INVALID_PROFILE_IMAGE_URL` | 지금 사진과 다른 값인데 업로드 API가 준 경로가 아니다. 빈 문자열, 다른 주소, 기본 이미지 경로, 형식을 바꾼 경로, 다른 회원이 쓰고 있는 경로 | FE 버그다. 업로드 응답의 값을 그대로 넣는다. 사진을 다시 올리게 한다 |
   | 400 | `INVALID_NICKNAME`·`INVALID_EMAIL` | 서버의 안전망. 요청 검증을 통과한 값이면 나지 않는다 | `message`를 보여준다 |
   | 409 | `NICKNAME_CHANGE_RESTRICTED` | 마지막 닉네임 변경 후 14일이 지나지 않았다 | `nicknameChangeableAt`으로 바꿀 수 있는 날짜를 안내한다 |
   | 409 | `DUPLICATED_NICKNAME` | 다른 회원이 쓰고 있거나 보호 기간이 남은 닉네임(대소문자 무시) | 다른 닉네임을 입력받는다 |

@@ -132,6 +132,7 @@
 - **커밋된 뒤에만 해야 하는 되돌릴 수 없는 외부 정리(파일 삭제 등)는 같은 도메인 이벤트로 넘긴다.** Command 서비스가 트랜잭션 안에서 이벤트 발행 포트로 발행하고, 같은 도메인 `infrastructure/event`의 리스너가 AFTER_COMMIT으로 받아 `port/out`을 부른다. facade 없이 외부 호출이 트랜잭션 밖에 남고, 롤백되면 지우지 않는다. 리스너가 DB를 바꾸지 않으므로 `REQUIRES_NEW`는 필요 없다.
   - 예: `UserAnonymizedEvent`(보관 기간이 지난 탈퇴 회원의 비식별)·`ProfileImageReplacedEvent`(사진 교체) → `ProfileImageCleanupListener` → `FileStoragePort.delete`. 비식별 이벤트는 비식별 전 경로가 우리 업로드 경로일 때만 낸다(기본 이미지·소셜 사진은 지울 파일이 없다). 탈퇴(`UserWithdrawnEvent`)는 원본을 보관하므로 사진을 지우지 않는다.
   - **지울 대상이 사용자가 보낸 값(경로·키)에서 왔으면 저장할 때 막는다.** 우리가 만든 형식과 정확히 일치하는지, 다른 소유자가 이미 참조하고 있지 않은지 본다. 남의 경로를 자기 값으로 넣고 교체하거나 비식별되면 남의 파일이 지워진다. 삭제 표시됐어도 나중에 그 값으로 지울 행(보관 중인 탈퇴 회원)은 소유자로 센다. 삭제 adapter도 형식 밖의 값이면 아무것도 지우지 않는다. 예: `ProfileImage.isUploadedPath`(수정·가입·삭제가 함께 쓰는 형식 규칙), `UserRepository.isProfileImageUsedByOthers`, `LocalFileStorageAdapter.delete`.
+    - 수정에서는 형식 검사와 다른 소유자 검사를 **현재 값과 달라진 값에만** 건다. 같은 값은 이미 저장된 값이라 새로 막을 것이 없다. 검사마다 "바뀌었는가"를 따로 판단하면 어긋난다. SHI-206: 다른 소유자 검사·교체 이벤트는 바뀐 값만 봤는데 형식 검사만 현재 값과 비교하지 않아, 지금 사진(소셜 사진 주소·기본 이미지)을 그대로 보낸 프로필 수정이 400 `INVALID_PROFILE_IMAGE_URL`이었다. 예: `UserProfileCommandService.changedImageUrl`(같으면 `null`을 넘겨 `User.validateProfileChange`·`changeProfile`이 사진을 보지 않는다).
 - 같은 트랜잭션(`@EventListener`)은 두 도메인 변경이 반드시 원자적이어야 할 때만 쓰고, 그 이유와 "서비스 분리 시 saga 필요"를 주석으로 남긴다.
 - AFTER_COMMIT 방식은 수신 실패 시 이벤트가 유실된다. 유실되면 안 되는 이벤트가 생기면 Spring Modulith(Event Publication Registry) 도입을 제안한다.
 - **유실이 보안·정합성 문제로 번지는 이벤트는 수신 측에 안전망을 함께 둔다.** 이벤트는 즉시 정리용이고, 안전망이 최종 보장이다.

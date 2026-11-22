@@ -54,6 +54,7 @@ class UserProfileCommandServiceTest {
     private static final Duration PROTECT_PERIOD = Duration.ofDays(14);
     private static final String OLD_IMAGE = "/images/profiles/0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png";
     private static final String NEW_IMAGE = "/images/profiles/1b2c3d4e-5f60-7182-93a4-b5c6d7e8f9a0.jpg";
+    private static final String SOCIAL_IMAGE = "http://k.kakaocdn.net/dn/abc/img.jpg";
 
     @Mock
     private UserRepository userRepository;
@@ -319,6 +320,50 @@ class UserProfileCommandServiceTest {
 
         assertThat(user.getProfile().getProfileImageUrl()).isEqualTo(OLD_IMAGE);
         verify(userEventPort, never()).publishProfileImageReplaced(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {SOCIAL_IMAGE, Profile.DEFAULT_PROFILE_IMAGE_URL})
+    @DisplayName("지금 사진이 업로드 경로가 아니어도 그 값을 그대로 보내면 바뀌지 않은 것으로 보고, 같이 보낸 값은 반영된다")
+    void unchangedNonUploadedImage(String currentImage) {
+        User current = givenUserWithImage(currentImage);
+        givenLastChangedAt(null);
+
+        update("Lemon", "lemon@example.com", currentImage);
+
+        assertThat(current.getProfile().getNickname()).isEqualTo("Lemon");
+        assertThat(current.getEmail()).isEqualTo("lemon@example.com");
+        assertThat(current.getProfile().getProfileImageUrl()).isEqualTo(currentImage);
+        verify(userEventPort, never()).publishProfileImageReplaced(any());
+        verify(userRepository, never()).isProfileImageUsedByOthers(anyString(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://evil.test/me.png", "", Profile.DEFAULT_PROFILE_IMAGE_URL, "/images/profiles/.."})
+    @DisplayName("지금 사진이 소셜 주소일 때 그와 다른 업로드 경로가 아닌 값을 보내면 INVALID_PROFILE_IMAGE_URL이고 아무것도 바뀌지 않는다")
+    void changedNonUploadedImageFromSocial(String profileImageUrl) {
+        User current = givenUserWithImage(SOCIAL_IMAGE);
+        givenLastChangedAt(null);
+
+        assertErrorCode(() -> update("Lemon", "lemon@example.com", profileImageUrl),
+                UserErrorCode.INVALID_PROFILE_IMAGE_URL);
+
+        assertThat(current.getProfile().getNickname()).isEqualTo("Mint");
+        assertThat(current.getEmail()).isEqualTo("mint@example.com");
+        assertThat(current.getProfile().getProfileImageUrl()).isEqualTo(SOCIAL_IMAGE);
+        verify(userNicknameHistoryRepository, never()).save(any());
+        verify(userEventPort, never()).publishProfileImageReplaced(any());
+        verify(userRepository, never()).save(any());
+    }
+
+    /** 지금 사진이 업로드 경로가 아닌 사용자. 기본 이미지는 {@code Profile.of}에 {@code null}을 넘겨 채운다. */
+    private User givenUserWithImage(String currentImage) {
+        String image = Profile.DEFAULT_PROFILE_IMAGE_URL.equals(currentImage) ? null : currentImage;
+        User current = User.create("김민트", "mint@example.com",
+                Profile.of("Mint", Gender.FEMALE, LocalDate.of(1996, 4, 12), image), LocalDate.now());
+        assertThat(current.getProfile().getProfileImageUrl()).isEqualTo(currentImage);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(current));
+        return current;
     }
 
     @Test
