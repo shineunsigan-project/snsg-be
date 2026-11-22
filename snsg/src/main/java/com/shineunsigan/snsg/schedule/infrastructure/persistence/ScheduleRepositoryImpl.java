@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Repository;
 
 import com.shineunsigan.snsg.common.entity.Auditor;
@@ -62,6 +63,12 @@ public class ScheduleRepositoryImpl implements ScheduleRepository {
             Duration blockAfterStart) {
         return Optional.ofNullable(scheduleJpaRepository.findLatestConfirmedNotCanceledStartAtAfter(userId,
                 now.minus(blockAfterStart)));
+    }
+
+    @Override
+    public Optional<Schedule> findNextUpcoming(UUID userId, LocalDateTime now) {
+        return scheduleJpaRepository.findConfirmedScheduledStartingAfter(userId, now, Limit.of(1)).stream()
+                .findFirst();
     }
 
     /** 선택 조건이 있어 JPQL을 조건별로 이어 만든다. 컬렉션 파라미터에 null을 바인딩하지 않기 위해서다. */

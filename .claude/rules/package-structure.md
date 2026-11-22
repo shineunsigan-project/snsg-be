@@ -59,7 +59,7 @@
 - **facade(`XxxFacade`)는 아래 두 경우에만 만든다.** application 패키지에 두고, 행위마다 하나씩 만든다(`SocialLoginFacade`, `CompleteSignUpFacade`). 트랜잭션을 걸지 않는다.
   - **이벤트 발행 포트가 아닌 `port/out`을 호출하는 흐름.** 외부 API, Redis, 파일 저장소, 다른 도메인이 여기 든다. 다른 도메인은 지금은 코드 참조 adapter, 서비스 분리 후에는 Feign → 상대의 `/internal` 컨트롤러다. 이유: 외부 호출을 트랜잭션 밖에 둔다.
     - 조회도 같다. 읽은 결과에 다른 도메인 값(이름 등)을 붙여야 하면 QueryService는 자기 데이터만 읽고 facade가 포트를 불러 붙인다. 포트는 건마다 부르지 않고 요청당 한 번 불러 맵으로 붙인다. 예: `ListSchedulesFacade`(`ScheduleQueryService`로 일정 카드를 읽고 `RegionPort.findAll`을 한 번 불러 지역 이름을 붙인다), `GetScheduleDetailFacade`(개설자와 확정 참여자 ID를 모아 `UserPort.findProfiles`를 한 번 부른다).
-    - `GetScheduleDetailFacade`·`ListParticipantsFacade`(참여자 명단)는 맵에서 꺼낸 값이 있는지 따로 확인하지 않는다. user `FindUserProfilesUseCase`가 "요청한 서로 다른 ID마다 항목이 정확히 하나 있다"(탈퇴자·행이 없는 ID도 가려서 넣는다)를 javadoc에 계약으로 두기 때문이다. 이 계약을 바꾸면 이 facade들도 함께 고친다.
+    - `GetScheduleDetailFacade`·`ListParticipantsFacade`(참여자 명단)·`GetNextScheduleFacade`(홈 배너의 다가오는 내 일정, 명단 앞 3명의 사진)는 맵에서 꺼낸 값이 있는지 따로 확인하지 않는다. user `FindUserProfilesUseCase`가 "요청한 서로 다른 ID마다 항목이 정확히 하나 있다"(탈퇴자·행이 없는 ID도 가려서 넣는다)를 javadoc에 계약으로 두기 때문이다. 이 계약을 바꾸면 이 facade들도 함께 고친다.
   - **같은 도메인의 여러 서비스를 조합하는 흐름.** 이유: 서비스끼리 주입하지 않는다.
   - 이렇게 두면 **트랜잭션 안에 외부 호출이 들어갈 수 없다.** 규칙으로 막는 게 아니라 구조가 막는다. 외부 API가 느려져 DB 커넥션이 말라붙는 사고를 구조적으로 차단한다.
 - "다른 도메인 동기 호출"은 별도 기준이 아니다. facade는 다른 도메인의 서비스를 직접 부르지 않고 자기 `port/out`만 부르므로 첫째 경우에 든다.

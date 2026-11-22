@@ -46,11 +46,12 @@
   - 증상이 "자리표시자 해석 실패"로 보이지 않을 수 있다. `@ConfigurationProperties` 바인딩은 해석하지 못한 `${ADMIN_JWT_SECRET}`을 글자 그대로 값으로 넣어, `@SpringBootTest` 계열(`OpenApiSpecTest`, 전체 build)이 `WeakKeyException`(키가 짧다)으로 실패한다(SHI-190). 이 예외가 보이면 `.env`에 키가 있는지부터 본다. 확인은 2번 단계의 키 비교 명령.
   - 머지할 때 사용자에게 메인 `snsg/.env`(그리고 develop을 받을 다른 워크트리의 `.env`)에 그 키를 더해야 한다고 알리고, PR의 background에도 적는다. 작업 중 AI는 메인 디렉터리와 다른 워크트리의 `.env`를 고치지 않는다(SHI-182 task.md 비목표).
   - 비밀값(서명 키 등)은 각자 로컬에서 난수로 만들어 파일에 바로 덧붙이고 화면·로그·채팅에 찍지 않는다. 예: Bash `printf 'ADMIN_JWT_SECRET=%s\n' "$(openssl rand -base64 48)" >> snsg/.env`. 다른 비밀값(`JWT_SECRET` 등)과 같은 값을 쓰지 않는다.
+    - 덧붙인 뒤 `grep -c '^ADMIN_JWT_SECRET=' snsg/.env`가 0이면 `.env` 끝에 줄바꿈이 없어 새 키가 마지막 줄 뒤에 붙은 것이다(SHI-202: `DATA_GO_KR_API_KEY=...` 줄 끝에 붙었다). 키가 읽히지 않고 마지막 키 값도 깨진다. 덧붙이기 전에 `[ -n "$(tail -c1 snsg/.env)" ] && echo >> snsg/.env`로 끝 줄바꿈을 맞춘다. 이미 붙었으면 그 줄을 둘로 나눈다(값을 화면에 찍지 않게 `sed`로).
   - 기본값이 있는 키(`ADMIN_CORS_ALLOWED_ORIGINS`)는 없어도 컨텍스트가 뜨지만, 로컬에서 그 기능을 쓰려면 함께 넣는다.
   - 운영 값은 `.claude/rules/package-structure.md` 설정 절(ECS task definition).
 - **DB·Redis·8080 포트는 모든 워크트리가 공유한다.** 두 워크트리에서 앱을 동시에 띄울 수 없고, 한쪽에서 돌린 테스트가 다른 쪽 데이터를 지운다.
   - 테스트는 한 번에 한 워크트리에서만 돌리도록 조율한다.
-  - DB·Redis는 로컬 Docker 컨테이너 `snsg-postgres`·`snsg-redis`다. 꺼져 있으면 DB·Redis 테스트와 `@SpringBootTest` 계열이 실패한다(skip이 아니다). Docker 데몬을 켜도 두 컨테이너는 Exited로 남아 있었다(SHI-190). 테스트 전에 `docker ps`로 확인하고, 없으면 `docker start snsg-postgres snsg-redis`로 켠다.
+  - DB·Redis는 로컬 Docker 컨테이너 `snsg-postgres`·`snsg-redis`다. 꺼져 있으면 DB·Redis 테스트와 `@SpringBootTest` 계열이 실패한다(skip이 아니다). Docker 데몬을 켜도 두 컨테이너는 Exited로 남아 있었다(SHI-190). 데몬 자체가 꺼져 `docker ps`가 실패하면 Docker Desktop을 먼저 켠다(SHI-202). 테스트 전에 `docker ps`로 확인하고, 없으면 `docker start snsg-postgres snsg-redis`로 켠다.
   - 워크트리를 오가며 마이그레이션이 서로 다르면 로컬 스키마를 지우고 다시 적용해도 된다. 번호 규칙은 `.claude/rules/package-structure.md` 마이그레이션 절.
   - **마이그레이션을 더하는 작업끼리는 병렬로 진행할 수 없다.** 한 워크트리가 머지 전 마이그레이션을 공유 DB에 적용해 두면 다른 워크트리의 Flyway 검증이 어긋난다. 먼저 시작한 작업이 머지된 뒤 develop을 최신화하고 다음 번호로 진행한다(SHI-146은 SHI-147 머지 후 V3로 진행했다). 워크트리별 DB는 두지 않기로 했다.
     - 기존 테이블에 DEFAULT 없는 NOT NULL 컬럼을 더하는 마이그레이션은 마이그레이션이 없는 작업도 깨뜨린다. 공유 DB에 적용된 순간부터, 그 컬럼을 모르는 다른 워크트리가 그 테이블에 INSERT하면(엔티티 저장, 테스트의 native INSERT) NOT NULL 위반으로 실패한다. 예: SHI-184의 V12(`places`의 `created_by`·`updated_by`·`reviewed_by`). 다른 워크트리에서 그 테이블 INSERT가 갑자기 실패하면 이것부터 본다. 그 작업이 머지된 뒤 develop을 받으면 풀린다.

@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -41,6 +42,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.common.web.GlobalExceptionHandler;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.GetNextScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.ListParticipantsFacade;
@@ -48,6 +50,7 @@ import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.command.CreateScheduleCommand;
 import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
+import com.shineunsigan.snsg.schedule.application.dto.result.NextScheduleResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ParticipantListItemResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ParticipantSummaryResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleAgeGroupResult;
@@ -104,6 +107,9 @@ class ScheduleControllerTest {
 
     @MockitoBean
     private ListParticipantsFacade listParticipantsFacade;
+
+    @MockitoBean
+    private GetNextScheduleFacade getNextScheduleFacade;
 
     @BeforeEach
     void authenticate() {
@@ -595,6 +601,39 @@ class ScheduleControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.cancellation.reason").value("개인 사정으로 취소해요."))
                 .andExpect(jsonPath("$.data.cancellation.canceledAt").value("2026-11-12T08:30:12"));
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정: SecurityContext의 사용자로 facade를 부르고, 카드 필드를 펼쳐 장소 이름·소요 시간·사진 경로와 함께 준다")
+    void nextSchedule() throws Exception {
+        UUID scheduleId = UUID.randomUUID();
+        ScheduleListItemResult item = page(scheduleId, null).items().get(0);
+        when(getNextScheduleFacade.get(USER_ID)).thenReturn(Optional.of(new NextScheduleResult(item,
+                "보드게임카페 홍대점", DurationType.NORMAL,
+                List.of("/images/profiles/a.png", "/images/default-profile.png"))));
+
+        mockMvc.perform(get("/api/v1/schedules/next"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(scheduleId.toString()))
+                .andExpect(jsonPath("$.data.category.name").value("보드게임"))
+                .andExpect(jsonPath("$.data.regionName").value("마포구"))
+                .andExpect(jsonPath("$.data.placeName").value("보드게임카페 홍대점"))
+                .andExpect(jsonPath("$.data.durationType").value("NORMAL"))
+                .andExpect(jsonPath("$.data.participantProfileImageUrls[0]").value("/images/profiles/a.png"))
+                .andExpect(jsonPath("$.data.participantProfileImageUrls[1]").value("/images/default-profile.png"));
+
+        verify(getNextScheduleFacade).get(USER_ID);
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정이 없으면 200이고 본문에 data 키가 없다")
+    void noNextSchedule() throws Exception {
+        when(getNextScheduleFacade.get(USER_ID)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/v1/schedules/next"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
     }
 
     private static ScheduleDetailResult detail(UUID scheduleId, ViewerRole viewerRole) {

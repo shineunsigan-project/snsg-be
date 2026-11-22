@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
+import com.shineunsigan.snsg.schedule.application.dto.result.NextScheduleQueryResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardPageResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleCardResult;
 import com.shineunsigan.snsg.schedule.application.dto.result.ScheduleDetailQueryResult;
@@ -25,13 +27,14 @@ import com.shineunsigan.snsg.schedule.domain.model.ActivityCategory;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
 import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
+import com.shineunsigan.snsg.schedule.domain.model.ScheduleParticipant;
 import com.shineunsigan.snsg.schedule.domain.repository.ActivityCategoryRepository;
 import com.shineunsigan.snsg.schedule.domain.repository.ScheduleRepository;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * 일정 목록 3종(모집 중, 참여한, 개설한), 일정 상세, 참여자 명단과 탈퇴 가능 여부. 목록은 커서 페이지로 읽어 카드로 바꾼다.
+ * 일정 목록 3종(모집 중, 참여한, 개설한), 다가오는 내 일정, 일정 상세, 참여자 명단과 탈퇴 가능 여부. 목록은 커서 페이지로 읽어 카드로 바꾼다.
  * <p>
  * 한 페이지보다 한 건 더 읽어 다음 페이지가 있는지 정한다. 총 건수가 페이지 크기의 배수여도 빈 페이지를 한 번 더 부르지 않게 하기 위해서다.
  * 지금 시각은 요청마다 한 번 잡아 쿼리 조건과 표시 상태에 함께 쓴다.
@@ -70,6 +73,15 @@ public class ScheduleQueryService implements CheckWithdrawableUseCase {
         LocalDateTime now = LocalDateTime.now();
         return toPage(scheduleRepository.findHosted(userId, period, completionBoundary(now), after, pageSize + 1),
                 pageSize, now);
+    }
+
+    /**
+     * 다가오는 내 일정 1건. 내가 확정 참여(개설자 포함)한 취소되지 않은 시작 전 일정 중 시작이 가장 빠른 것이다. 없으면 비어 있다.
+     * 지금 시각 한 번을 조회 조건과 표시 상태에 함께 쓴다. 참여 행은 지연 로딩이라 트랜잭션 안에서 결과로 바꾼다.
+     */
+    public Optional<NextScheduleQueryResult> findNext(UUID userId) {
+        LocalDateTime now = LocalDateTime.now();
+        return scheduleRepository.findNextUpcoming(userId, now).map(schedule -> toNext(schedule, now));
     }
 
     /**
@@ -153,6 +165,14 @@ public class ScheduleQueryService implements CheckWithdrawableUseCase {
                 schedule.getPlace().getRegionCode(), schedule.getStartAt(), schedule.getConfirmedCount(),
                 schedule.getCapacity(), schedule.getCapacity() - schedule.getConfirmedCount(),
                 schedule.displayStatus(now, scheduleProperties.completionAfter()), schedule.getCreatedAt());
+    }
+
+    private NextScheduleQueryResult toNext(Schedule schedule, LocalDateTime now) {
+        List<UUID> confirmedUserIds = schedule.confirmedParticipantsInListOrder().stream()
+                .map(ScheduleParticipant::getUserId)
+                .toList();
+        return new NextScheduleQueryResult(toCard(schedule, findCategoryNames(List.of(schedule)), now),
+                schedule.getPlace().getPlaceName(), schedule.getDurationType(), confirmedUserIds);
     }
 
     private static String nextCursor(Schedule last) {

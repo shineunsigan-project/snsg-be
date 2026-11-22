@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.shineunsigan.snsg.common.web.ApiResponse;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.GetNextScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.ListParticipantsFacade;
@@ -29,6 +30,7 @@ import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.presentation.dto.request.CancelScheduleRequest;
 import com.shineunsigan.snsg.schedule.presentation.dto.request.CreateScheduleRequest;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.CreateScheduleResponse;
+import com.shineunsigan.snsg.schedule.presentation.dto.response.NextScheduleResponse;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.ScheduleCardPageResponse;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.ScheduleDetailResponse;
 import com.shineunsigan.snsg.schedule.presentation.dto.response.ScheduleParticipantResponse;
@@ -54,6 +56,7 @@ public class ScheduleController {
     private final ListSchedulesFacade listSchedulesFacade;
     private final GetScheduleDetailFacade getScheduleDetailFacade;
     private final ListParticipantsFacade listParticipantsFacade;
+    private final GetNextScheduleFacade getNextScheduleFacade;
 
     @PostMapping
     @Operation(summary = "일정 개설",
@@ -325,6 +328,28 @@ public class ScheduleController {
             @RequestParam(required = false) Integer size) {
         return ResponseEntity.ok(ApiResponse.success(
                 ScheduleCardPageResponse.from(listSchedulesFacade.listHosted(userId, period, cursor, size))));
+    }
+
+    @GetMapping("/next")
+    @Operation(summary = "다가오는 내 일정",
+            description = """
+                    홈 상단 배너에 그릴 일정 1건을 준다. 홈 화면에 들어올 때 부른다. 로그인이 필요하다.
+                    대상은 내가 멤버로 참여 확정했거나 내가 연 일정 중, 취소되지 않았고 시작 전(시작 일시가 지금보다 뒤)인 일정이다.
+                    정원이 차 모집 마감된 일정도 대상이다. 내가 참여를 취소한 일정, 시작한 일정, 완료된 일정은 대상이 아니다.
+                    그중 시작 일시가 가장 빠른 1건만 온다(같으면 id 순으로 앞의 것).
+                    대상이 없으면 오류가 아니라 200이고 본문은 {"isSuccess":true}다(data 키가 빠진다). 이때는 쉬는시간 소개 배너를 그린다.
+                    participantProfileImageUrls는 참여자 명단과 같은 순서(개설자 먼저 → 참여 일시 순)의 앞 3명의 사진이다. 나도 빼지 않는다.
+                    확정 인원이 3명보다 적으면 그 수만큼 온다. 사진보다 확정 인원이 많아 "+N"을 그리려면 confirmedCount로 계산한다.
+                    배너를 누르면 id로 일정 상세(GET /api/v1/schedules/{scheduleId})로 간다.
+                    조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.""")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+                    description = "다가오는 내 일정 1건. 대상이 없으면 data가 빠진다({\"isSuccess\":true})"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
+                    description = "UNAUTHENTICATED: 토큰이 없거나 만료·무효. 재발급 후 다시 부르거나 로그인 화면으로 간다")})
+    public ResponseEntity<ApiResponse<NextScheduleResponse>> getNext(@AuthenticationPrincipal UUID userId) {
+        return ResponseEntity.ok(ApiResponse.success(
+                getNextScheduleFacade.get(userId).map(NextScheduleResponse::from).orElse(null)));
     }
 
     /** 선택 인증 API다. 토큰이 없거나 틀리면 userId는 null이고 GUEST로 본다. 그래서 @SecurityRequirements를 달지 않는다. */

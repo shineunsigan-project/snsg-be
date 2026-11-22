@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +41,7 @@ import com.shineunsigan.snsg.auth.presentation.AuthCookieFactory;
 import com.shineunsigan.snsg.auth.presentation.WithdrawalController;
 import com.shineunsigan.snsg.common.exception.BusinessException;
 import com.shineunsigan.snsg.schedule.application.CreateScheduleFacade;
+import com.shineunsigan.snsg.schedule.application.GetNextScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.GetScheduleDetailFacade;
 import com.shineunsigan.snsg.schedule.application.JoinScheduleFacade;
 import com.shineunsigan.snsg.schedule.application.ListParticipantsFacade;
@@ -117,6 +119,9 @@ class SecurityConfigTest {
 
     @MockitoBean
     private ListParticipantsFacade listParticipantsFacade;
+
+    @MockitoBean
+    private GetNextScheduleFacade getNextScheduleFacade;
 
     @Test
     @DisplayName("닉네임 사용 가능 여부는 토큰 없이 부를 수 있다")
@@ -226,6 +231,30 @@ class SecurityConfigTest {
         mockMvc.perform(post("/api/v1/schedules").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정은 토큰 없이 부르면 401이고 facade를 부르지 않는다. 상세의 공개 경로 패턴에 걸리지 않는다")
+    void nextScheduleRequiresToken() throws Exception {
+        mockMvc.perform(get("/api/v1/schedules/next"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+
+        verify(getNextScheduleFacade, never()).get(any());
+        verify(getScheduleDetailFacade, never()).get(any(), any());
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정은 유효한 토큰이면 200이고 그 토큰의 사용자로 facade를 부른다")
+    void nextScheduleWithToken() throws Exception {
+        UUID userId = UUID.randomUUID();
+        when(tokenPort.parseUserId("valid-token")).thenReturn(userId);
+        when(getNextScheduleFacade.get(userId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/v1/schedules/next").header(HttpHeaders.AUTHORIZATION, "Bearer valid-token"))
+                .andExpect(status().isOk());
+
+        verify(getNextScheduleFacade).get(userId);
     }
 
     @Test

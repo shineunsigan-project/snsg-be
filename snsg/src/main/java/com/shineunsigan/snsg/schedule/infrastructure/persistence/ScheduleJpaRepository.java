@@ -1,9 +1,11 @@
 package com.shineunsigan.snsg.schedule.infrastructure.persistence;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -59,6 +61,24 @@ interface ScheduleJpaRepository extends JpaRepository<Schedule, UUID> {
             """)
     LocalDateTime findLatestConfirmedNotCanceledStartAtAfter(@Param("userId") UUID userId,
             @Param("startAfter") LocalDateTime startAfter);
+
+    /**
+     * 내 확정 참여 행(user_id, status 인덱스)에서 출발해 일정과 조인한다. 개설자도 HOST 확정 행을 가지므로
+     * 역할 조건이 없으면 "개설 또는 멤버 확정"이다. 확정 행은 일정당 사용자 하나라 같은 일정이 두 번 나오지 않는다.
+     */
+    @Query("""
+            select s
+            from ScheduleParticipant p join p.schedule s
+            where p.userId = :userId
+              and p.status = com.shineunsigan.snsg.schedule.domain.constants.ParticipationStatus.CONFIRMED
+              and p.isDeleted = false
+              and s.isDeleted = false
+              and s.status = com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus.SCHEDULED
+              and s.startAt > :now
+            order by s.startAt, s.id
+            """)
+    List<Schedule> findConfirmedScheduledStartingAfter(@Param("userId") UUID userId, @Param("now") LocalDateTime now,
+            Limit limit);
 
     @Modifying
     @Query("""
