@@ -68,4 +68,28 @@ class HandleSocialUnlinkFacadeTest {
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", AuthErrorCode.INVALID_WEBHOOK_SENDER);
     }
+
+    @Test
+    @DisplayName("설정 어드민 키가 비어 있으면 빈 키를 보내도 탈퇴시키지 않는다")
+    void rejectsWhenConfiguredAdminKeyIsEmpty() {
+        HandleSocialUnlinkFacade facade = new HandleSocialUnlinkFacade(userPort, new KakaoWebhookProperties(""));
+
+        assertThatThrownBy(() -> facade.handleKakaoUnlink("KakaoAK ", PROVIDER_USER_ID))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", AuthErrorCode.INVALID_WEBHOOK_SENDER);
+
+        verify(userPort, never()).withdrawBySocialAccount(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("설정 어드민 키가 공백뿐이면 같은 공백을 보내도 탈퇴시키지 않는다")
+    void rejectsWhenConfiguredAdminKeyIsBlank() {
+        HandleSocialUnlinkFacade facade = new HandleSocialUnlinkFacade(userPort, new KakaoWebhookProperties("   "));
+
+        assertThatThrownBy(() -> facade.handleKakaoUnlink("KakaoAK    ", PROVIDER_USER_ID))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", AuthErrorCode.INVALID_WEBHOOK_SENDER);
+
+        verify(userPort, never()).withdrawBySocialAccount(any(), anyString());
+    }
 }
