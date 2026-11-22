@@ -3,9 +3,11 @@ package com.shineunsigan.snsg.common.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -48,6 +50,27 @@ class CorsConfigTest {
         CorsConfiguration admin = configurationFor(source(null), "/api/admin/v1/admins/me");
 
         assertThat(admin.checkOrigin(USER_ORIGIN)).isNull();
+    }
+
+    @Test
+    @DisplayName("어드민 경로는 장소 수정(PUT)을 허용하고 기존 메서드도 계속 허용한다")
+    void adminAllowsPut() {
+        CorsConfiguration admin = configurationFor(source(List.of(ADMIN_ORIGIN)),
+                "/api/admin/v1/places/" + UUID.randomUUID());
+
+        assertThat(admin.checkHttpMethod(HttpMethod.PUT)).isNotNull();
+        assertThat(admin.getAllowedMethods())
+                .containsExactlyInAnyOrder("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
+    }
+
+    @Test
+    @DisplayName("사용자 경로는 PUT을 허용하지 않고 허용 메서드가 그대로다")
+    void userDisallowsPut() {
+        CorsConfiguration user = configurationFor(source(List.of(ADMIN_ORIGIN)), "/api/v1/users/me");
+
+        assertThat(user.checkHttpMethod(HttpMethod.PUT)).isNull();
+        assertThat(user.getAllowedMethods())
+                .containsExactlyInAnyOrder("GET", "POST", "PATCH", "DELETE", "OPTIONS");
     }
 
     private CorsConfigurationSource source(List<String> adminOrigins) {

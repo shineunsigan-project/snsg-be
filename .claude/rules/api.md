@@ -16,6 +16,7 @@ paths:
 - 수정 방식은 둘이다.
   - 바꿀 필드만 보내는 부분 수정은 `PATCH`다. 생략한 필드는 그대로 둔다. 예: `PATCH /api/v1/users/me`.
   - 화면이 바꿀 수 있는 필드를 모두 다시 보내는 전체 수정은 `PUT`이다. 본문의 필드는 모두 필수이고 생략하면 400이다. 빈 값을 허용하는 필드는 문서에 적는다. 바꿀 수 없는 필드는 본문 record에 두지 않는다. FE는 상세의 지금 값으로 폼을 채워 고친 뒤 전체를 보낸다. 예: `PUT /api/admin/v1/places/{placeId}`(`AdminPlaceUpdateRequest`, `addressDetail`만 `''` 허용, 원천 값·폐업 여부는 본문에 없다).
+    - 사용자 경로의 CORS는 PUT을 허용하지 않는다. 사용자 API에 PUT을 만들면 `common/config/CorsConfig`의 사용자 메서드 목록에 더한다(`.claude/rules/package-structure.md` common 판단 기록의 CorsConfig 항목).
   - 수정·생성 응답은 결과 리소스를 `data`에 담는다(수정 200, 생성 201). 예: 장소 수정·MANUAL 등록(`POST /api/admin/v1/places`, 201). 일정 개설도 201이다.
 - 요청자 자신의 리소스는 id 대신 `me`로 가리킨다. 대상은 인증 주체로 정해진다. 예: `DELETE /api/v1/users/me`(탈퇴), `DELETE /api/v1/schedules/{scheduleId}/participants/me`(참여 취소).
 - prefix를 두는 이유:
