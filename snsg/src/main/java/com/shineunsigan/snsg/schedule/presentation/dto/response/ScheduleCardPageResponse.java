@@ -8,7 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 public record ScheduleCardPageResponse(
 
-        @Schema(description = "일정 카드. 시작 일시가 빠른 순이다. 없으면 빈 배열")
+        @Schema(description = "일정 카드. 순서는 목록마다 다르다(모집 중 목록은 sort, 참여한·개설한 목록은 period에 따른다). 받은 순서 그대로 그린다. 없으면 빈 배열")
         List<ScheduleCardResponse> items,
 
         @Schema(description = """

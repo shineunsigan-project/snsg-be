@@ -7,6 +7,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
+import com.shineunsigan.snsg.schedule.domain.model.ClosingSoonScheduleCursor;
+import com.shineunsigan.snsg.schedule.domain.model.LatestScheduleCursor;
 import com.shineunsigan.snsg.schedule.domain.model.RecruitingScheduleFilter;
 import com.shineunsigan.snsg.schedule.domain.model.Schedule;
 import com.shineunsigan.snsg.schedule.domain.model.ScheduleCursor;
@@ -53,7 +55,7 @@ public interface ScheduleRepository {
     Optional<Schedule> findNextUpcoming(UUID userId, LocalDateTime now);
 
     /*
-     * 일정 목록 3종. 모두 삭제되지 않은 일정을 limit건까지 준다. 모집 중 목록과 UPCOMING은 (start_at, id) 오름차순,
+     * 일정 목록 3종. 모두 삭제되지 않은 일정을 limit건까지 준다. 모집 중 목록(시작 일시 순)과 UPCOMING은 (start_at, id) 오름차순,
      * PAST는 (start_at, id) 내림차순이다. after가 있으면 정렬 방향으로 그 (start_at, id) 다음 일정만 준다(keyset).
      * null이면 처음부터다.
      */
@@ -64,6 +66,21 @@ public interface ScheduleRepository {
      */
     List<Schedule> findRecruiting(RecruitingScheduleFilter filter, LocalDateTime now, ScheduleCursor after,
             int limit);
+
+    /**
+     * 모집 중 목록의 최근 열린 순. 범위는 {@link #findRecruiting}과 같고, (created_at, id) 내림차순이다.
+     * after가 있으면 그 (created_at, id)보다 앞인 일정만 준다.
+     */
+    List<Schedule> findRecruitingLatest(RecruitingScheduleFilter filter, LocalDateTime now,
+            LatestScheduleCursor after, int limit);
+
+    /**
+     * 모집 중 목록의 마감 임박 순. {@link #findRecruiting}의 범위 중 시작 시각이
+     * {@code RecruitingScheduleSort.closingSoonStartBefore(now)} 미만이고 정원이 차지 않은 일정이다.
+     * (남은 자리, start_at, id) 오름차순이고, after가 있으면 그 값보다 뒤인 일정만 준다.
+     */
+    List<Schedule> findRecruitingClosingSoon(RecruitingScheduleFilter filter, LocalDateTime now,
+            ClosingSoonScheduleCursor after, int limit);
 
     /**
      * 내가 멤버로 확정 참여한 일정. 개설자가 취소한 일정도 포함한다. 개설한 일정(HOST 행)은 빠진다.

@@ -26,6 +26,7 @@ import com.shineunsigan.snsg.schedule.application.ListParticipantsFacade;
 import com.shineunsigan.snsg.schedule.application.ListSchedulesFacade;
 import com.shineunsigan.snsg.schedule.application.ScheduleCommandService;
 import com.shineunsigan.snsg.schedule.application.dto.command.ListRecruitingSchedulesCommand;
+import com.shineunsigan.snsg.schedule.domain.constants.RecruitingScheduleSort;
 import com.shineunsigan.snsg.schedule.domain.constants.SchedulePeriod;
 import com.shineunsigan.snsg.schedule.presentation.dto.request.CancelScheduleRequest;
 import com.shineunsigan.snsg.schedule.presentation.dto.request.CreateScheduleRequest;
@@ -201,16 +202,21 @@ public class ScheduleController {
         return ResponseEntity.ok(ApiResponse.success());
     }
 
-    /** 파라미터는 모두 선택이다. 기본값을 주지 않는다. 생략은 null이고 size의 기본값은 서버 설정이 정한다. */
+    /** 파라미터는 모두 선택이다. sort만 기본값(START_AT)을 준다. 나머지 생략은 null이고 size의 기본값은 서버 설정이 정한다. */
     @SecurityRequirements
     @GetMapping
     @Operation(summary = "모집 중 일정 목록",
             description = """
                     참여할 수 있는 일정을 카드로 보여준다. 목록 화면의 모집 중 탭에 들어올 때, 필터(활동·지역·날짜)를 바꿀 때,
                     끝까지 스크롤해 다음 페이지가 필요할 때 부른다. 토큰 없이 부를 수 있고, 토큰을 보내도 응답은 같다.
+                    홈의 "새로 열린 일정"(sort=LATEST)·"곧 마감돼요"(sort=CLOSING_SOON) 칸과 각 전체보기도 이 API를 부른다.
                     취소되지 않았고 시작 전인 일정이 모두 온다. 정원이 찬 일정도 displayStatus = RECRUITMENT_CLOSED(모집 마감)로 함께 온다.
-                    정렬은 시작 일시가 빠른 순(같으면 id 순)이다. 한 번에 size개(기본 20, 최대 50)를 주고, 더 있으면 nextCursor를 준다.
-                    다음 페이지는 같은 필터에 cursor = nextCursor를 붙여 부른다. 필터를 바꾸면 cursor 없이 처음부터 부른다.
+                    단 sort=CLOSING_SOON은 시작 날짜(한국 날짜)가 오늘·내일·모레(D-2까지)인 일정만 오고, 정원이 찬 일정은 오지 않는다.
+                    정렬은 sort로 고른다. START_AT(기본)은 시작 일시가 빠른 순(같으면 id 순), LATEST는 개설 일시가 늦은 순(같으면 id 역순),
+                    CLOSING_SOON은 남은 자리가 적은 순 → 시작 일시가 빠른 순 → id 순이다. 필터(활동·지역·날짜)는 세 정렬 모두에 함께 걸린다.
+                    한 번에 size개(기본 20, 최대 50)를 주고, 더 있으면 nextCursor를 준다.
+                    다음 페이지는 같은 필터·sort에 cursor = nextCursor를 붙여 부른다. 필터나 sort를 바꾸면 cursor 없이 처음부터 부른다.
+                    CLOSING_SOON은 남은 자리(바뀌는 값)로 정렬해, 페이지를 넘기는 사이 참여·참여 취소가 생기면 일정이 겹치거나 빠질 수 있다.
                     맞는 일정이 없으면 items는 빈 배열이고 nextCursor는 null이다.
                     조회만 하므로 같은 요청을 몇 번 다시 보내도 된다.
                     날짜와 커서가 둘 다 틀리면 INVALID_DATE_FILTER가 온다.""")
@@ -219,9 +225,9 @@ public class ScheduleController {
                     description = "일정 카드 한 페이지. nextCursor가 null이면 마지막 페이지다"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
                     description = """
-                            INVALID_REQUEST: categoryIds가 UUID 형식이 아니거나, categoryIds·regionCodes가 중복을 빼고 20개를 넘거나, 날짜가 yyyy-MM-dd 형식이 아니거나 없는 날짜이거나, size가 숫자가 아니다. 정상 화면 흐름에서는 나지 않는다.
+                            INVALID_REQUEST: categoryIds가 UUID 형식이 아니거나, categoryIds·regionCodes가 중복을 빼고 20개를 넘거나, 날짜가 yyyy-MM-dd 형식이 아니거나 없는 날짜이거나, sort가 START_AT·LATEST·CLOSING_SOON이 아니거나, size가 숫자가 아니다. 정상 화면 흐름에서는 나지 않는다.
                             INVALID_DATE_FILTER: endDate가 startDate보다 앞선다. 날짜를 다시 고르게 한다.
-                            INVALID_CURSOR: 해석할 수 없는 cursor. cursor 없이 처음부터 다시 부른다""")})
+                            INVALID_CURSOR: 해석할 수 없는 cursor(다른 sort에서 받은 cursor 포함). cursor 없이 처음부터 다시 부른다""")})
     public ResponseEntity<ApiResponse<ScheduleCardPageResponse>> listRecruiting(
             @Parameter(description = """
                     활동 ID. 활동 목록 API의 id. 여러 개면 categoryIds=a&categoryIds=b처럼 반복해 보내고, 그중 하나에 맞으면 온다.
@@ -245,12 +251,20 @@ public class ScheduleController {
                     startDate 없이 보내면 그날 하루다. startDate와 같으면 그날 하루, startDate보다 앞서면 400 INVALID_DATE_FILTER""",
                     example = "2026-11-15")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @Parameter(description = "이전 응답의 nextCursor를 그대로 보낸다. 생략하면 첫 페이지다. 해석할 수 없으면 400 INVALID_CURSOR")
+            @Parameter(description = """
+                    정렬. START_AT(기본)은 시작 일시가 빠른 순(같으면 id 순), LATEST(최근 열린 순)는 개설 일시가 늦은 순(같으면 id 역순),
+                    CLOSING_SOON(마감 임박 순)은 시작 날짜가 오늘·내일·모레(한국 날짜, D-2까지)이고 정원이 차지 않은 일정만
+                    남은 자리가 적은 순 → 시작 일시가 빠른 순 → id 순으로 준다. 필터와 함께 쓰면 둘 다 맞는 일정만 온다.
+                    생략하거나 빈 값이면 START_AT이다. 대문자 그대로 보낸다. 그 밖의 값은 400 INVALID_REQUEST.
+                    sort를 바꾸면 cursor 없이 처음부터 부른다. 다른 sort에서 받은 cursor는 400 INVALID_CURSOR""",
+                    example = "CLOSING_SOON")
+            @RequestParam(defaultValue = "START_AT") RecruitingScheduleSort sort,
+            @Parameter(description = "이전 응답의 nextCursor를 그대로 보낸다. 생략하면 첫 페이지다. 해석할 수 없거나 다른 sort에서 받은 cursor면 400 INVALID_CURSOR")
             @RequestParam(required = false) String cursor,
             @Parameter(description = "한 페이지 개수. 생략하면 20, 50보다 크면 50, 1보다 작으면 1로 맞춘다", example = "20")
             @RequestParam(required = false) Integer size) {
         ListRecruitingSchedulesCommand command = new ListRecruitingSchedulesCommand(categoryIds, regionCodes,
-                startDate, endDate, cursor, size);
+                startDate, endDate, sort, cursor, size);
 
         return ResponseEntity.ok(ApiResponse.success(
                 ScheduleCardPageResponse.from(listSchedulesFacade.listRecruiting(command))));
