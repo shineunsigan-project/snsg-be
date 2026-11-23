@@ -8,6 +8,10 @@ spring:
       hibernate:
         format_sql: true
 
+# 프로필 사진을 디스크(FILE_STORAGE_DIRECTORY)에 둔다. S3·CloudFront 설정이 없어도 뜬다.
+file-storage:
+  type: local
+
 logging:
   level:
     org.hibernate.SQL: debug

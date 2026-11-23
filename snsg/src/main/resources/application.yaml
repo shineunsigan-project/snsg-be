@@ -46,7 +46,23 @@ app:
   frontend-redirect-uri: ${FRONTEND_REDIRECT_URI}
 
 file-storage:
+  # local 모드(디스크 저장)만 쓴다.
   directory: ${FILE_STORAGE_DIRECTORY}
+  # 프로필 사진 저장소. s3는 S3에 두고 /images/profiles/** 요청을 CloudFront로 리다이렉트한다.
+  # local(application-local.yaml)은 디스크에 두고 같은 경로로 내려준다.
+  # @ConditionalOnProperty가 읽는 값이라 설정 record에 두지 않는다.
+  type: s3
+  # 버킷과 CloudFront 주소의 빈 기본값을 지우지 않는다. 없으면 자리표시자가 글자 그대로 바인딩된다.
+  # s3 모드에서 비어 있으면 기동이 실패한다(S3StorageConfig).
+  s3:
+    bucket: ${FILE_STORAGE_S3_BUCKET:}
+    region: ap-northeast-2
+    # 같은 리전·5MB 이하라 정상 호출은 1초 안에 끝난다. 호출 전체는 SDK 기본 재시도를 포함한 상한이다.
+    connect-timeout: 2s
+    socket-timeout: 5s
+    api-call-timeout: 10s
+  cloudfront:
+    url: ${FILE_STORAGE_CLOUDFRONT_URL:}
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
