@@ -76,6 +76,7 @@ description: 요구사항을 분석해 검증 가능한 GOAL이 담긴 task.md�
   - 생성기가 만드는 파일(`docs/openapi.yaml`)의 형태를 기대 결과로 걸 때는, 같은 형태가 **이미 생성된 결과에 나오는지** 먼저 grep으로 확인한다. 나온 적이 없으면 형태가 아니라 뜻(description의 문구 등)으로 건다. SHI-179에서 "`cancellation`이 nullable"을 걸었으나 springdoc이 `$ref` 필드의 nullable을 출력하지 않아 나올 수 없었다(`.claude/rules/api.md` 문서 절).
   - **검증 명령에 파일을 쓰는 단계를 넣지 않는다.** verifier는 파일을 고칠 수 없어(`.claude/agents/verifier.md`) 그 명령을 돌리지 않고 거부한다. 스펙 재생성(`OPENAPI_UPDATE=true ...`)은 구현이 할 일이라 `## 제약`·`## 참고`에 적고, GOAL에는 `OPENAPI_UPDATE` 없이 `cd snsg && ./gradlew cleanTest test --tests '*OpenApiSpecTest'` → 실패 0을 건다. 이 테스트가 생성 결과와 파일을 `isEqualTo`로 비교하므로 재생성이 반영됐는지 같은 성질을 확인한다. SHI-202에서 "재생성 실행 뒤 비교 테스트"를 걸어 verifier가 재생성을 거부했고 비교 테스트로 판정했다.
   - `bootRun` 로그 파일을 grep하는 기대 결과는 한글 문구가 아니라 같은 줄의 ASCII 문자열로 건다. Windows에서는 로그가 CP949로 저장돼 한글 패턴이 걸리지 않는다(`.claude/rules/testing.md` "쓰지 않는 테스트"의 bootRun 항목, SHI-181).
+  - SQL 로그를 세는 기대 결과는 SQL 한 문장이 여러 줄로 찍힌다는 전제로 쓴다(local 프로파일 `format_sql: true`). 한 줄 패턴(`update schedules`)은 0이 나와 구현이 맞아도 FAIL이다. 명령은 같은 bootRun 항목의 예를 따른다(SHI-215에서 GOAL을 고치러 spec을 다시 돌렸다).
 - **변경 경로를 허용 목록으로 검사하는 GOAL에는 `.claude/tasks/SHI-<번호>/task.md`를 넣는다.** task.md도 스테이징돼 diff에 들어간다. 빠뜨리면 검증 단계가 task.md를 범위 밖 변경으로 읽어 오판한다(T-18).
 
 ```markdown

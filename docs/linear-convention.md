@@ -65,7 +65,7 @@ linear issue update SHI-<번호> -s "In Progress" -a @me
 | `Type` | Feature / Bug / Improvement | 선택 |
 | (그룹 없음) | 보안 | 다른 라벨과 함께 붙일 수 있다 |
 
-> 현재 상태: Linear에는 BE·FE·기획·보안, Feature·Bug·Improvement 라벨이 그룹 없이 있고 `대상` 라벨은 아직 없다. 그룹 구성은 Linear 웹에서 할 예정이다(CLI로는 라벨 그룹을 만들 수 없다).
+> 현재 상태: Linear에는 BE·FE·기획·보안, Feature·Bug·Improvement 라벨이 그룹 없이 있고 `대상` 라벨은 아직 없다. 그룹 구성은 Linear 웹에서 할 예정이다(CLI로는 라벨 그룹을 만들 수 없다). 그동안 위 "자주 쓰는 명령"의 `-l 사용자`는 라벨이 없어 이슈 생성이 실패한다(SHI-215). `-l 사용자`를 빼고 `-l BE`와 유형 라벨(`-l Improvement` 등)로 만든다.
 
 ## 이슈
 

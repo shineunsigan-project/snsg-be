@@ -30,7 +30,7 @@ class SnsgApplicationTests {
     void schedulingIsDisabledInTests() {
         assertThat(context.getBeanNamesForType(SchedulingConfig.class)).isEmpty();
         assertThat(context.getBeanNamesForType(ScheduledAnnotationBeanPostProcessor.class)).isEmpty();
-        assertThat(environment.getProperty("schedule.status-transition-interval")).isEqualTo("1m");
+        assertThat(environment.getProperty("schedule.status-transition-cron")).isEqualTo("0 0,30 * * * *");
     }
 
 }

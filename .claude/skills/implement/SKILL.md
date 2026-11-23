@@ -48,6 +48,7 @@ git status --short
 ## 테스트를 돌릴 때
 
 - **DB·Redis·8080 포트는 모든 워크트리가 공유한다**(`.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의"). 다른 작업이 돌고 있을 수 있으니 앱을 띄워둔 채 방치하지 않는다.
+  - `bootRun` 백그라운드 작업을 `TaskStop`으로 멈춰도 gradle이 띄운 java 프로세스가 8080을 쥔 채 남는다(SHI-215에서 implement·verify 모두). 멈춘 뒤 `.claude/agents/verifier.md`의 방법대로 8080 LISTEN 프로세스를 찾아 끝내고, 8080 LISTEN이 없는지 확인한다.
 - **DB 충돌로 보이는 실패가 나면 멈추고 보고한다.** 증상은 Flyway 검증 오류(예: "Detected resolved migration not applied to database"), 모르는 테이블이나 버전, `flyway_schema_history` 불일치다. 스키마, `flyway_schema_history`, 다른 워크트리의 데이터는 건드리지 않는다. 공유 DB라 다른 작업이 쓰고 있고, 스키마 재적용은 오케스트레이터와 사용자가 정한다.
 - **버그 수정은 회귀 테스트를 먼저 쓰고, 수정 전 코드에서 돌려 실패하는 것을 확인한다.** 실패 출력(테스트 이름, 단정 메시지)을 보고 3번에 적는다. 수정 전에도 통과하면 테스트가 버그를 잡지 못하는 것이므로 멈추고 보고한다. verify는 수정 전 코드를 돌려볼 수 없어 이 확인은 여기서만 된다(`.claude/rules/testing.md`의 잠금을 빼고 실패를 확인하는 방법과 같은 이유).
 - 워크트리에 `snsg/.env`가 없으면 컨텍스트가 뜨지 않는다. 없으면 보고한다. 직접 만들지 않는다. 환경변수 값을 추측해 채우면 테스트는 통과하는데 실제 설정과 다른 상태가 된다.

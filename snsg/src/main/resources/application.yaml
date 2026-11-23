@@ -115,8 +115,9 @@ schedule:
   page-size-default: 20
   page-size-max: 50
   withdrawal-block-after-start: 24h
-  # 상태 전환 스케줄러 주기. @Scheduled가 자리표시자로 읽어 ScheduleProperties에는 두지 않는다.
-  status-transition-interval: 1m
+  # 상태 전환 스케줄러 실행 시각(매시 0분·30분). 일정 시작은 :00/:30만 허용되고 완료(시작 + completion-after)도 :00/:30이다.
+  # @Scheduled가 자리표시자로 읽어 ScheduleProperties에는 두지 않는다.
+  status-transition-cron: "0 0,30 * * * *"
 
 scheduling:
   enabled: true

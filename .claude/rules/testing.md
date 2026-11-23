@@ -24,7 +24,7 @@ paths:
 ## 쓰지 않는 테스트
 
 - 설정만 추가한 변경. 앱이 뜨는지, DB·Redis에 붙는지는 실행으로 확인하고 결과를 PR의 test 절에 적는다.
-  - 스케줄러가 실제로 도는지는 `./gradlew bootRun` 로그의 SQL로 확인한다(local 프로파일이 `org.hibernate.SQL: debug`라 0건 갱신도 찍힌다). `format_sql: true`라 SQL 한 문장이 여러 줄로 찍힌다. grep은 줄을 이어 붙인 뒤 하거나, 한 줄에 같이 찍히는 짧은 문자열로 찾는다. 로그는 세션 스크래치패드에 두고 확인 후 지운다(`.claude/rules/temp-files.md`).
+  - 스케줄러가 실제로 도는지는 `./gradlew bootRun` 로그의 SQL로 확인한다(local 프로파일이 `org.hibernate.SQL: debug`라 0건 갱신도 찍힌다). `format_sql: true`라 SQL 한 문장이 여러 줄로 찍힌다. grep은 줄을 이어 붙인 뒤 하거나, 한 줄에 같이 찍히는 짧은 문자열로 찾는다. 예: UPDATE는 `update` / `schedules s1_0` / `set` / `<컬럼>=...`이 각자 한 줄이라 `grep -ci "update schedules"`는 0이다. `grep -A3 -E '^\s*update\s*$' <로그> | grep -c "<컬럼>='<값>'"`처럼 `update` 단독 줄과 그 뒤 몇 줄에서 찾는다(SHI-215). 로그는 세션 스크래치패드에 두고 확인 후 지운다(`.claude/rules/temp-files.md`).
   - Windows에서 `bootRun` 출력을 파일로 받으면 콘솔 인코딩(CP949)으로 저장돼, 한글 문구로 grep하면 걸리지 않는다(SHI-181). 같은 줄에 찍히는 ASCII 문자열(`regionCode=11440` 등)로 찾는다.
 - 라이브러리 객체를 직접 만들어 검증하는 것(`new ObjectMapper()` 등). 앱이 실제로 쓰는 설정과 달라 통과해도 의미가 없다.
 - DTO 변환 메서드(`XxxResponse.from`)처럼 필드를 그대로 옮기는 코드. 변환 중 계산이나 분기가 들어가면 그때 테스트한다.
