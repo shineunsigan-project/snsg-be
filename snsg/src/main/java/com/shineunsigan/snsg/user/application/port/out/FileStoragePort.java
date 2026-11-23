@@ -1,7 +1,7 @@
 package com.shineunsigan.snsg.user.application.port.out;
 
 /**
- * 업로드한 파일을 보관한다. 지금은 로컬 디스크에 두고, 서버가 여러 대가 되면 어댑터만 S3로 바꾼다.
+ * 업로드한 파일을 보관한다. dev·prod는 S3, local 프로파일은 로컬 디스크에 둔다({@code file-storage.type}으로 어댑터를 고른다).
  */
 public interface FileStoragePort {
 

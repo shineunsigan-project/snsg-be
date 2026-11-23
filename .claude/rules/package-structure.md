@@ -70,6 +70,8 @@
 - 가진 데이터가 없는 도메인은 Command 서비스 없이 facade만 가질 수 있다. auth가 그렇다. 자기 테이블이 생기면 그때 만든다.
 - 서비스가 커져 한눈에 안 들어오면(대략 150줄) 책임별로 나눈다. 행위별로 나누지 않는다.
   - 예: user의 `UserCommandService`(가입), `UserWithdrawalCommandService`(탈퇴와 보관 뒤 비식별), `UserProfileCommandService`(가입한 사용자의 프로필 수정). 한 서비스에 두면 150줄과 의존 4개를 넘는다. 나눈 서비스도 이름이 `CommandService`로 끝나야 ArchUnit 규칙이 적용된다.
+- **조회 서비스는 Entity(애그리거트) 단위로 이름 짓는다.** enum·VO 이름으로 QueryService를 따로 만들지 않고, 그 값을 가진 애그리거트의 QueryService에 메서드를 둔다. 예: 프로필 사진 CDN 주소 해석은 enum `ProfileImage`가 아니라 `UserQueryService.resolveProfileImageCdnUrl`에 있다(SHI-211, 사용자 결정).
+- **DB를 읽지 않는 조회 메서드**(설정·domain 규칙만으로 답하는 것)도 QueryService에 두되, 그 메서드에만 `@Transactional(propagation = Propagation.NOT_SUPPORTED)`를 달아 클래스의 읽기 전용 트랜잭션을 끈다. 요청마다 불리는 경로가 커넥션을 잡지 않게 한다. repository를 부르지 않고, 의존은 설정 record만 더한다. 예: `UserQueryService.resolveProfileImageCdnUrl`(사진을 볼 때마다 불리는 리다이렉트, SHI-211).
 
 ## Port
 
@@ -131,7 +133,7 @@
   - **트랜잭션 밖에서 발행한 이벤트는 AFTER_COMMIT 리스너에 도착하지 않는다.** 커밋할 트랜잭션이 없기 때문이다. 트랜잭션을 걸지 않는 facade(예: auth의 facade)에서 발행하지 않는다.
 - **커밋된 뒤에만 해야 하는 되돌릴 수 없는 외부 정리(파일 삭제 등)는 같은 도메인 이벤트로 넘긴다.** Command 서비스가 트랜잭션 안에서 이벤트 발행 포트로 발행하고, 같은 도메인 `infrastructure/event`의 리스너가 AFTER_COMMIT으로 받아 `port/out`을 부른다. facade 없이 외부 호출이 트랜잭션 밖에 남고, 롤백되면 지우지 않는다. 리스너가 DB를 바꾸지 않으므로 `REQUIRES_NEW`는 필요 없다.
   - 예: `UserAnonymizedEvent`(보관 기간이 지난 탈퇴 회원의 비식별)·`ProfileImageReplacedEvent`(사진 교체) → `ProfileImageCleanupListener` → `FileStoragePort.delete`. 비식별 이벤트는 비식별 전 경로가 우리 업로드 경로일 때만 낸다(기본 이미지·소셜 사진은 지울 파일이 없다). 탈퇴(`UserWithdrawnEvent`)는 원본을 보관하므로 사진을 지우지 않는다.
-  - **지울 대상이 사용자가 보낸 값(경로·키)에서 왔으면 저장할 때 막는다.** 우리가 만든 형식과 정확히 일치하는지, 다른 소유자가 이미 참조하고 있지 않은지 본다. 남의 경로를 자기 값으로 넣고 교체하거나 비식별되면 남의 파일이 지워진다. 삭제 표시됐어도 나중에 그 값으로 지울 행(보관 중인 탈퇴 회원)은 소유자로 센다. 삭제 adapter도 형식 밖의 값이면 아무것도 지우지 않는다. 예: `ProfileImage.isUploadedPath`(수정·가입·삭제가 함께 쓰는 형식 규칙), `UserRepository.isProfileImageUsedByOthers`, `LocalFileStorageAdapter.delete`.
+  - **지울 대상이 사용자가 보낸 값(경로·키)에서 왔으면 저장할 때 막는다.** 우리가 만든 형식과 정확히 일치하는지, 다른 소유자가 이미 참조하고 있지 않은지 본다. 남의 경로를 자기 값으로 넣고 교체하거나 비식별되면 남의 파일이 지워진다. 삭제 표시됐어도 나중에 그 값으로 지울 행(보관 중인 탈퇴 회원)은 소유자로 센다. 삭제 adapter도 형식 밖의 값이면 아무것도 지우지 않는다. 예: `ProfileImage.isUploadedPath`(수정·가입·삭제가 함께 쓰는 형식 규칙), `UserRepository.isProfileImageUsedByOthers`, `LocalFileStorageAdapter.delete`·`S3FileStorageAdapter.delete`(형식 밖이면 S3를 부르지 않는다).
     - 수정에서는 형식 검사와 다른 소유자 검사를 **현재 값과 달라진 값에만** 건다. 같은 값은 이미 저장된 값이라 새로 막을 것이 없다. 검사마다 "바뀌었는가"를 따로 판단하면 어긋난다. SHI-206: 다른 소유자 검사·교체 이벤트는 바뀐 값만 봤는데 형식 검사만 현재 값과 비교하지 않아, 지금 사진(소셜 사진 주소·기본 이미지)을 그대로 보낸 프로필 수정이 400 `INVALID_PROFILE_IMAGE_URL`이었다. 예: `UserProfileCommandService.changedImageUrl`(같으면 `null`을 넘겨 `User.validateProfileChange`·`changeProfile`이 사진을 보지 않는다).
 - 같은 트랜잭션(`@EventListener`)은 두 도메인 변경이 반드시 원자적이어야 할 때만 쓰고, 그 이유와 "서비스 분리 시 saga 필요"를 주석으로 남긴다.
 - AFTER_COMMIT 방식은 수신 실패 시 이벤트가 유실된다. 유실되면 안 되는 이벤트가 생기면 Spring Modulith(Event Publication Registry) 도입을 제안한다.
@@ -348,10 +350,30 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
 예: 상가정보 API(`place/infrastructure/client/SemasPlaceSourceAdapter`).
 
 - 시간 초과는 config 빈이 request factory에 걸어 완성한 `RestClient`를 만들고, adapter는 그 `RestClient`를 주입받는다(`SemasClientConfig.semasRestClient`). adapter 생성자에서 builder에 request factory를 걸지 않는다. 테스트의 목 서버가 덮인다(`.claude/rules/testing.md`).
+  - SDK 클라이언트도 같다. config 빈이 시간 초과를 건 클라이언트를 만들고 adapter는 주입받는다. 예: `S3StorageConfig.s3Client`가 HTTP 클라이언트의 연결·응답 시간 초과와 재시도를 포함한 호출 전체 시간 초과(`apiCallTimeout`)를 `file-storage.s3.*`에서 읽어 건다(SHI-211).
+- **AWS SDK의 HTTP 클라이언트는 `url-connection-client`만 쓰고 `apache5-client`·`apache-client`·`netty-nio-client`를 뺀다**(`snsg/build.gradle`의 `software.amazon.awssdk:s3` exclude).
+  - 증상: SDK를 넣자 카카오 연동의 자동 설정 `RestClient.Builder`가 HttpComponents로 바뀌고, httpclient5가 Boot가 관리하는 버전으로 내려가 SDK가 기대한 버전과 어긋났다(SHI-211).
+  - 원인: 기본으로 딸려오는 `apache5-client`가 httpclient5를 끌어오고, Boot는 클래스패스에 httpclient5가 있으면 그것을 HTTP 클라이언트로 고른다.
+  - 행동: 다른 SDK 모듈을 더할 때도 같은 exclude를 걸고 `url-connection-client`를 쓴다.
 - **인증키가 요청 URL에 들어가는 API는 요청 URL과 예외 메시지를 로그·실패 이유에 남기지 않는다.** 예외는 종류(클래스 이름)와 HTTP 상태만 남긴다. 호출하는 facade도 같다(`ImportPlacesFacade.fetch`).
 - 쿼리에 넣는 인증키는 URI 변수(`queryParam("serviceKey", "{serviceKey}")` → `encode()` → `buildAndExpand`)로 넣어 엄격히 인코딩한다. 템플릿 리터럴로 붙이면 `+`가 인코딩되지 않아 서버가 공백으로 읽는다. 공공데이터포털 키는 "일반 인증키(Decoding)" 원문을 설정(`public-data.api-key`)으로 받는다.
 - **호출한 쪽이 실패 종류에 따라 흐름을 가르면, `port/out`은 실패를 예외 대신 결과로 돌려준다.** 예: `PublicPlaceSourcePort.fetchPage` → `PlaceSourcePageResult`(성공 / 데이터 없음 / 실패와 이유). facade는 실패면 같은 페이지를 다시 부르고, 데이터 없음(공공데이터포털 결과 코드 03)은 다시 불러도 같은 답이라 재시도하지 않는다. 포트가 예상하지 못한 예외를 던져도 facade가 실패로 다룬다.
 - 재시도는 새 라이브러리 없이 반복문으로 한다. 최대 시도 횟수는 설정값이다(`place.import-max-attempts`, 첫 시도 포함).
+
+### 파일 저장소 (프로필 사진)
+
+SHI-211에서 사용자와 합의했다.
+
+- **저장소는 `file-storage.type`으로 고른다.** base `application.yaml`이 `s3`(dev·prod), `application-local.yaml`이 `local`(디스크)이다. 모드별 빈은 모두 `@ConditionalOnProperty(name = "file-storage.type", havingValue = ...)`로 한쪽만 만든다. 이 키는 애노테이션이 읽으므로 record에 넣지 않는다(설정 절의 예외).
+  - local: `LocalFileStorageAdapter` + `ProfileImageResourceConfig`(디스크 파일을 `/images/profiles/**`로 내려준다)
+  - s3: `S3FileStorageAdapter` + `S3StorageConfig`(`S3Client`, 빈 값 거부) + `ProfileImageRedirectController`
+  - 같은 `/images/profiles/**`를 두 쪽이 함께 잡으면 안 된다. 모드별 빈 구성과 기동 실패는 `S3StorageConfigTest`(`ApplicationContextRunner`)가 본다.
+- **DB·API 응답의 사진 값은 모드와 관계없이 `/images/profiles/<소문자 UUID>.<png|jpg>`다.** S3 키는 앞 슬래시를 뺀 `images/profiles/...`라 CloudFront 주소의 경로와 같다. S3 모드에서는 서버의 `GET /images/profiles/{fileName}`이 형식(`ProfileImage.isUploadedPath`)을 확인한 뒤 CloudFront 주소로 302 리다이렉트하고, 형식 밖이면 404다. S3에 파일이 있는지는 보지 않는다. CloudFront 절대 주소를 DB·응답에 넣지 않는다.
+  - 302로 둔다. 301은 브라우저가 영구 저장해 CDN 주소를 바꿀 때 되돌릴 수 없다.
+- **캐시는 하루다**(S3 객체 `Cache-Control: public, max-age=86400`, 리다이렉트 응답도 같다). 파일명이 난수라 내용은 바뀌지 않지만, 지운 얼굴 사진이 CloudFront·브라우저에 남는 기간을 줄이려고 짧게 두고 `immutable`을 붙이지 않는다. 사용자 결정 "캐시 기간을 짧게"(SHI-211). CloudFront 캐시 정책(관리형 `CachingOptimized`)은 원본 `Cache-Control`을 따른다.
+- 사진 삭제는 커밋 뒤 이벤트로 한다(이벤트 절, `ProfileImageCleanupListener` → `FileStoragePort.delete`). 형식 밖 값이면 저장소를 부르지 않는다(이벤트 절 "지울 대상이 사용자가 보낸 값에서 왔으면").
+- **업로드 실패는 `error`, 삭제 실패는 `warn`으로 남긴다.** `BusinessException`은 원인을 싣지 않고 전역 예외 처리도 로그를 남기지 않아, 저장소 예외를 `PROFILE_IMAGE_STORE_FAILED`로 바꾸는 자리에서 버킷·키·예외(스택)를 남긴다. 파일 내용과 자격 증명은 남기지 않는다. 업로드 실패는 사용자에게 500이 나가고 기능이 막힌 상태라 `error`, 삭제 실패는 이미 끝난 요청의 뒷정리라 `warn`이다(`S3FileStorageAdapter`).
+- 자격 증명은 AWS SDK 기본 체인(`DefaultCredentialsProvider`)만 쓴다. 키를 설정으로 받지 않는다. dev·prod는 ECS task role이 `images/profiles/*`의 `s3:PutObject`·`s3:DeleteObject`를 가져야 한다. task role은 IAM 권한자가 만든다(사용자 합의). task definition에 `taskRoleArn`이 생기기 전에는 dev에 S3 모드 버전을 배포하지 않는다.
 
 ### 설정 (`@ConfigurationProperties`)
 
@@ -365,6 +387,8 @@ API 형식(커서·size·`nextCursor`)은 `.claude/rules/api.md` 목록 절. 여
   - 요청이 보낸 값과 비교하는 검증용 키도 같은 모양이다. 자리표시자에 빈 기본값을 주고(`oauth.kakao.admin-key: ${KAKAO_ADMIN_KEY:}`), 비교하는 자리에서 설정 키가 null이거나 공백뿐이면 비교하지 않고 거부한다(`HandleSocialUnlinkFacade.verifyKakao`, SHI-207). 기동 실패로 막지 않았다. `.env.example`이 빈 값이라 템플릿을 복사한 로컬에서 컨텍스트가 뜨지 않게 된다.
     - 이유: 빈 설정 키는 빈 키를 보낸 요청과 같아 통과한다. 기본값이 없으면 해석하지 못한 자리표시자가 글자 그대로 바인딩되어(`.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의", SHI-190) 그 문자열(`${KAKAO_ADMIN_KEY}`)을 보낸 요청이 통과한다. 카카오 연결 끊기 웹훅은 인증 없이 열려 있어, 둘 다 누구나 임의 회원을 탈퇴시킬 수 있는 구멍이었다.
     - 대가: 운영에서 키가 빠지면 기동은 되고 웹훅만 모두 거부된다(컨트롤러는 200을 주고 warn 로그만 남긴다).
+  - **모드(프로파일)에 따라 필요한 키는 빈 기본값을 주고, 그 모드에서만 만들어지는 조건부 빈이 비어 있으면 기동을 멈춘다.** record에 `@Validated`·`@NotBlank`를 달지 않는다. `SnsgApplication`의 `@ConfigurationPropertiesScan`이 base package의 record를 모드와 관계없이 모두 바인딩해, record에 검증을 달면 그 키가 필요 없는 모드(local)도 뜨지 않는다. 예외 메시지에는 키 이름만 넣고 값은 넣지 않는다. 예: `FILE_STORAGE_S3_BUCKET`(`file-storage.s3.bucket`)·`FILE_STORAGE_CLOUDFRONT_URL`(`file-storage.cloudfront.url`)은 `${...:}`이고 S3 모드의 `S3StorageConfig` 생성자가 거부한다. local에 이 키가 없어도 테스트 컨텍스트가 뜬다(SHI-211).
+  - dev 환경(ECS)의 값은 Secrets Manager `snsg/be/dev`의 JSON 키로 넣고 task definition의 `secrets`가 참조한다. 사용자 결정 "태스크디피니션이 아니라 aws 시크릿매니저에 값 넣어줘"(SHI-211, task definition rev 13). 실행 역할(`ecsTaskExecutionRole`)에 Secrets Manager 권한이 없어 시크릿 리소스 정책으로 `GetSecretValue`를 허용했다. 이 권한이 없으면 태스크가 `AccessDeniedException`으로 뜨지 않는다.
   - 머지 전 워크트리에만 넣은 값을 다른 워크트리·메인 디렉터리 `.env`에 옮기는 절차는 `.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의".
 
 ## 코드 작성

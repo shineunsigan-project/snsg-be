@@ -13,6 +13,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.shineunsigan.snsg.common.exception.BusinessException;
@@ -25,6 +26,7 @@ import com.shineunsigan.snsg.user.domain.constants.NicknameUnavailableReason;
 import com.shineunsigan.snsg.user.domain.constants.SocialProvider;
 import com.shineunsigan.snsg.user.domain.exception.UserErrorCode;
 import com.shineunsigan.snsg.user.domain.model.Profile;
+import com.shineunsigan.snsg.user.domain.model.ProfileImage;
 import com.shineunsigan.snsg.user.domain.model.User;
 import com.shineunsigan.snsg.user.domain.model.UserNicknameHistory;
 import com.shineunsigan.snsg.user.domain.model.UserSocialAccount;
@@ -43,6 +45,7 @@ public class UserQueryService implements FindUserUseCase, FindUserProfilesUseCas
     private final UserSocialAccountRepository userSocialAccountRepository;
     private final UserNicknameHistoryRepository userNicknameHistoryRepository;
     private final NicknameProperties nicknameProperties;
+    private final ProfileImageCdnProperties profileImageCdnProperties;
 
     @Override
     public Optional<UUID> findIdBySocialAccount(SocialProvider provider, String providerUserId) {
@@ -108,6 +111,21 @@ public class UserQueryService implements FindUserUseCase, FindUserProfilesUseCas
             return new NicknameAvailabilityResult(false, NicknameUnavailableReason.DUPLICATED);
         }
         return new NicknameAvailabilityResult(true, null);
+    }
+
+    /**
+     * 업로드한 프로필 사진 경로({@code /images/profiles/<fileName>})를 내려줄 CloudFront 주소. S3 모드의 사진 리다이렉트용이다.
+     * 업로드 API가 만든 형식이 아니면 빈 값이다. 파일이 있는지는 보지 않는다(없으면 CloudFront가 답한다).
+     * <p>
+     * 사진을 볼 때마다 불리고 DB를 읽지 않으므로 클래스의 읽기 전용 트랜잭션(커넥션 획득)을 끈다.
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public Optional<String> resolveProfileImageCdnUrl(String fileName) {
+        String path = ProfileImage.UPLOADED_PATH_PREFIX + fileName;
+        if (!ProfileImage.isUploadedPath(path)) {
+            return Optional.empty();
+        }
+        return Optional.of(profileImageCdnProperties.url() + path);
     }
 
     /** 사용자를 못 찾으면(탈퇴 포함) 본인 예외가 없다. */

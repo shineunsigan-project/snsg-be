@@ -42,6 +42,18 @@ dependencies {
 
     runtimeOnly 'org.postgresql:postgresql'
 
+    // 프로필 사진 저장소(S3). S3Client는 우리 config가 직접 만든다(Spring Cloud AWS 자동 설정을 쓰지 않는다).
+    // HTTP 클라이언트는 JDK HttpURLConnection 기반(url-connection-client)만 쓴다. 기본으로 딸려오는 apache5-client의
+    // httpclient5가 클래스패스에 있으면 Spring Boot가 자동 설정 RestClient.Builder(카카오 연동)의 HTTP 클라이언트를
+    // 그것으로 바꾸고, Boot가 관리하는 httpclient5 버전으로 내려가 SDK가 기대한 버전과 어긋난다. netty는 비동기용이라 쓰지 않는다.
+    implementation platform('software.amazon.awssdk:bom:2.59.7')
+    implementation('software.amazon.awssdk:s3') {
+        exclude group: 'software.amazon.awssdk', module: 'apache5-client'
+        exclude group: 'software.amazon.awssdk', module: 'apache-client'
+        exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
+    }
+    implementation 'software.amazon.awssdk:url-connection-client'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-security-test'

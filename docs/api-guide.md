@@ -159,6 +159,7 @@ fetch(url, { credentials: 'include' })   // axios면 withCredentials: true
 - 5MB 이하의 JPG·PNG만 받는다. **형식은 파일 내용으로 판별하므로 확장자만 바꿔 올리면 거부된다.** JPG·PNG가 아니거나 빈 파일이면 400 `INVALID_PROFILE_IMAGE`("JPG, PNG 형식의 사진만 올릴 수 있어요.")다.
 - **5MB를 넘는 파일은 `400 INVALID_PROFILE_IMAGE`가 아니라 `413 INVALID_REQUEST`로 온다.** 업로드 크기 한도에서 먼저 걸리기 때문이다. 올리기 전에 화면에서 크기를 확인해 막고, 413을 받으면 5MB 이하 사진을 고르라고 안내한다.
 - 응답은 `{ "profileImageUrl": "/images/profiles/<uuid>.png" }`. 도메인이 붙지 않은 경로이므로 화면에 쓸 때 서버 주소를 앞에 붙인다.
+  - 개발·운영 서버는 사진 파일을 CDN에 둔다. 서버 주소를 붙인 `/images/profiles/...`를 요청하면 서버가 302로 CDN 주소를 준다. `<img>`는 리다이렉트를 따라가므로 FE가 바꿀 것은 없다. 경로 형식이 틀리면 404다.
 - 가입 요청의 `profileImageUrl`에는 **이 API가 돌려준 경로만** 넣을 수 있다. 다른 주소, 형식을 바꾼 경로, 다른 회원이 쓰고 있는 경로를 넣으면 400 `INVALID_PROFILE_IMAGE_URL`이다.
 - 비워 두면(`null` 또는 생략) 소셜에서 받은 사진을 쓴다. 그것도 없으면 기본 이미지가 된다.
 - 올리기만 하고 가입을 완료하지 않으면 그 사진은 쓰이지 않는다.
