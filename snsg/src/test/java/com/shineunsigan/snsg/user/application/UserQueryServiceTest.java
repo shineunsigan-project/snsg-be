@@ -52,11 +52,14 @@ import com.shineunsigan.snsg.user.domain.repository.UserSocialAccountRepository;
  * 중복 판정 자체(사용 중·보호 중·만료)는 {@code UserRepositoryImplTest}가 실제 DB로 본다.
  * 내 프로필 조회는 닉네임 변경 가능 시각이 마지막 변경 이력에 따라 정해지는지 본다.
  * 타 도메인용 프로필 조회는 정상·삭제·행 없음·중복·빈 입력에서 결과와 저장소 호출을 본다.
+ * 프로필 사진 CDN 주소는 업로드 경로 형식인 파일명만 CDN 주소로 바꾸고, 저장소를 보지 않는지 본다.
  */
 @ExtendWith(MockitoExtension.class)
 class UserQueryServiceTest {
 
     private static final UUID USER_ID = UUID.randomUUID();
+    private static final String CDN_URL = "https://cdn.example.test";
+    private static final String UPLOADED_FILE_NAME = "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png";
 
     @Mock
     private UserRepository userRepository;
@@ -69,6 +72,9 @@ class UserQueryServiceTest {
 
     @Spy
     private NicknameProperties nicknameProperties = new NicknameProperties(Duration.ofDays(14), Duration.ofDays(90));
+
+    @Spy
+    private ProfileImageCdnProperties profileImageCdnProperties = new ProfileImageCdnProperties(CDN_URL);
 
     @InjectMocks
     private UserQueryService userQueryService;
@@ -294,6 +300,32 @@ class UserQueryServiceTest {
         assertThat(profiles).isEmpty();
         verify(userRepository, never()).findAllByIdIncludingDeleted(anyCollection());
         verify(userRepository, never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("업로드 경로 형식인 파일명이면 CDN 주소 + 업로드 경로를 주고 저장소를 보지 않는다")
+    void resolvesProfileImageCdnUrl() {
+        Optional<String> url = userQueryService.resolveProfileImageCdnUrl(UPLOADED_FILE_NAME);
+
+        assertThat(url).contains("https://cdn.example.test/images/profiles/" + UPLOADED_FILE_NAME);
+        verifyNoInteractions(userRepository, userSocialAccountRepository, userNicknameHistoryRepository);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "a.png",
+            "0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9.png",
+            "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.gif",
+            "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png.png",
+            "",
+            "..",
+            "../0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9.png"})
+    @DisplayName("업로드 경로 형식이 아닌 파일명이면 빈 값이고 저장소를 보지 않는다")
+    void rejectsOtherFileNames(String fileName) {
+        Optional<String> url = userQueryService.resolveProfileImageCdnUrl(fileName);
+
+        assertThat(url).isEmpty();
+        verifyNoInteractions(userRepository, userSocialAccountRepository, userNicknameHistoryRepository);
     }
 
     /** {@code User.create}로 만든 엔티티는 id가 없어(JPA가 만든다) 맵 키를 보려고 직접 넣는다. */
