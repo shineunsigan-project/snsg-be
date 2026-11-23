@@ -41,8 +41,9 @@ public record NextScheduleResponse(
 
         @Schema(description = """
                 화면에 보여줄 상태. 서버가 일정 상태·모집 상태·시각을 합쳐 정한다. FE는 이 값만 보고 배지를 그린다.
-                이 API는 시작 전 일정만 주므로 두 값만 온다.
-                RECRUITING: 모집 중. RECRUITMENT_CLOSED: 모집 마감(정원이 찼다)""",
+                이 API는 종료되지 않은 일정(시작 전과 진행 중)만 주므로 두 값만 온다.
+                RECRUITING: 모집 중. RECRUITMENT_CLOSED: 모집 마감(정원이 찼거나, 시작해 진행 중이다).
+                진행 중인 일정은 정원과 상관없이 RECRUITMENT_CLOSED다""",
                 example = "RECRUITING")
         DisplayStatus displayStatus,
 

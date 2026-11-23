@@ -69,8 +69,8 @@ public class ScheduleRepositoryImpl implements ScheduleRepository {
     }
 
     @Override
-    public Optional<Schedule> findNextUpcoming(UUID userId, LocalDateTime now) {
-        return scheduleJpaRepository.findConfirmedScheduledStartingAfter(userId, now, Limit.of(1)).stream()
+    public Optional<Schedule> findNextUpcoming(UUID userId, LocalDateTime completionBoundary) {
+        return scheduleJpaRepository.findConfirmedNotEnded(userId, completionBoundary, Limit.of(1)).stream()
                 .findFirst();
     }
 

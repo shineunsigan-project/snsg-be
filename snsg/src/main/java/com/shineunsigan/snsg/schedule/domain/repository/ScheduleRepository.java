@@ -49,10 +49,15 @@ public interface ScheduleRepository {
             Duration blockAfterStart);
 
     /**
-     * 다가오는 내 일정 1건. 내가 확정 참여(개설자 포함)한, 삭제되지 않은 예정(SCHEDULED) 일정 중 시작 시각이 now보다 뒤인 것에서
-     * (start_at, id) 순으로 가장 앞의 것이다. 시작 시각이 now와 같으면 빠진다. 모집 마감(정원 참)도 포함한다. 없으면 비어 있다.
+     * 다가오는 내 일정 1건. 내가 확정 참여(개설자 포함)한, 삭제되지 않고 종료되지 않은 일정 중 (start_at, id) 순으로 가장 앞의 것이다.
+     * 종료되지 않은 일정은 상태가 취소(CANCELED)·완료(COMPLETED)가 아니고 시작 시각이 completionBoundary보다 뒤인 것으로,
+     * 시작 전 일정과 시작해 진행 중인 일정(시작 + 완료 기준 시간 전까지)이다. 시작 시각이 completionBoundary와 같으면 빠진다.
+     * 모집 마감(정원 참)도 포함한다. 없으면 비어 있다.
+     * 상태 조건은 종료 상태를 빼는 형태라, ScheduleStatus에 값이 더해지면 이 조건을 다시 본다.
+     *
+     * @param completionBoundary 지금 − 완료 기준 시간. 시작 시각이 이 값 이하면 완료 시각이 지난 일정이다
      */
-    Optional<Schedule> findNextUpcoming(UUID userId, LocalDateTime now);
+    Optional<Schedule> findNextUpcoming(UUID userId, LocalDateTime completionBoundary);
 
     /*
      * 일정 목록 3종. 모두 삭제되지 않은 일정을 limit건까지 준다. 모집 중 목록(시작 일시 순)과 UPCOMING은 (start_at, id) 오름차순,
