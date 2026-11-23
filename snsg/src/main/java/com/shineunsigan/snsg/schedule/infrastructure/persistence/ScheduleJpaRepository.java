@@ -65,6 +65,8 @@ interface ScheduleJpaRepository extends JpaRepository<Schedule, UUID> {
     /**
      * 내 확정 참여 행(user_id, status 인덱스)에서 출발해 일정과 조인한다. 개설자도 HOST 확정 행을 가지므로
      * 역할 조건이 없으면 "개설 또는 멤버 확정"이다. 확정 행은 일정당 사용자 하나라 같은 일정이 두 번 나오지 않는다.
+     * 대상은 종료되지 않은 일정(시작 전과 진행 중)이다. 종료는 취소(CANCELED)·완료(COMPLETED) 상태이거나 시작 시각이
+     * completionBoundary 이하인 것이다. 상태 조건은 종료 상태를 빼는 형태라, ScheduleStatus에 값이 더해지면 이 조건을 다시 본다.
      */
     @Query("""
             select s
@@ -73,12 +75,13 @@ interface ScheduleJpaRepository extends JpaRepository<Schedule, UUID> {
               and p.status = com.shineunsigan.snsg.schedule.domain.constants.ParticipationStatus.CONFIRMED
               and p.isDeleted = false
               and s.isDeleted = false
-              and s.status = com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus.SCHEDULED
-              and s.startAt > :now
+              and s.status not in (com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus.CANCELED,
+                  com.shineunsigan.snsg.schedule.domain.constants.ScheduleStatus.COMPLETED)
+              and s.startAt > :completionBoundary
             order by s.startAt, s.id
             """)
-    List<Schedule> findConfirmedScheduledStartingAfter(@Param("userId") UUID userId, @Param("now") LocalDateTime now,
-            Limit limit);
+    List<Schedule> findConfirmedNotEnded(@Param("userId") UUID userId,
+            @Param("completionBoundary") LocalDateTime completionBoundary, Limit limit);
 
     @Modifying
     @Query("""

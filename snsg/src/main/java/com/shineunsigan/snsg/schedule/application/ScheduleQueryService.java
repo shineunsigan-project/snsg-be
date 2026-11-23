@@ -83,12 +83,15 @@ public class ScheduleQueryService implements CheckWithdrawableUseCase {
     }
 
     /**
-     * 다가오는 내 일정 1건. 내가 확정 참여(개설자 포함)한 취소되지 않은 시작 전 일정 중 시작이 가장 빠른 것이다. 없으면 비어 있다.
+     * 다가오는 내 일정 1건. 내가 확정 참여(개설자 포함)한 종료되지 않은 일정 중 시작이 가장 빠른 것이다. 없으면 비어 있다.
+     * 종료되지 않은 일정은 취소·완료 상태가 아니고 시작 + 완료 기준 시간이 지나지 않은 일정으로, 진행 중인 일정도 든다.
+     * 다가오는 일정 탭(UPCOMING)과 같은 완료 기준을 쓴다. ScheduleStatus에 값이 더해지면 이 조건을 다시 본다.
      * 지금 시각 한 번을 조회 조건과 표시 상태에 함께 쓴다. 참여 행은 지연 로딩이라 트랜잭션 안에서 결과로 바꾼다.
      */
     public Optional<NextScheduleQueryResult> findNext(UUID userId) {
         LocalDateTime now = LocalDateTime.now();
-        return scheduleRepository.findNextUpcoming(userId, now).map(schedule -> toNext(schedule, now));
+        return scheduleRepository.findNextUpcoming(userId, completionBoundary(now))
+                .map(schedule -> toNext(schedule, now));
     }
 
     /**
