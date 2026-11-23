@@ -705,7 +705,46 @@ class ScheduleRepositoryImplTest {
     }
 
     @Test
-    @DisplayName("다가오는 내 일정에서 취소·완료된·시작 시각이 기준 시각과 같거나 이전인·참여 취소한·삭제된·삭제된 참여 행의·남의 일정은 빠진다")
+    @DisplayName("다가오는 내 일정에 시작해 진행 중인(모집 마감된) 일정이 온다")
+    void nextUpcomingInProgress() {
+        UUID inProgress = insertSchedule(row().startAt(NOW.minusMinutes(30)).recruitmentStatus("CLOSED"));
+        insertParticipant(inProgress, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(nextUpcomingId()).contains(inProgress);
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정에서 진행 중인 일정이 더 늦게 시작하는 일정보다 먼저 온다")
+    void nextUpcomingInProgressFirst() {
+        UUID inProgress = insertSchedule(row().startAt(NOW.minusHours(1)).recruitmentStatus("CLOSED"));
+        insertParticipant(inProgress, userId, "MEMBER", "CONFIRMED", false);
+        UUID upcoming = insertSchedule(row().startAt(NOW.plusMinutes(10)));
+        insertParticipant(upcoming, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(nextUpcomingId()).contains(inProgress);
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정에서 시작 + 12시간이 정확히 된 예정 일정은 빠진다")
+    void nextUpcomingCompletionBoundaryExcluded() {
+        insertParticipant(insertSchedule(row().startAt(NOW.minus(COMPLETION_AFTER)).recruitmentStatus("CLOSED")),
+                userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(nextUpcomingId()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정에 시작 + 12시간이 1분 남은 예정 일정은 온다")
+    void nextUpcomingCompletionBoundaryIncluded() {
+        UUID schedule = insertSchedule(row().startAt(NOW.minus(COMPLETION_AFTER).plusMinutes(1))
+                .recruitmentStatus("CLOSED"));
+        insertParticipant(schedule, userId, "MEMBER", "CONFIRMED", false);
+
+        assertThat(nextUpcomingId()).contains(schedule);
+    }
+
+    @Test
+    @DisplayName("다가오는 내 일정에서 취소·완료된·참여 취소한·삭제된·삭제된 참여 행의·남의 일정은 빠진다")
     void nextUpcomingExcluded() {
         insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).status("CANCELED")), userId, "MEMBER",
                 "CONFIRMED", false);
@@ -713,9 +752,6 @@ class ScheduleRepositoryImplTest {
                 userId, "HOST", "CONFIRMED", false);
         insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).status("COMPLETED")), userId, "MEMBER",
                 "CONFIRMED", false);
-        insertParticipant(insertSchedule(row().startAt(NOW)), userId, "MEMBER", "CONFIRMED", false);
-        insertParticipant(insertSchedule(row().startAt(NOW.minusMinutes(30))), userId, "MEMBER", "CONFIRMED",
-                false);
         insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1))), userId, "MEMBER", "CANCELED", false);
         insertParticipant(insertSchedule(row().startAt(NOW.plusDays(1)).deleted(true)), userId, "MEMBER",
                 "CONFIRMED", false);
@@ -1002,7 +1038,7 @@ class ScheduleRepositoryImplTest {
     }
 
     private Optional<UUID> nextUpcomingId() {
-        return scheduleRepository.findNextUpcoming(userId, NOW).map(Schedule::getId);
+        return scheduleRepository.findNextUpcoming(userId, NOW.minus(COMPLETION_AFTER)).map(Schedule::getId);
     }
 
     private static List<UUID> ids(List<Schedule> schedules) {
