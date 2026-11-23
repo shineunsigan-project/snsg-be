@@ -77,8 +77,11 @@ paths:
 - 결과가 경고 로그로만 드러나는 분기는 `OutputCaptureExtension`(`org.springframework.boot.test.system`)으로 로그를 받아 단정한다. Mockito와 함께 쓸 때는 `@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})`. 예: `PlaceCommandServiceTest`, `ImportPlacesFacadeTest`(미완주 경고에 지역 코드와 이유가 있는지, 같은 응답으로 다시 적재하면 원천 변경 경고가 없는지).
 - 외부 API adapter는 슬라이스 없이 `MockRestServiceServer.bindTo(RestClient.Builder)`로 테스트한다.
   - `bindTo`는 builder의 request factory를 목으로 바꾼다. 그 뒤에 request factory를 다시 걸면 목이 덮여 실제 네트워크로 나간다. 그래서 시간 초과를 거는 adapter는 완성된 `RestClient`를 주입받게 하고(`.claude/rules/package-structure.md` 외부 API 연동 절), 테스트는 `bindTo(builder)` 뒤 `builder.build()`를 넘긴다. 예: `SemasPlaceSourceAdapterTest`. 시간 초과 동작 자체는 라이브러리 동작이라 테스트하지 않는다.
+  - SDK가 HTTP를 직접 열어 `MockRestServiceServer`를 쓸 수 없는 adapter(AWS SDK)는 SDK 클라이언트 인터페이스를 Mockito mock으로 두고 보낸 요청 객체를 단정한다. 실제 AWS를 부르지 않는다. 예: `S3FileStorageAdapterTest`(`S3Client` mock, 버킷·키·Content-Type·Cache-Control, 형식 밖 값이면 `verifyNoInteractions`).
+  - SDK 클라이언트에 건 시간 초과는 공개 API로 꺼낼 수 있는 값만 단정한다. 예: `S3StorageConfigTest`가 `serviceClientConfiguration().overrideConfiguration().apiCallTimeout()`을 본다. HTTP 클라이언트의 연결·응답 시간 초과는 꺼내 볼 수 없어 테스트하지 않는다.
 - 서버가 `LocalDateTime.now()`로 저장한 시각을 테스트가 잰 시각과 비교할 때는 테스트 쪽 값을 `truncatedTo(ChronoUnit.MICROS)`로 자른다. PostgreSQL `timestamp`는 마이크로초까지라, 같은 마이크로초 안에서 더 늦게 잰 값도 저장되면 더 작아 보인다. 예: `ImportPlacesFacadeTest.Stored`.
 - 파일 저장소 adapter는 Spring 없이 JUnit `@TempDir` 아래 디렉터리를 설정 record로 넘겨 실제 파일로 테스트한다. 예: `LocalFileStorageAdapterTest`(형식 밖 경로로 디렉터리 안팎의 파일이 지워지지 않는지).
+  - 설정값으로 고르는 조건부 빈(`@ConditionalOnProperty`)과 모드별 기동 실패는 앱 전체 대신 `ApplicationContextRunner`에 관련 설정 클래스·record만 올려 모드마다 본다. record는 앱의 `@ConfigurationPropertiesScan`처럼 모든 모드에서 등록한다. 예: `S3StorageConfigTest`(local·s3 빈 구성, s3에서 버킷·CloudFront 주소가 비면 실패, local은 비어도 성공).
 - Redis adapter는 `@SpringBootTest`로 `.env`가 가리키는 로컬 Redis(Docker 컨테이너 `snsg-redis`)에 붙어 실제로 테스트한다. Testcontainers 의존성은 저장소에 없다. 예: `RedisRefreshTokenStoreAdapterTest`, `RedisSignUpSessionAdapterTest`.
   - Redis가 꺼져 있으면 건너뛰지 않고 실패한다. 실패하면 코드보다 컨테이너가 떠 있는지 먼저 본다.
   - 모든 워크트리가 Redis를 공유한다(`.claude/rules/git-workflow.md` "워크트리를 쓸 때 주의"). 테스트는 고정된 키(고정 UUID 사용자·세션)를 쓰고, 만든 키를 `@AfterEach`에서 이름으로 지운다. 패턴으로 찾아 지우지 않는다. 다른 작업의 키까지 지운다. 예: `RedisAdminRefreshTokenStoreAdapterTest`(고정 adminId의 `admin-refresh:`·`admin-sessions:` 키), `RedisLoginAttemptAdapterTest`.

@@ -8,15 +8,17 @@
 
 1. 작업 시작 전 Linear 이슈를 만든다. 프로젝트·라벨·본문 템플릿(개요·범위·범위 밖)은 `docs/linear-convention.md`를 따른다. 본문은 세션 스크래치패드에 파일로 써서 넘긴다(`.claude/rules/temp-files.md`).
    ```bash
-   linear issue create --team SHI --project "<프로젝트>" -l BE -l <대상> -t "<제목>" --description-file <본문.md>
+   linear issue create --team SHI --project "<프로젝트>" -l BE -l <Type> -t "<제목>" --description-file <본문.md>
    ```
 2. develop을 최신화하고 **워크트리와 브랜치를 함께 만든다**: `<prefix>/SHI-<번호>-<작업-이름>` (예: `feat/SHI-12-matching-create`). 만든 직후 이슈를 In Progress로 바꾼다. Linear의 PR 자동 전환은 PR이 열린 뒤에만 움직인다.
    ```bash
    git fetch origin
    git worktree add ../wt-SHI-<번호> -b <prefix>/SHI-<번호>-<작업-이름> origin/develop
    cp snsg/.env ../wt-SHI-<번호>/snsg/.env   # gitignore 대상이라 따라오지 않는다
-   # 운영 목록에 있는데 .env에 없는 키를 본다. 기본값 있는 키(SPRING_PROFILES_ACTIVE, ADMIN_CORS_ALLOWED_ORIGINS) 말고 나오면 테스트 전에 채운다
-   comm -23 <(grep -oE '^[A-Z_]+' snsg/.env.example | sort) <(grep -oE '^[A-Z_]+' ../wt-SHI-<번호>/snsg/.env | sort)
+   # 운영 목록에 있는데 .env에 없는 키를 본다. 아래 키 말고 나오면 테스트 전에 채운다
+   #  - 기본값 있는 키: SPRING_PROFILES_ACTIVE, ADMIN_CORS_ALLOWED_ORIGINS
+   #  - local에서 쓰지 않는 키(S3 모드 전용, 빈 기본값): FILE_STORAGE_S3_BUCKET, FILE_STORAGE_CLOUDFRONT_URL
+   comm -23 <(grep -oE '^[A-Z0-9_]+' snsg/.env.example | sort) <(grep -oE '^[A-Z0-9_]+' ../wt-SHI-<번호>/snsg/.env | sort)
    linear issue update SHI-<번호> -s "In Progress" -a @me
    ```
    - `linear issue start`는 쓰지 않는다. 현재 디렉터리에서 브랜치를 바꿔 워크트리 규칙과 맞지 않는다
@@ -60,6 +62,8 @@
 
 ## main
 
-- 작업은 develop에 머지하는 것으로 끝난다. dev 서버가 없으므로 develop 머지에 배포는 따르지 않는다.
+- 작업은 develop에 머지하는 것으로 끝난다. develop 머지만으로는 배포되지 않는다.
+  - dev 환경은 ECS(`snsg-be-web-task`)다(사용자 확인 "ecs 배포가 dev 환경이 맞다"). develop 커밋에 버전 태그(`*.*.*`)를 push하면 `.github/workflows/deploy.yml`이 이미지를 만들어 배포한다. 이미지는 `snsg/Dockerfile`이 `SPRING_PROFILES_ACTIVE=prod`로 고정해, dev 환경도 prod 프로파일로 뜬다.
+  - 새 필수 설정·AWS 권한이 필요한 작업은 그 값(`.claude/rules/package-structure.md` 설정 절)이 dev에 들어간 뒤 태그를 단다. 예: SHI-211(S3 버킷·CloudFront 주소, ECS task role).
 - main은 운영 환경이다. 릴리즈할 때만 쓴다. `develop` → `main` PR을 만들고, squash가 아니라 merge commit으로 머지해 두 브랜치의 이력을 맞춘다. 릴리즈 PR에는 Linear 이슈 ID를 넣지 않는다.
 - **main에서는 절대 브랜치를 따거나 커밋하지 않는다.** 작업 브랜치는 항상 develop에서 딴다.

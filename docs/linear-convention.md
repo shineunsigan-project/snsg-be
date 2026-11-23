@@ -26,7 +26,8 @@ API 키는 Linear Settings → Account → Security & access → Personal API ke
 
 ```bash
 # 이슈 만들기. 본문은 아래 "본문 템플릿" 형식으로 파일에 써서 넘긴다
-linear issue create --team SHI --project "쉬는시간 MVP" -l BE -l 사용자 -t "<제목>" --description-file <본문.md>
+# 대상 라벨(사용자 등)은 아직 없어 -l 사용자를 붙이면 생성이 실패한다(아래 "라벨"의 현재 상태). Type 라벨을 붙인다
+linear issue create --team SHI --project "쉬는시간 MVP" -l BE -l Feature -t "<제목>" --description-file <본문.md>
 
 # 조회
 linear issue list --team SHI --all-states -A   # 상태·담당자 무관 전체
